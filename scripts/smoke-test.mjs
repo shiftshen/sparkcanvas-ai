@@ -716,6 +716,7 @@ try {
   assert(videoNode.videoPlan.includes("Storyboard plan") && videoNode.videoPlan.includes("关键帧") && videoNode.videoPlan.includes("引用素材"), "video node should create a duration-aware storyboard and keyframe plan with reference controls");
   assert(videoNode.videoPlan.includes("最终成片 5s") && videoNode.videoPlan.includes("模型固定单次输出 10s") && videoNode.videoPlan.includes("后裁切"), "5s final video should be planned as a 10s model clip followed by trimming");
   assert(!videoNode.videoPlan.includes("720P · 5s"), "video plan should not mix final duration into the ratio selector");
+  assert(videoNode.videoPlan.includes("分镜板:"), "video node should expose storyboard-board generation status before image-to-video execution");
 
   const composeNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_compose/generate-compose`, {
     method: "POST",

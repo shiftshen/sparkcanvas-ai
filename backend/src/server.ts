@@ -1584,6 +1584,23 @@ function videoStoryboardBrief(sourcePrompt: string, brand: Brand | undefined, re
   ].filter(Boolean).join("\n");
 }
 
+function videoStoryboardSheetPrompt(sourcePrompt: string, brand: Brand | undefined, references: ReferenceItem[], settings: { duration?: string; ratio?: string; contentLanguage?: ContentLanguage | string }, segmentPlan: ReturnType<typeof videoSegmentPlan>) {
+  const durationSeconds = videoDurationSeconds(settings);
+  const shotCount = Math.max(5, Math.min(10, segmentPlan.length * 5));
+  const visualRefs = references.filter((reference) => reference.imageUrl).slice(0, 8);
+  return [
+    `Create a professional wide storyboard board for a ${durationSeconds}s commercial video, similar to a film production shot sheet, not a final poster.`,
+    `Canvas: 16:9 wide storyboard layout with dark premium background, thin gold dividers, clear panels, ${shotCount} numbered shot cells, video info row, character reference area, scene reference area, and brand lock notes.`,
+    "Each shot cell must contain one coherent cinematic frame thumbnail plus short shot action labels. The board should be useful for a video director to generate consistent image-to-video clips.",
+    brand ? `Brand identity lock: ${brand.name}; exact logo text ${brand.logoText}; IP/model identity ${brand.ipName}; colors ${brand.primaryColor}/${brand.accentColor}; visual style ${brand.visualStyle}.` : "Brand identity lock: only use supplied references.",
+    visualRefs.length ? `Use supplied image references as the source of truth for character face, hair, horns/outfit, logo, restaurant/product/menu details: ${visualRefs.map((reference) => `${reference.role}=${reference.title}`).join("; ")}.` : "",
+    `Segment plan: ${segmentPlan.map((segment) => `S${segment.index + 1}: source ${segment.modelSeconds}s, final ${segment.targetSeconds}s${segment.trim ? " trimmed" : ""}`).join(" / ")}.`,
+    `Intent: ${stripCalForExecution(sourcePrompt, resolvePromptAssets(sourcePrompt, brand))}`,
+    contentLanguageInstruction(settings, "image"),
+    "Hard constraints: no random new person, no alternate mascot, no changed uniform, no distorted logo, no off-brand character, no watermark, no app UI screenshot, no unrelated brand."
+  ].filter(Boolean).join("\n");
+}
+
 function videoKeyframePrompt(sourcePrompt: string, brand: Brand | undefined, references: ReferenceItem[], settings: { duration?: string; ratio?: string; contentLanguage?: ContentLanguage | string }, shotIndex: number, shotCount: number) {
   const durationSeconds = videoDurationSeconds(settings);
   const perShot = Math.max(1, Math.round(durationSeconds / Math.max(1, shotCount)));
@@ -1601,12 +1618,38 @@ function videoKeyframePrompt(sourcePrompt: string, brand: Brand | undefined, ref
     "Make it a single coherent cinematic frame with clear subject, stable camera-ready composition, and realistic motion potential.",
     `Shot timing: about ${perShot}s within a ${durationSeconds}s video. Shot role: ${shotText}.`,
     brand ? `Brand lock: ${brand.name}, logo style, IP/model face/outfit, product/menu materials, colors ${brand.primaryColor}/${brand.accentColor}, visual style ${brand.visualStyle}.` : "Brand lock: only use explicitly supplied visual references.",
-    references.length ? `Use attached references for identity and consistency: ${references.slice(0, 6).map((reference) => `${reference.role}=${reference.title}`).join("; ")}.` : "",
+    references.length ? `Use attached references for identity and consistency: ${references.slice(0, 8).map((reference) => `${reference.role}=${reference.title}`).join("; ")}.` : "",
+    "Identity lock is mandatory: keep the exact same face, hairstyle, horns/outfit/uniform, logo style, restaurant world and product/menu references across every keyframe. Do not invent another model or mascot.",
     `Intent: ${stripCalForExecution(sourcePrompt, resolvePromptAssets(sourcePrompt, brand))}`,
     contentLanguageInstruction(settings, "image"),
     `Aspect ratio: ${settings.ratio ?? "16:9"}.`,
     "Hard constraints: no random new character, no changed logo, no changed uniform, no broken text, no CAL variables, no table, no long copy."
   ].filter(Boolean).join("\n");
+}
+
+function videoReferencePriority(reference: ReferenceItem) {
+  const priority: Record<string, number> = {
+    logo: 0,
+    ip: 1,
+    model: 2,
+    product: 3,
+    menu: 4,
+    storefront: 5,
+    environment: 6,
+    "storyboard-sheet": 7,
+    "first-frame": 8,
+    keyframe: 9,
+    "video-preview": 10
+  };
+  return priority[reference.role] ?? 20;
+}
+
+function stableVideoReferences(references: ReferenceItem[], limit = 10) {
+  return references
+    .filter((reference) => reference.imageUrl)
+    .filter((reference, index, list) => list.findIndex((item) => item.id === reference.id || item.imageUrl === reference.imageUrl) === index)
+    .sort((a, b) => videoReferencePriority(a) - videoReferencePriority(b))
+    .slice(0, limit);
 }
 
 function executableVideoPrompt(sourcePrompt: string, brand: Brand | undefined, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }, references: ReferenceItem[] = []) {
@@ -2721,7 +2764,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
       const durationSeconds = videoDurationSeconds({ duration: `${frame.settings.duration || 5}s` });
       const segmentPlan = videoSegmentPlan(durationSeconds);
       const keyframeCount = videoKeyframeCount(durationSeconds);
-      const videoRefs = [
+      const videoRefs = stableVideoReferences([
         ...refs,
         ...(sharedVisualUrl ? [{
           id: `first_frame_${frame.id}_${index}`,
@@ -2731,14 +2774,47 @@ async function fillFrameOutputs(frame: CanvasFrame) {
           color: outputNode?.preview ?? neutralBrandColor(brand).accent,
           imageUrl: sharedVisualUrl
         }] : [])
-      ].filter((reference, referenceIndex, list) => list.findIndex((item) => item.id === reference.id) === referenceIndex);
+      ]);
       const videoSettings = { mode: "图生视频", ratio: `${frame.settings.ratio} · 720P`, duration: `${durationSeconds}s`, sound: true, translate: false, contentLanguage: frame.settings.contentLanguage };
+      let storyboardSheetUrl = "";
+      try {
+        const generatedStoryboard = await runImageGenerationSkill(
+          videoStoryboardSheetPrompt(frame.prompt, brand, videoRefs, { ratio: "16:9", duration: `${durationSeconds}s`, contentLanguage: frame.settings.contentLanguage }, segmentPlan),
+          videoRefs,
+          `xmanx-${frame.id}-video-storyboard-${index + 1}`,
+          model.model,
+          { ...frame.settings, ratio: "16:9", count: 1, quality: "hd" },
+          Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "300000")
+        );
+        if (generatedStoryboard) storyboardSheetUrl = generatedStoryboard;
+      } catch (error) {
+        output.copy = appendCopyNote(output.copy, `视频分镜板生成降级：${error instanceof Error ? error.message.slice(0, 100) : "image skill unavailable"}`);
+      }
+      const storyboardRef = storyboardSheetUrl ? {
+        id: `video_storyboard_${frame.id}_${index}`,
+        role: "storyboard-sheet",
+        title: "视频分镜板",
+        description: `宽幅分镜板，用于锁定 ${durationSeconds}s 视频的人物、Logo、场景、镜头和片段关系。`,
+        color: outputNode?.preview ?? neutralBrandColor(brand).accent,
+        imageUrl: storyboardSheetUrl
+      } : undefined;
+      if (storyboardRef) {
+        upsertNodeReference(outputNode, storyboardRef);
+        const scriptNode = frame.workflowNodes.find((node) => node.type === "script");
+        const videoNode = frame.workflowNodes.find((node) => node.type === "video" || node.id.includes("mp4"));
+        const composeNode = frame.workflowNodes.find((node) => node.type === "compose");
+        upsertNodeReference(scriptNode, storyboardRef);
+        upsertNodeReference(videoNode, storyboardRef);
+        upsertNodeReference(composeNode, storyboardRef);
+        output.copy = appendCopyNote(output.copy, "已先生成视频分镜板，再按分镜生成各片段首帧。");
+      }
       const keyframeUrls: string[] = [];
+      const keyframeSourceRefs = stableVideoReferences([...videoRefs, ...(storyboardRef ? [storyboardRef] : [])]);
       for (let shotIndex = 0; shotIndex < keyframeCount; shotIndex += 1) {
         try {
           const generatedKeyframe = await runImageGenerationSkill(
-            videoKeyframePrompt(frame.prompt, brand, videoRefs, { ratio: frame.settings.ratio, duration: `${durationSeconds}s`, contentLanguage: frame.settings.contentLanguage }, shotIndex, keyframeCount),
-            videoRefs,
+            videoKeyframePrompt(frame.prompt, brand, keyframeSourceRefs, { ratio: frame.settings.ratio, duration: `${durationSeconds}s`, contentLanguage: frame.settings.contentLanguage }, shotIndex, keyframeCount),
+            keyframeSourceRefs,
             `xmanx-${frame.id}-video-keyframe-${index + 1}-${shotIndex + 1}`,
             model.model,
             { ...frame.settings, count: 1 },
@@ -2771,8 +2847,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
       if (videoNeedsCompose(durationSeconds)) {
         output.copy = appendCopyNote(output.copy, `已拆为 ${segmentPlan.length} 个模型片段任务；短于模型时长的片段会在合成节点裁切，长视频会合并为最终 MP4。`);
       }
-      const videoPromptRefs = [...videoRefs, ...keyframeRefs]
-        .filter((reference, referenceIndex, list) => reference.imageUrl && list.findIndex((item) => item.id === reference.id || item.imageUrl === reference.imageUrl) === referenceIndex);
+      const videoPromptRefs = stableVideoReferences([...videoRefs, ...(storyboardRef ? [storyboardRef] : []), ...keyframeRefs], 12);
       try {
         const segmentResults = [];
         for (const segment of segmentPlan) {
@@ -3992,11 +4067,11 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   const visualDraftNode = frame.workflowNodes.find((item) => item.id === "visual-draft");
   const inputRefs = frame.workflowNodes.find((item) => item.id === "input-image")?.refs ?? [];
   const resolvedRefs = resolvePromptAssets(sourcePrompt, contextBrand).imageReferences;
-  const videoRefs = [
-    ...(node.refs ?? []),
+  const videoRefs = stableVideoReferences([
+    ...resolvedRefs,
     ...inputRefs,
-    ...resolvedRefs
-  ].filter((reference, index, list) => reference.imageUrl && list.findIndex((item) => item.id === reference.id || item.imageUrl === reference.imageUrl) === index).slice(0, 8);
+    ...(node.refs ?? [])
+  ], 10);
   let firstFrameUrl = node.refs?.find((reference) => ["first-frame", "visual", "video-preview", "generated"].includes(reference.role) && reference.imageUrl)?.imageUrl
     ?? targetOutput?.imageUrl
     ?? visualDraftNode?.refs?.find((reference) => reference.imageUrl)?.imageUrl
@@ -4007,13 +4082,39 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   const segmentPlan = videoSegmentPlan(durationSeconds);
   const keyframeCount = videoKeyframeCount(durationSeconds);
   const generatedKeyframeRefs: ReferenceItem[] = [];
+  let storyboardSheetRef: ReferenceItem | undefined;
+  if (videoRefs.length) {
+    try {
+      const generatedStoryboard = await runImageGenerationSkill(
+        videoStoryboardSheetPrompt(sourcePrompt, contextBrand, videoRefs, { ratio: "16:9", duration: `${durationSeconds}s`, contentLanguage: settings.contentLanguage ?? frame.settings.contentLanguage }, segmentPlan),
+        videoRefs,
+        `xmanx-${frame.id}-${node.id}-storyboard`,
+        models[0]?.model,
+        { ...frame.settings, ratio: "16:9", contentLanguage: settings.contentLanguage ?? frame.settings.contentLanguage },
+        Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "300000")
+      );
+      if (generatedStoryboard) {
+        storyboardSheetRef = {
+          id: `video_storyboard_${node.id}`,
+          role: "storyboard-sheet",
+          title: "视频分镜板",
+          description: `宽幅分镜板，用于锁定 ${durationSeconds}s 视频的人物、Logo、场景、镜头和片段关系。`,
+          color: node.preview ?? "#111827",
+          imageUrl: generatedStoryboard
+        };
+      }
+    } catch (error) {
+      firstFrameNote = `视频分镜板生成失败，继续生成单镜头首帧：${error instanceof Error ? error.message.slice(0, 140) : "image skill unavailable"}`;
+    }
+  }
   if (videoRefs.length) {
     const startIndex = firstFrameUrl ? 1 : 0;
+    const keyframeSourceRefs = stableVideoReferences([...videoRefs, ...(storyboardSheetRef ? [storyboardSheetRef] : [])], 12);
     try {
       for (let shotIndex = startIndex; shotIndex < keyframeCount; shotIndex += 1) {
         const generated = await runImageGenerationSkill(
-          videoKeyframePrompt(sourcePrompt, contextBrand, videoRefs, { ratio: settings.ratio?.split("·")[0]?.trim() || frame.settings.ratio, duration: `${durationSeconds}s`, contentLanguage: settings.contentLanguage ?? frame.settings.contentLanguage }, shotIndex, keyframeCount),
-          videoRefs,
+          videoKeyframePrompt(sourcePrompt, contextBrand, keyframeSourceRefs, { ratio: settings.ratio?.split("·")[0]?.trim() || frame.settings.ratio, duration: `${durationSeconds}s`, contentLanguage: settings.contentLanguage ?? frame.settings.contentLanguage }, shotIndex, keyframeCount),
+          keyframeSourceRefs,
           `xmanx-${frame.id}-${node.id}-keyframe-${shotIndex + 1}`,
           models[0]?.model,
           { ...frame.settings, ratio: settings.ratio?.split("·")[0]?.trim() || frame.settings.ratio, contentLanguage: settings.contentLanguage ?? frame.settings.contentLanguage },
@@ -4039,6 +4140,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   }
   const videoPromptRefs = [
     ...videoRefs,
+    ...(storyboardSheetRef ? [storyboardSheetRef] : []),
     ...generatedKeyframeRefs,
     ...(firstFrameUrl ? [{
       id: `first_frame_${node.id}_${Date.now().toString(36)}`,
@@ -4061,8 +4163,9 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   let fallbackReason = "";
   try {
     const segmentResults: VideoRunResult[] = [];
+    const segmentFirstFrames = [firstFrameUrl, ...generatedKeyframeRefs.map((reference) => reference.imageUrl).filter(Boolean)];
     for (const segment of segmentPlan) {
-      const segmentFirstFrame = generatedKeyframeRefs[segment.index]?.imageUrl ?? firstFrameUrl;
+      const segmentFirstFrame = segmentFirstFrames[segment.index] ?? firstFrameUrl;
       const segmentSettings = { ...settings, duration: `${segment.modelSeconds}s`, mode: effectiveVideoMode };
       const segmentPrompt = [
         executableVideoPrompt(sourcePrompt, contextBrand, segmentSettings, videoPromptRefs),
@@ -4117,6 +4220,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
     `翻译: ${settings.translate ? "开启" : "关闭"}`,
     `时长策略: 最终成片 ${durationSeconds}s；模型固定单次输出 ${videoModelClipSeconds()}s；${videoSegmentSummary(durationSeconds)}。`,
     `首帧: ${firstFrameUrl ? usedFirstFrame ? "已提交给视频模型" : "已生成/已选择，但视频接口未确认使用" : "未使用首帧"}`,
+    `分镜板: ${storyboardSheetRef?.imageUrl ? "已生成并作为关键帧生成参考" : "未生成/使用已有分镜文本"}`,
     `关键帧: ${generatedKeyframeRefs.length ? `${generatedKeyframeRefs.length} 张，长视频可拆段后合成` : keyframeCount > 1 ? "当前仅使用已有首帧；建议继续生成补充关键帧" : "短视频单首帧"}`,
     `引用素材: ${videoRefs.length ? videoRefs.map((reference) => `${reference.role}:${reference.title}`).join(" / ") : "无"}`,
     `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
@@ -4138,6 +4242,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
       imageUrl: firstFrameUrl
     });
   }
+  if (storyboardSheetRef) upsertNodeReference(node, storyboardSheetRef);
   for (const keyframeRef of generatedKeyframeRefs) upsertNodeReference(node, keyframeRef);
   if (node.type === "output") {
     if (targetOutput) {

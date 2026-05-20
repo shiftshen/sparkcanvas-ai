@@ -2064,6 +2064,27 @@ svg {
   background:
     radial-gradient(circle at 50% 38%, rgba(249, 115, 22, 0.28), transparent 32%),
     linear-gradient(135deg, #111827, #05070d);
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+}
+
+.rh-video-tile.has-preview {
+  background-size: contain !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+}
+
+.rh-video-tile.has-preview::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(5, 7, 13, 0.1), rgba(5, 7, 13, 0.76));
+}
+
+.rh-video-tile.has-preview > * {
+  position: relative;
+  z-index: 1;
 }
 
 .rh-video-tile svg {
@@ -2697,6 +2718,13 @@ svg {
   background-repeat: no-repeat;
   background-position: center;
   background-color: #05070d;
+}
+
+.rh-preview-video {
+  width: 100%;
+  max-height: min(58vh, 520px);
+  border-radius: 8px;
+  background: #05070d;
 }
 
 .rh-preview-actions {

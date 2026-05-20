@@ -253,7 +253,7 @@ type PanelKey = "projects" | "assets" | "brand" | "templates" | "history" | "tut
 type Locale = "zh" | "en" | "th";
 type ContentLanguage = "auto" | "none" | "zh" | "en" | "th" | "zh-en" | "zh-th" | "en-th" | "zh-en-th";
 type Viewport = { x: number; y: number; scale: number };
-type PreviewTarget = { title: string; subtitle?: string; imageUrl?: string; color?: string; nodeId?: string };
+type PreviewTarget = { title: string; subtitle?: string; imageUrl?: string; videoUrl?: string; color?: string; nodeId?: string };
 type NodeGenerateResponse = { frame: Frame; node: WorkflowNode; imageUrl: string; generated?: boolean; message?: string };
 type WorkflowGenerateResponse = { taskId: string; task: GenerationTask; frame: Frame; credits: number };
 type TextGenerateResponse = { frame: Frame; node: WorkflowNode; text: string; model: string };
@@ -2899,7 +2899,13 @@ function NodeCard(props: {
   onPreview: (target: PreviewTarget) => void;
   onEdit: () => void;
 }) {
-  const firstRef = props.refs.find((ref) => ref.imageUrl);
+  const previewPriority: Record<string, number> = props.node.type === "video"
+    ? { "first-frame": 0, keyframe: 1, "storyboard-sheet": 2, "video-preview": 3, generated: 4, version: 5 }
+    : { generated: 0, version: 1, visual: 2, "document-preview": 3, "video-preview": 4 };
+  const preferredVideoRoles = new Set(["first-frame", "keyframe", "storyboard-sheet", "video-preview", "generated", "version"]);
+  const firstRef = [...props.refs]
+    .filter((ref) => ref.imageUrl && (props.node.type !== "video" || preferredVideoRoles.has(ref.role)))
+    .sort((a, b) => (previewPriority[a.role] ?? 20) - (previewPriority[b.role] ?? 20))[0];
   const imageUrl = firstRef?.imageUrl ?? props.output?.imageUrl;
   const title = firstRef?.title ?? props.output?.title ?? props.node.title;
   const downloadUrl = props.output?.kind === "document"
@@ -2964,11 +2970,32 @@ function NodeCard(props: {
           <span>{props.node.body || "添加剧情、角色参考、视频参考，生成分镜脚本"}</span>
         </button>
       ) : props.node.type === "video" ? (
-        <button type="button" className="rh-video-tile" onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
-          <Play />
+        <div
+          role="button"
+          tabIndex={0}
+          className={`rh-video-tile ${imageUrl ? "has-preview" : ""}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (imageUrl || props.output?.videoUrl) props.onPreview({ title, subtitle: props.node.body, imageUrl, videoUrl: props.output?.videoUrl, color: props.node.preview, nodeId: props.node.id });
+            else props.onEdit();
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            if (imageUrl || props.output?.videoUrl) props.onPreview({ title, subtitle: props.node.body, imageUrl, videoUrl: props.output?.videoUrl, color: props.node.preview, nodeId: props.node.id });
+            else props.onEdit();
+          }}
+          style={imageUrl ? { backgroundImage: `url(${imageUrl})` } : undefined}
+        >
+          {!imageUrl && <Play />}
           <span>{props.node.body || "添加视频提示词"}</span>
           <small>16:9 · 720P · 模型固定10s</small>
-        </button>
+          <div className="rh-image-node-actions" onClick={(event) => event.stopPropagation()}>
+            <button type="button" title="编辑/生成" onClick={props.onEdit}><Wand2 /></button>
+            <button type="button" title="预览" onClick={() => (imageUrl || props.output?.videoUrl) && props.onPreview({ title, subtitle: props.node.body, imageUrl, videoUrl: props.output?.videoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!imageUrl && !props.output?.videoUrl}><Expand /></button>
+            <button type="button" title="下载MP4" onClick={() => downloadFile(props.output?.videoUrl, downloadTitle, "mp4")} disabled={!props.output?.videoUrl}><Download /></button>
+          </div>
+        </div>
       ) : props.node.type === "compose" ? (
         <button type="button" className="rh-compose-tile" onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
           <Scissors />
@@ -4046,12 +4073,16 @@ function ImagePreview({ preview, onClose, onSaveAsset }: { preview: PreviewTarge
           <div><strong>{preview.title}</strong><small>{preview.subtitle}</small></div>
           <button type="button" title="关闭预览" aria-label="关闭预览" onClick={onClose}><X /></button>
         </div>
-        <div className="rh-preview-image" style={preview.imageUrl ? { backgroundImage: `url(${preview.imageUrl})` } : { background: preview.color ?? "#111827" }}>{!preview.imageUrl && <Image />}</div>
+        {preview.videoUrl ? (
+          <video className="rh-preview-video" src={preview.videoUrl} poster={preview.imageUrl} controls playsInline />
+        ) : (
+          <div className="rh-preview-image" style={preview.imageUrl ? { backgroundImage: `url(${preview.imageUrl})` } : { background: preview.color ?? "#111827" }}>{!preview.imageUrl && <Image />}</div>
+        )}
         <div className="rh-preview-actions">
           <button type="button" disabled><ChevronLeft />前插</button>
           <button type="button" disabled><Plus />后插</button>
-          <button type="button" onClick={() => downloadImage(preview.imageUrl, preview.title)} disabled={!preview.imageUrl}><ArrowDownToLine />下载</button>
-          <button type="button" onClick={() => { onSaveAsset(preview); onClose(); }} disabled={!preview.imageUrl}><Upload />保存到素材</button>
+          <button type="button" onClick={() => preview.videoUrl ? downloadFile(preview.videoUrl, preview.title, "mp4") : downloadImage(preview.imageUrl, preview.title)} disabled={!preview.imageUrl && !preview.videoUrl}><ArrowDownToLine />下载</button>
+          <button type="button" onClick={() => { onSaveAsset(preview); onClose(); }} disabled={!preview.imageUrl || Boolean(preview.videoUrl)}><Upload />保存到素材</button>
         </div>
       </section>
     </div>
