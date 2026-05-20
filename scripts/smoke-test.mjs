@@ -436,6 +436,12 @@ try {
   assert(multiOutputCompleted.task.progress === 100 && multiOutputCompleted.frame.progress === 100, "multi-output workflow should finish at 100%, not stay at 96%");
   assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "document" && output.title.includes("PDF")), "CAL -> pdf should create a document output");
   assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "document" && output.fileUrl?.endsWith(".pdf")), "CAL -> pdf should generate a downloadable PDF artifact");
+  const pdfOutput = multiOutputCompleted.frame.outputs.find((output) => output.kind === "document");
+  const pdfResponse = await fetch(`${baseUrl}${pdfOutput.fileUrl}`);
+  const pdfBuffer = Buffer.from(await pdfResponse.arrayBuffer());
+  assert(pdfResponse.ok && pdfResponse.headers.get("content-type")?.includes("application/pdf"), "PDF artifact should download as application/pdf");
+  assert(pdfBuffer.subarray(0, 4).toString() === "%PDF" && pdfBuffer.includes(Buffer.from("/Subtype /Image")), "PDF artifact should be a real image-composed PDF, not a PNG preview");
+  assert(pdfOutput.copy.includes("PDF 已合成"), "PDF output should tell users that canvas images were composed into the PDF");
   assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "video" && output.title.includes("MP4")), "CAL -> mp4 should create a video output");
   assert(multiOutputCompleted.frame.outputs.every((output) => output.imageUrl && (output.copy.includes("预览") || output.kind === "image" || output.fileUrl || output.videoId || output.videoUrl)), "every workflow output should have a visible preview or concrete artifact status");
   assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id.startsWith("doc-pdf") && node.type === "process"), "CAL -> pdf should create an editable document/text node");

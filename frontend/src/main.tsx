@@ -2482,6 +2482,13 @@ function NodeCard(props: {
   const firstRef = props.refs.find((ref) => ref.imageUrl);
   const imageUrl = firstRef?.imageUrl ?? props.output?.imageUrl;
   const title = firstRef?.title ?? props.output?.title ?? props.node.title;
+  const downloadUrl = props.output?.kind === "document"
+    ? props.output.fileUrl
+    : props.output?.kind === "video"
+      ? props.output.videoUrl
+      : imageUrl;
+  const downloadExt = props.output?.kind === "document" ? "pdf" : props.output?.kind === "video" ? "mp4" : "png";
+  const downloadTitle = props.output?.title ?? title;
   return (
     <article
       className={`rh-node ${props.node.type} ${props.selected ? "selected" : ""}`}
@@ -2510,7 +2517,7 @@ function NodeCard(props: {
           <div className="rh-image-node-actions" onClick={(event) => event.stopPropagation()}>
             <button type="button" title="编辑/生成" onClick={props.onEdit}><Wand2 /></button>
             <button type="button" title="预览" onClick={() => imageUrl && props.onPreview({ title, subtitle: props.node.body, imageUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!imageUrl}><Expand /></button>
-            <button type="button" title="下载" onClick={() => downloadImage(imageUrl, title)} disabled={!imageUrl}><Download /></button>
+            <button type="button" title={props.output?.kind === "document" ? "下载PDF" : props.output?.kind === "video" ? "下载MP4" : "下载图片"} onClick={() => downloadFile(downloadUrl, downloadTitle, downloadExt)} disabled={!downloadUrl}><Download /></button>
           </div>
         </div>
       ) : props.node.type === "model" ? (

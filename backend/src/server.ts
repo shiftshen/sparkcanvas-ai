@@ -1,9 +1,10 @@
 import cors from "cors";
 import express from "express";
 import type { ErrorRequestHandler, NextFunction, Request, Response } from "express";
+import PDFDocument from "pdfkit";
 import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { createWriteStream, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
@@ -1146,14 +1147,27 @@ async function persistDb() {
   await writeFile(dataFile, JSON.stringify(db, null, 2));
 }
 
+function pdfArtifactHasEmbeddedImage(fileUrl?: string) {
+  const filePath = localPublicPathFromUrl(fileUrl);
+  if (!filePath || !existsSync(filePath)) return false;
+  try {
+    return readFileSync(filePath).includes(Buffer.from("/Subtype /Image"));
+  } catch {
+    return false;
+  }
+}
+
 async function repairInterruptedGenerations() {
   let changed = false;
   async function repairDocumentArtifacts(frame: CanvasFrame) {
     for (const output of frame.outputs) {
-      if (output.kind !== "document" || output.fileUrl) continue;
+      if (output.kind !== "document") continue;
+      const hasEmbeddableImages = collectPdfImageSources(frame, output).length > 0;
+      if (output.fileUrl && (!hasEmbeddableImages || pdfArtifactHasEmbeddedImage(output.fileUrl))) continue;
       try {
         output.fileUrl = await createPdfArtifact(frame, output, `xmanx-${frame.id}-${output.id || "document"}`);
         output.copy = appendCopyNote(output.copy, `PDF 文件已生成: ${output.fileUrl}`);
+        if (hasEmbeddableImages) output.copy = appendCopyNote(output.copy, "PDF 已合成画布图片页。");
         changed = true;
       } catch (error) {
         output.copy = appendCopyNote(output.copy, `PDF 导出待重试：${error instanceof Error ? error.message.slice(0, 120) : "pdf unavailable"}`);
@@ -1186,9 +1200,10 @@ async function repairInterruptedGenerations() {
     changed = true;
   }
   for (const frame of db.frames) {
-    if (frame.status !== "success" || !frame.outputs.some((output) => output.kind === "document" && !output.fileUrl)) continue;
+    if (frame.status !== "success" || !frame.outputs.some((output) => output.kind === "document" && (!output.fileUrl || (!pdfArtifactHasEmbeddedImage(output.fileUrl) && collectPdfImageSources(frame, output).length > 0)))) continue;
     await repairDocumentArtifacts(frame);
     frame.updatedAt = now();
+    changed = true;
   }
   if (changed) await persistDb();
 }
@@ -1431,7 +1446,10 @@ function executableVideoPrompt(sourcePrompt: string, brand: Brand | undefined, s
 
 function localPublicPathFromUrl(imageUrl?: string) {
   if (!imageUrl?.startsWith("/")) return undefined;
-  const candidate = path.join(frontendPublicDir, imageUrl.replace(/^\/+/, ""));
+  const relative = imageUrl.replace(/^\/+/, "");
+  const candidate = relative.startsWith("generated/")
+    ? path.join(generatedDir, relative.replace(/^generated\//, ""))
+    : path.join(frontendPublicDir, relative);
   return existsSync(candidate) ? candidate : undefined;
 }
 
@@ -2082,67 +2100,101 @@ function appendCopyNote(copy: string, note: string) {
   return copy.includes(note) ? copy : `${copy} · ${note}`;
 }
 
-function wrapPdfLine(line: string, limit = 34) {
-  const chars = Array.from(line.replace(/\s+/g, " ").trim());
-  const rows: string[] = [];
-  for (let index = 0; index < chars.length; index += limit) rows.push(chars.slice(index, index + limit).join(""));
-  return rows.length ? rows : [""];
+function pdfFontPath() {
+  return [
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+  ].find((candidate) => existsSync(candidate));
 }
 
-function pdfTextHex(text: string) {
-  let hex = "";
-  for (let index = 0; index < text.length; index += 1) {
-    hex += text.charCodeAt(index).toString(16).padStart(4, "0");
-  }
-  return hex;
+function pdfImageBuffer(imageUrl?: string) {
+  if (!imageUrl) return undefined;
+  const dataMatch = imageUrl.match(/^data:image\/(png|jpe?g);base64,(.+)$/i);
+  if (dataMatch) return Buffer.from(dataMatch[2], "base64");
+  const localPath = localPublicPathFromUrl(imageUrl);
+  if (!localPath || !/\.(png|jpe?g)$/i.test(localPath)) return undefined;
+  return readFileSync(localPath);
 }
 
-async function writeSimplePdf(filePath: string, title: string, lines: string[]) {
-  const cleanLines = [title, ...lines]
-    .flatMap((line) => wrapPdfLine(line, 36))
-    .slice(0, 28);
-  const stream = [
-    "BT",
-    "/F1 18 Tf",
-    "72 778 Td",
-    ...cleanLines.flatMap((line, index) => [
-      index === 1 ? "/F1 11 Tf" : "",
-      `<${pdfTextHex(line || " ")}> Tj`,
-      "0 -24 Td"
-    ]).filter(Boolean),
-    "ET"
-  ].join("\n");
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 6 0 R >>",
-    "<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [5 0 R] >>",
-    "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 2 >> >>",
-    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`
+function collectPdfImageSources(frame: CanvasFrame, output: CanvasFrame["outputs"][number]) {
+  const sources: Array<{ title: string; imageUrl: string; description: string }> = [];
+  const add = (title: string, imageUrl?: string, description = "") => {
+    if (!imageUrl || sources.some((item) => item.imageUrl === imageUrl)) return;
+    sources.push({ title, imageUrl, description });
+  };
+  add(output.title || "PDF preview", output.imageUrl, output.copy);
+  const priorityNodes = [
+    ...frame.workflowNodes.filter((node) => node.id === "visual-draft"),
+    ...nodesForOutput(frame, output),
+    ...frame.workflowNodes.filter((node) => ["image", "reference", "output"].includes(node.type))
   ];
-  let body = "%PDF-1.4\n";
-  const offsets = [0];
-  for (const [index, object] of objects.entries()) {
-    offsets.push(Buffer.byteLength(body));
-    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  for (const node of priorityNodes) {
+    for (const ref of node.refs ?? []) add(ref.title || node.title, ref.imageUrl, ref.description || node.body);
   }
-  const xrefOffset = Buffer.byteLength(body);
-  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  body += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, body);
+  const resolved: Array<{ title: string; imageUrl: string; description: string; buffer: Buffer }> = [];
+  for (const source of sources.slice(0, 12)) {
+    const buffer = pdfImageBuffer(source.imageUrl);
+    if (buffer) resolved.push({ ...source, buffer });
+  }
+  return resolved;
+}
+
+function writeCanvasPdf(filePath: string, title: string, lines: string[], images: Array<{ title: string; description: string; buffer: Buffer }>) {
+  return new Promise<void>((resolve, reject) => {
+    const doc = new PDFDocument({ size: "A4", margin: 46, info: { Title: title } });
+    const output = createWriteStream(filePath);
+    output.on("finish", () => resolve());
+    output.on("error", reject);
+    doc.on("error", reject);
+    doc.pipe(output);
+    const fontPath = pdfFontPath();
+    if (fontPath) {
+      doc.registerFont("SparkCanvasFont", fontPath);
+      doc.font("SparkCanvasFont");
+    }
+    doc.fontSize(20).fillColor("#111827").text(title || "SparkCanvas PDF", { width: 500 });
+    doc.moveDown(0.4);
+    doc.fontSize(9).fillColor("#64748b").text("Generated by SparkCanvas CAL workflow. Image pages are composed from canvas visual previews and referenced assets.");
+    doc.moveDown(0.8);
+    doc.fontSize(10).fillColor("#111827");
+    for (const line of lines.slice(0, 22)) {
+      doc.text(line || " ", { width: 500, lineGap: 2 });
+    }
+    images.forEach((image, index) => {
+      doc.addPage({ size: "A4", margin: 34 });
+      doc.fontSize(12).fillColor("#111827").text(`${index + 1}. ${image.title}`, { width: 520 });
+      doc.moveDown(0.35);
+      try {
+        doc.image(image.buffer, 34, 76, { fit: [527, 650], align: "center", valign: "center" });
+      } catch {
+        doc.fontSize(10).fillColor("#dc2626").text("Image could not be embedded in this PDF. The preview remains available on the canvas.");
+      }
+      if (image.description) {
+        doc.fontSize(8).fillColor("#64748b").text(image.description.replace(/\s+/g, " ").slice(0, 260), 34, 752, { width: 527 });
+      }
+    });
+    if (!images.length) {
+      doc.addPage({ size: "A4", margin: 46 });
+      doc.fontSize(12).fillColor("#64748b").text("No embeddable PNG/JPG images were available. Canvas preview images are still visible in the app.");
+    }
+    doc.end();
+  });
 }
 
 async function createPdfArtifact(frame: CanvasFrame, output: CanvasFrame["outputs"][number], outputName: string) {
   const fileName = `${outputName}.pdf`;
   const filePath = path.join(generatedDir, fileName);
   const docNodes = nodesForOutput(frame, output).filter((node) => node.type !== "output");
+  const pdfImages = collectPdfImageSources(frame, output);
   const lines = [
     `项目: ${frame.title}`,
     `品牌: ${frame.brandName || "未绑定品牌"}`,
     `状态: ${frame.brandInjected ? "自动注入品牌上下文" : "仅使用显式 CAL 引用"}`,
     `目标: ${output.title}`,
+    `图片页: ${pdfImages.length} 张`,
     "",
     ...docNodes.flatMap((node) => [`${node.title}:`, node.body]),
     "",
@@ -2151,7 +2203,8 @@ async function createPdfArtifact(frame: CanvasFrame, output: CanvasFrame["output
     "",
     output.copy
   ].filter(Boolean);
-  await writeSimplePdf(filePath, output.title || frame.title, lines);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeCanvasPdf(filePath, output.title || frame.title, lines, pdfImages);
   return `/generated/${fileName}`;
 }
 
@@ -2287,8 +2340,10 @@ async function fillFrameOutputs(frame: CanvasFrame) {
       }
     } else {
       try {
+        const pdfImageCount = collectPdfImageSources(frame, output).length;
         output.fileUrl = await createPdfArtifact(frame, output, `xmanx-${frame.id}-${output.id || "document"}`);
         output.copy = appendCopyNote(output.copy, `PDF 文件已生成: ${output.fileUrl}`);
+        if (pdfImageCount > 0) output.copy = appendCopyNote(output.copy, `PDF 已合成 ${pdfImageCount} 张画布图片页。`);
       } catch (error) {
         output.copy = appendCopyNote(output.copy, `PDF 导出失败，已保留封面/结构预览：${error instanceof Error ? error.message.slice(0, 120) : "pdf unavailable"}`);
       }
