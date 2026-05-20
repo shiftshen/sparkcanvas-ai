@@ -1309,7 +1309,7 @@ svg {
 .rh-selection-pill {
   position: fixed;
   left: 50%;
-  top: 104px;
+  top: 72px;
   z-index: 42;
   display: grid;
   grid-template-columns: 34px minmax(0, auto) auto auto auto;
@@ -2496,6 +2496,17 @@ svg {
   margin-left: 0;
 }
 
+.rh-image-editor-toolbar .rh-regenerate-primary {
+  min-width: 132px !important;
+  color: #07111f;
+  background: #f8fafc;
+  border-color: rgba(255, 255, 255, 0.38);
+}
+
+.rh-image-editor-toolbar .rh-regenerate-primary:hover {
+  background: #ffffff;
+}
+
 .rh-image-editor-toolbar b {
   position: absolute;
   right: 6px;
@@ -2606,13 +2617,18 @@ svg {
 }
 
 .rh-image-editor-footer .submit {
-  width: 38px;
-  flex: 0 0 38px;
+  width: 112px;
+  flex: 0 0 112px;
   height: 38px;
-  padding: 0;
+  padding: 0 12px;
   border-radius: 10px;
   color: #111827;
   background: #fff;
+  gap: 6px;
+}
+
+.rh-image-editor-footer .submit span {
+  display: inline;
 }
 
 .rh-editor-actions.compact {
@@ -3556,11 +3572,13 @@ svg {
 .rh-image-editor-footer {
   grid-column: 1 / -1 !important;
   grid-row: 3 !important;
-  display: grid !important;
-  grid-template-columns: 138px 80px auto 1fr 34px 88px 66px 118px 118px 108px auto 38px;
+  display: flex !important;
+  flex-wrap: nowrap !important;
   align-items: center !important;
+  min-width: 0;
   gap: 7px !important;
-  overflow: hidden !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
   padding: 0 !important;
 }
 

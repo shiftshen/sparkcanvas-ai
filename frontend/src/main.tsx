@@ -2931,6 +2931,10 @@ function NodeEditor({
           <button type="button" title="优化 CAL" onClick={() => void handleTransformDraft("optimize")}><Sparkles /><span>优化</span></button>
           <button type="button" title="聚焦"><Camera /><span>聚焦</span></button>
           <button type="button" className="active" title="列表"><Layers3 /><b>1</b></button>
+          <button type="button" className="rh-regenerate-primary" title={imageUrl ? "不满意时重新调用 @imgen 生成当前节点图片" : "调用 @imgen 生成图片"} onClick={() => void handleGenerate()} disabled={generating || !imagePromptReady}>
+            {generating ? <Loader2 className="spin" /> : <Play />}
+            <span>{imageUrl ? "重新生成图片" : "生成图片"}</span>
+          </button>
           <button type="button" className="ghost" title="放大预览" onClick={() => imageUrl && onPreview({ title: draft.title, subtitle: draft.body, imageUrl, color: draft.preview, nodeId: draft.id })} disabled={!imageUrl}><Expand /></button>
           <button type="button" className="ghost" title="关闭" onClick={onClose}><X /></button>
         </div>
@@ -2988,7 +2992,7 @@ function NodeEditor({
           </select>
           <label className="rh-mini-range"><SlidersHorizontal /><input type="range" min={0} max={100} value={imageStrength} onChange={(event) => setImageStrength(Number(event.target.value))} /></label>
           <small>♦ 14</small>
-          <button type="button" className="submit" title="生成图片" aria-label="生成图片" onClick={() => void handleGenerate()} disabled={generating || !imagePromptReady}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
+          <button type="button" className="submit" title={imageUrl ? "重新生成图片" : "生成图片"} aria-label={imageUrl ? "重新生成图片" : "生成图片"} onClick={() => void handleGenerate()} disabled={generating || !imagePromptReady}>{generating ? <Loader2 className="spin" /> : <Play />}<span>{imageUrl ? "重生成" : "生成"}</span></button>
         </div>
         <div className="rh-editor-actions compact">
           <label className="rh-file-action"><Upload />{imageUrl ? "替换" : "上传图片"}<input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleUploadReference(file); event.currentTarget.value = ""; }} /></label>
