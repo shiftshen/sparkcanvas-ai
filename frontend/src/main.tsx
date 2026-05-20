@@ -2604,6 +2604,7 @@ function Canvas(props: {
               if (!props.editingNodeId) return;
               return props.onGenerateAudioNode(props.editingNodeId, nodePrompt, modelId, settings);
             }}
+            onUpload={(file, type, options) => props.onUpload(file, type, options)}
             onPreview={(target) => props.setPreview({ ...target, nodeId: props.editingNodeId ?? undefined })}
           />
         </div>
@@ -2781,6 +2782,7 @@ function NodeEditor({
   onGenerateScript,
   onGenerateVideo,
   onGenerateAudio,
+  onUpload,
   onGenerationProgress,
   onPreview
 }: {
@@ -2799,6 +2801,7 @@ function NodeEditor({
   onGenerateScript: (prompt: string, modelId: string, translate: boolean, contentLanguage?: ContentLanguage) => ScriptGenerateResponse | void | Promise<ScriptGenerateResponse | void>;
   onGenerateVideo: (prompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean; contentLanguage: ContentLanguage }) => VideoGenerateResponse | void | Promise<VideoGenerateResponse | void>;
   onGenerateAudio: (prompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean; contentLanguage: ContentLanguage }) => AudioGenerateResponse | void | Promise<AudioGenerateResponse | void>;
+  onUpload: (file: File, type: Asset["type"], options?: AssetUploadOptions) => Promise<Asset | undefined>;
   onGenerationProgress: (progress: number | null) => void;
   onPreview: (target: PreviewTarget) => void;
 }) {
@@ -2941,15 +2944,15 @@ function NodeEditor({
   async function handleUploadReference(file: File) {
     const currentDraft = draft;
     if (!currentDraft) return;
-    const imageUrl = await readFileAsDataUrl(file);
-    const nextRef: ReferenceItem = {
-      id: `upload_${currentDraft.id}_${Date.now().toString(36)}`,
-      role: currentDraft.type === "reference" ? "reference" : "uploaded",
-      title: file.name.replace(/\.[^.]+$/, "") || currentDraft.title,
-      description: currentDraft.body || "uploaded reference image",
-      color: currentDraft.preview ?? "#f97316",
-      imageUrl
-    };
+    const title = file.name.replace(/\.[^.]+$/, "") || currentDraft.title || "uploaded image";
+    const asset = await onUpload(file, "upload", {
+      brandId: activeBrand?.id,
+      title,
+      meta: currentDraft.body || "$asset · node upload",
+      color: currentDraft.preview ?? activeBrand?.accentColor ?? "#f97316"
+    });
+    if (!asset) return;
+    const nextRef = assetToRef(asset);
     const nextDraft = {
       ...currentDraft,
       title: currentDraft.title || nextRef.title,
