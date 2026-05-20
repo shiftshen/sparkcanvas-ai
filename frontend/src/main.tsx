@@ -260,7 +260,7 @@ type TextGenerateResponse = { frame: Frame; node: WorkflowNode; text: string; mo
 type ScriptGenerateResponse = { frame: Frame; node: WorkflowNode; script: string; model: string };
 type VideoGenerateResponse = { frame: Frame; node: WorkflowNode; videoPlan: string; model: string; videoId?: string; videoUrl?: string };
 type AudioGenerateResponse = { frame: Frame; node: WorkflowNode; audioPlan: string; model: string };
-type ComposeGenerateResponse = { frame: Frame; node: WorkflowNode; composePlan: string; mergedUrl?: string; segments: number[] };
+type ComposeGenerateResponse = { frame: Frame; node: WorkflowNode; composePlan: string; mergedUrl?: string; segments: number[]; segmentPlan?: Array<{ index: number; targetSeconds: number; modelSeconds: number; trim: boolean }> };
 type TransformTextResponse = { text: string; action: "translate" | "optimize"; model: string };
 
 const coreNodeIds = ["input-image", "brand", "prompt", "output"];
@@ -2946,7 +2946,7 @@ function NodeCard(props: {
         <button type="button" className="rh-video-tile" onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
           <Play />
           <span>{props.node.body || "添加视频提示词"}</span>
-          <small>16:9 · 720P · 5s</small>
+          <small>16:9 · 720P · 模型固定10s</small>
         </button>
       ) : props.node.type === "compose" ? (
         <button type="button" className="rh-compose-tile" onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
@@ -3074,7 +3074,7 @@ function NodeEditor({
   const [translateScript, setTranslateScript] = useState(false);
   const [videoMode, setVideoMode] = useState("文生视频");
   const [videoModel, setVideoModel] = useState("grok-imagine-1.0-video-super-720p");
-  const [videoRatio, setVideoRatio] = useState("16:9 · 720P · 5s");
+  const [videoRatio, setVideoRatio] = useState("16:9 · 720P");
   const [videoDuration, setVideoDuration] = useState("5s");
   const [videoSound, setVideoSound] = useState(true);
   const [translateVideo, setTranslateVideo] = useState(false);
@@ -3470,7 +3470,7 @@ function NodeEditor({
       onSave({ title: currentDraft.title, body: currentDraft.body });
       try {
         const result = await Promise.resolve(onGenerateCompose(currentDraft.body || currentDraft.title || "合成当前画布视频片段", {
-          duration: videoDuration === "5s" ? "20s" : videoDuration,
+          duration: videoDuration,
           ratio: videoRatio,
           contentLanguage,
           transition: "短交叉淡入淡出 + 节奏点硬切",
@@ -3490,7 +3490,7 @@ function NodeEditor({
         <div className="rh-node-editor-head">
           <div>
             <strong>视频合成</strong>
-            <small>长视频按 10 秒内片段拆分，统一配音、转场和最终 MP4 状态</small>
+            <small>最终时长由剪辑层控制；模型固定 10s/段，短片裁切，长片合并</small>
           </div>
           <button type="button" onClick={onClose}><X /></button>
         </div>
@@ -3502,8 +3502,8 @@ function NodeEditor({
         />
         {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
         <div className="rh-editor-actions">
-          <select value={videoDuration === "5s" ? "20s" : videoDuration} onChange={(event) => setVideoDuration(event.target.value)} title="最终时长">
-            <option>20s</option><option>30s</option><option>45s</option><option>60s</option>
+          <select value={videoDuration} onChange={(event) => setVideoDuration(event.target.value)} title="最终时长">
+            <option>5s</option><option>10s</option><option>20s</option><option>30s</option><option>45s</option><option>60s</option>
           </select>
           <select value={videoRatio} onChange={(event) => setVideoRatio(event.target.value)} title="画面比例">
             <option>16:9 · 720P</option><option>9:16 · 720P</option><option>1:1 · 720P</option>
@@ -3511,7 +3511,7 @@ function NodeEditor({
           <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="旁白/字幕语言">
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
-          <button type="button" onClick={() => void handleComposeGenerate()} disabled={generating}>{generating ? <Loader2 className="spin" /> : <Scissors />}生成合成计划</button>
+          <button type="button" onClick={() => void handleComposeGenerate()} disabled={generating}>{generating ? <Loader2 className="spin" /> : <Scissors />}裁切/合成</button>
           <button type="button" onClick={() => { onSave({ title: draft.title, body: draft.body }); onClose(); }}>保存</button>
         </div>
       </aside>
@@ -3697,7 +3697,7 @@ function NodeEditor({
         )}
         <div className="rh-video-preview">
           {output?.imageUrl ? <img src={output.imageUrl} alt={draft.title} /> : <Play />}
-          <span>{output?.videoUrl ? "MP4 文件已生成，可下载" : output?.videoId ? `视频任务已创建: ${output.videoId}` : draft.body ? "视频生成配置已就绪，尚未得到 MP4 文件" : "空视频节点"}</span>
+          <span>{output?.videoUrl ? "最终 MP4 已生成，可下载" : output?.videoId ? `视频片段任务已创建，等待合成/裁切: ${output.videoId}` : draft.body ? "视频配置已保存，需点击运行生成真实 MP4" : "空视频节点"}</span>
         </div>
         <div className="rh-video-editor-footer">
           <select value={videoModel} onChange={(event) => setVideoModel(event.target.value)}>
@@ -3705,9 +3705,9 @@ function NodeEditor({
             <option>veo_3_1-fast</option>
           </select>
           <select value={videoRatio} onChange={(event) => setVideoRatio(event.target.value)}>
-            <option>16:9 · 720P · 5s</option>
-            <option>9:16 · 720P · 5s</option>
-            <option>1:1 · 720P · 5s</option>
+            <option>16:9 · 720P</option>
+            <option>9:16 · 720P</option>
+            <option>1:1 · 720P</option>
           </select>
           <select value={videoDuration} onChange={(event) => setVideoDuration(event.target.value)} title="最终时长">
             <option>5s</option><option>10s</option><option>15s</option><option>20s</option><option>30s</option><option>45s</option><option>60s</option>

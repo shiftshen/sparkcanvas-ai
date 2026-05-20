@@ -558,7 +558,7 @@ try {
   assert(multiOutputCompleted.frame.steps.some((step) => step.includes("PDF") && step.includes("MP4")), "workflow steps should mention requested PDF and MP4 outputs");
   const mp4OutputNode = await request(`/canvas/frames/${multiOutputCompleted.frame.id}/nodes/output-mp4/generate-video`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "刷新 MP4 输出任务", model: "grok-imagine-1.0-video-super-720p", settings: { mode: "图生视频", ratio: "16:9 · 720P · 5s", duration: "5s", sound: true, translate: false, contentLanguage: "zh-th" } })
+    body: JSON.stringify({ prompt: "刷新 MP4 输出任务", model: "grok-imagine-1.0-video-super-720p", settings: { mode: "图生视频", ratio: "16:9 · 720P", duration: "5s", sound: true, translate: false, contentLanguage: "zh-th" } })
   });
   assert(mp4OutputNode.node.id === "output-mp4" && mp4OutputNode.node.type === "output", "MP4 output node generation should keep the node as an output node");
   assert(mp4OutputNode.frame.outputs.some((output) => output.kind === "video" && /执行状态|视频任务|MP4/.test(output.copy)), "MP4 output node should update the video output status instead of calling image generation");
@@ -677,16 +677,18 @@ try {
 
   const videoNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_video/generate-video`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "保存文生视频配置", model: "grok-imagine-1.0-video-super-720p", settings: { mode: "文生视频", ratio: "9:16 · 720P · 5s", duration: "5s", sound: true, translate: false } })
+    body: JSON.stringify({ prompt: "保存文生视频配置", model: "grok-imagine-1.0-video-super-720p", settings: { mode: "文生视频", ratio: "9:16 · 720P", duration: "5s", sound: true, translate: false } })
   });
   assert(videoNode.videoPlan.includes("视频类型: 文生视频") && videoNode.node.type === "video", "video node should save generation plan");
   assert(videoNode.videoPlan.includes("Storyboard plan") && videoNode.videoPlan.includes("关键帧") && videoNode.videoPlan.includes("引用素材"), "video node should create a duration-aware storyboard and keyframe plan with reference controls");
+  assert(videoNode.videoPlan.includes("最终成片 5s") && videoNode.videoPlan.includes("模型固定单次输出 10s") && videoNode.videoPlan.includes("后裁切"), "5s final video should be planned as a 10s model clip followed by trimming");
 
   const composeNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_compose/generate-compose`, {
     method: "POST",
     body: JSON.stringify({ prompt: "合成 20 秒品牌短视频，统一每段旁白和转场", settings: { duration: "20s", ratio: "9:16 · 720P", contentLanguage: "zh-en", transition: "节奏点硬切 + 轻淡入淡出", audioMode: "分段旁白统一混音" } })
   });
   assert(composeNode.composePlan.includes("分段策略") && composeNode.composePlan.includes("配音规则") && composeNode.segments.length === 2, "compose node should create a multi-segment edit plan with per-segment voice/audio rules");
+  assert(composeNode.segmentPlan?.every((segment) => segment.modelSeconds === 10) && composeNode.composePlan.includes("S1 成片10s/模型10s"), "compose node should expose fixed 10s model clip planning");
 
   const audioNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_audio/generate-audio`, {
     method: "POST",
