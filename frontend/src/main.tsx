@@ -3072,7 +3072,7 @@ function NodeEditor({
   const [translateText, setTranslateText] = useState(false);
   const [scriptModel, setScriptModel] = useState("gpt-5.4");
   const [translateScript, setTranslateScript] = useState(false);
-  const [videoMode, setVideoMode] = useState("文生视频");
+  const [videoMode, setVideoMode] = useState("图生视频");
   const [videoModel, setVideoModel] = useState("grok-imagine-1.0-video-super-720p");
   const [videoRatio, setVideoRatio] = useState("16:9 · 720P");
   const [videoDuration, setVideoDuration] = useState("5s");
@@ -3673,7 +3673,7 @@ function NodeEditor({
     return (
       <aside className="rh-node-editor rh-video-editor" onPointerDown={(event) => event.stopPropagation()}>
         <div className="rh-video-editor-tabs">
-          {["文生视频", "全能参考", "图生视频", "首尾帧", "图片参考"].map((mode) => (
+          {["图生视频", "全能参考", "首尾帧", "图片参考", "文生视频"].map((mode) => (
             <button type="button" key={mode} className={videoMode === mode ? "active" : ""} onClick={() => setVideoMode(mode)}>{mode}</button>
           ))}
           <button type="button" className="ghost" title="关闭" onClick={onClose}><X /></button>

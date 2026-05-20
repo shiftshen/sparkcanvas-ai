@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -8,8 +8,10 @@ const port = 4199;
 const baseUrl = `http://localhost:${port}`;
 const tempDir = await mkdtemp(path.join(tmpdir(), "sparkcanvas-smoke-"));
 const dataFile = path.join(tempDir, "sparkcanvas.json");
+const generatedDir = path.join(tempDir, "generated");
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 let token = "";
+const optionalChecks = [];
 
 const server = spawn("node", ["dist/server.js"], {
   cwd: path.join(root, "backend"),
@@ -17,6 +19,7 @@ const server = spawn("node", ["dist/server.js"], {
     ...process.env,
     PORT: String(port),
     SPARKCANVAS_DATA_FILE: dataFile,
+    SPARKCANVAS_GENERATED_DIR: generatedDir,
     SPARKCANVAS_DISABLE_IMAGE_GEN: "1"
   },
   stdio: ["ignore", "pipe", "pipe"]
@@ -92,6 +95,36 @@ async function waitForTask(taskId) {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+function runProcess(command, args, options = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { stdio: "ignore", ...options });
+    child.on("error", () => resolve(false));
+    child.on("close", (code) => resolve(code === 0));
+  });
+}
+
+async function createSmokeVideo(filename, color) {
+  await mkdir(generatedDir, { recursive: true });
+  const outputPath = path.join(generatedDir, filename);
+  const candidates = [process.env.FFMPEG_PATH, "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"].filter(Boolean);
+  for (const ffmpeg of candidates) {
+    const ok = await runProcess(ffmpeg, [
+      "-y",
+      "-f", "lavfi",
+      "-i", `color=c=${color}:s=320x180:d=1`,
+      "-f", "lavfi",
+      "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+      "-shortest",
+      "-c:v", "libx264",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      outputPath
+    ]);
+    if (ok) return `/generated/${filename}`;
+  }
+  return "";
 }
 
 try {
@@ -679,7 +712,7 @@ try {
     method: "POST",
     body: JSON.stringify({ prompt: "保存文生视频配置", model: "grok-imagine-1.0-video-super-720p", settings: { mode: "文生视频", ratio: "9:16 · 720P", duration: "5s", sound: true, translate: false } })
   });
-  assert(videoNode.videoPlan.includes("视频类型: 文生视频") && videoNode.node.type === "video", "video node should save generation plan");
+  assert(videoNode.videoPlan.includes("视频类型: 图生视频") && videoNode.node.type === "video", "canvas video node should use image-to-video when visual references or first frames exist");
   assert(videoNode.videoPlan.includes("Storyboard plan") && videoNode.videoPlan.includes("关键帧") && videoNode.videoPlan.includes("引用素材"), "video node should create a duration-aware storyboard and keyframe plan with reference controls");
   assert(videoNode.videoPlan.includes("最终成片 5s") && videoNode.videoPlan.includes("模型固定单次输出 10s") && videoNode.videoPlan.includes("后裁切"), "5s final video should be planned as a 10s model clip followed by trimming");
 
@@ -689,6 +722,34 @@ try {
   });
   assert(composeNode.composePlan.includes("分段策略") && composeNode.composePlan.includes("配音规则") && composeNode.segments.length === 2, "compose node should create a multi-segment edit plan with per-segment voice/audio rules");
   assert(composeNode.segmentPlan?.every((segment) => segment.modelSeconds === 10) && composeNode.composePlan.includes("S1 成片10s/模型10s"), "compose node should expose fixed 10s model clip planning");
+
+  const smokeVideoA = await createSmokeVideo("smoke-a.mp4", "red");
+  const smokeVideoB = await createSmokeVideo("smoke-b.mp4", "blue");
+  if (smokeVideoA && smokeVideoB) {
+    const composeFrameWithVideos = {
+      ...composeNode.frame,
+      workflowNodes: composeNode.frame.workflowNodes.map((node) => node.id === "node_smoke_compose" ? {
+        ...node,
+        refs: [
+          ...(node.refs ?? []),
+          { id: "smoke_video_a", role: "generated-video", title: "历史视频 A", description: "smoke local mp4", color: "#ef4444", imageUrl: smokeVideoA },
+          { id: "smoke_video_b", role: "generated-video", title: "历史视频 B", description: "smoke local mp4", color: "#3b82f6", imageUrl: smokeVideoB }
+        ]
+      } : node)
+    };
+    await request(`/canvas/frames/${generated.frame.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ workflowNodes: composeFrameWithVideos.workflowNodes })
+    });
+    const mergedComposeNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_compose/generate-compose`, {
+      method: "POST",
+      body: JSON.stringify({ prompt: "用历史生成视频裁切合并 5 秒成片", settings: { duration: "5s", ratio: "16:9 · 720P", contentLanguage: "zh-en", transition: "硬切", audioMode: "统一混音" } })
+    });
+    assert(mergedComposeNode.mergedUrl?.startsWith("/generated/") && mergedComposeNode.composePlan.includes("已用 ffmpeg 完成裁切/合成"), "compose node should trim and merge historical generated MP4 files into a final local MP4");
+    optionalChecks.push("compose-local-mp4");
+  } else {
+    optionalChecks.push("compose-local-mp4-skipped-no-ffmpeg");
+  }
 
   const audioNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_audio/generate-audio`, {
     method: "POST",
@@ -721,7 +782,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "dapot-brand-profile", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "compose", "audio", "generate", "task", "canvas", "export"],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "dapot-brand-profile", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "compose", "audio", "generate", "task", "canvas", "export", ...optionalChecks],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));

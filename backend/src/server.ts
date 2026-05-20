@@ -4039,6 +4039,9 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
       imageUrl: firstFrameUrl
     }] : [])
   ];
+  const effectiveVideoMode = firstFrameUrl || videoPromptRefs.some((reference) => reference.imageUrl)
+    ? "图生视频"
+    : settings.mode ?? "文生视频";
   const modelDurationSettings = { ...settings, duration: `${segmentPlan[0]?.modelSeconds ?? videoModelClipSeconds()}s` };
   const prompt = executableVideoPrompt(sourcePrompt, contextBrand, modelDurationSettings, videoPromptRefs);
   let generationLines: string[] = [];
@@ -4050,7 +4053,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
     const segmentResults: VideoRunResult[] = [];
     for (const segment of segmentPlan) {
       const segmentFirstFrame = generatedKeyframeRefs[segment.index]?.imageUrl ?? firstFrameUrl;
-      const segmentSettings = { ...settings, duration: `${segment.modelSeconds}s`, mode: firstFrameUrl ? "图生视频" : settings.mode };
+      const segmentSettings = { ...settings, duration: `${segment.modelSeconds}s`, mode: effectiveVideoMode };
       const segmentPrompt = [
         executableVideoPrompt(sourcePrompt, contextBrand, segmentSettings, videoPromptRefs),
         `Segment ${segment.index + 1}/${segmentPlan.length}: generate a ${segment.modelSeconds}s source clip for final ${segment.targetSeconds}s${segment.trim ? "; final editor trims the beginning to target duration" : ""}.`,
@@ -4096,7 +4099,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
     "分镜规范:",
     videoStoryboardBrief(sourcePrompt, contextBrand, videoPromptRefs, settings),
     "",
-    `视频类型: ${settings.mode ?? "文生视频"}`,
+    `视频类型: ${effectiveVideoMode}`,
     `模型: ${input.model ?? serviceConfig("video").model}`,
     `规格: ${settings.ratio ?? "16:9 · 720P"}`,
     `语言: ${contentLanguageLabel(settings.contentLanguage ?? frame.settings.contentLanguage)}`,
@@ -4217,6 +4220,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-compose", async (req, res) =
   const videoOutputs = frame.outputs.filter((output) => output.kind === "video");
   const segmentUrls = [
     ...videoOutputs.flatMap((output) => output.videoUrl ? [output.videoUrl] : []),
+    ...(node.refs ?? []).map((reference) => reference.imageUrl ?? "").filter((url) => /\.mp4($|\?)/i.test(url)),
     ...videoNodes.flatMap((item) => (item.refs ?? []).map((reference) => reference.imageUrl ?? "").filter((url) => /\.mp4($|\?)/i.test(url)))
   ].filter((url, index, list) => url && list.indexOf(url) === index);
   const mergedUrl = segmentUrls.length >= segmentPlan.length ? await composeLocalVideos(segmentUrls, segmentPlan, `xmanx-${frame.id}-${node.id}-merged`) : "";
