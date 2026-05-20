@@ -589,6 +589,26 @@ try {
   assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id === "output-mp4" && node.refs?.some((ref) => ref.imageUrl)), "MP4 output node should show a preview reference");
   assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "video" && /MP4|视频/.test(output.copy)), "MP4 output should record video execution status");
   assert(multiOutputCompleted.frame.steps.some((step) => step.includes("PDF") && step.includes("MP4")), "workflow steps should mention requested PDF and MP4 outputs");
+  const longVideoGenerated = await request("/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "@imgen /生成视频 使用 $logo $ip，为 xmanx 生成 20 秒品牌短视频 -> mp4",
+      mode: "magic",
+      modelId: "imgen-skill",
+      outputTarget: "mp4",
+      orientation: "landscape",
+      settings: { ratio: "16:9", count: 1, quality: "hd", strength: 70, duration: 20, contentLanguage: "zh-en" },
+      x: 320,
+      y: 260
+    })
+  });
+  const longVideoCompleted = await waitForTask(longVideoGenerated.taskId);
+  const segmentNodes = longVideoCompleted.frame.workflowNodes.filter((node) => node.type === "video" && node.id.includes("-seg-"));
+  const composeGraphNode = longVideoCompleted.frame.workflowNodes.find((node) => node.type === "compose" && node.id.startsWith("compose-mp4"));
+  const scriptGraphNode = longVideoCompleted.frame.workflowNodes.find((node) => node.type === "script" && node.id.startsWith("script-mp4"));
+  assert(segmentNodes.length >= 2, "20s MP4 workflow should create at least two video segment nodes");
+  assert(scriptGraphNode && segmentNodes.every((node) => node.parentId === scriptGraphNode.id), "video segments should fan out from the script node instead of chaining segment to segment");
+  assert(composeGraphNode?.inputIds?.length === segmentNodes.length && composeGraphNode.inputIds.every((id) => segmentNodes.some((node) => node.id === id)), "compose node should explicitly merge all video segment inputs");
   const mp4OutputNode = await request(`/canvas/frames/${multiOutputCompleted.frame.id}/nodes/output-mp4/generate-video`, {
     method: "POST",
     body: JSON.stringify({ prompt: "刷新 MP4 输出任务", model: "grok-imagine-1.0-video-super-720p", settings: { mode: "图生视频", ratio: "16:9 · 720P", duration: "5s", sound: true, translate: false, contentLanguage: "zh-th" } })

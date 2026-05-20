@@ -100,6 +100,7 @@ type WorkflowNode = {
   title: string;
   body: string;
   parentId?: string;
+  inputIds?: string[];
   preview?: string;
   refs?: ReferenceItem[];
   edgeOffsetY?: number;
@@ -681,8 +682,10 @@ function defaultWorkflowNodes(): WorkflowNode[] {
 }
 
 function normalizeWorkflowNodes(nodes: WorkflowNode[] = [], withDefaults = true): WorkflowNode[] {
-  const sourceNodes = nodes.filter((node) => node.id !== "model");
-  const defaults = withDefaults ? defaultWorkflowNodes() : [];
+  const rawSourceNodes = nodes.filter((node) => node.id !== "model");
+  const hasCustomOutput = rawSourceNodes.some((node) => node.type === "output" && node.id !== "output");
+  const sourceNodes = rawSourceNodes.filter((node) => !(node.id === "output" && hasCustomOutput));
+  const defaults = withDefaults ? defaultWorkflowNodes().filter((node) => !(node.id === "output" && hasCustomOutput)) : [];
   const merged = defaults.map((node) => {
     const next = { ...node, ...(sourceNodes.find((item) => item.id === node.id) ?? {}) };
     return next.id === "output" && next.parentId === "model" ? { ...next, parentId: "prompt" } : next;
@@ -747,16 +750,29 @@ function displayNodes(nodes: WorkflowNode[], withDefaults = true) {
 function graphEdges(nodes: WorkflowNode[]): GraphEdge[] {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const edges: GraphEdge[] = [];
+  const seen = new Set<string>();
+  const pushEdge = (from: WorkflowNode, to: WorkflowNode) => {
+    const id = `${from.id}-${to.id}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    edges.push({ from, to, id });
+  };
   for (let index = 0; index < nodeOrder.length - 1; index += 1) {
     const from = byId.get(nodeOrder[index]);
     const to = byId.get(nodeOrder[index + 1]);
-    if (from && to) edges.push({ from, to, id: `${from.id}-${to.id}` });
+    if (from && to) pushEdge(from, to);
   }
   nodes.forEach((node) => {
     if (coreNodeIds.includes(node.id)) return;
-    if (!node.parentId) return;
+    if (node.inputIds?.length) {
+      node.inputIds.forEach((inputId) => {
+        const from = byId.get(inputId);
+        if (from) pushEdge(from, node);
+      });
+    }
+    if (!node.parentId || node.inputIds?.includes(node.parentId)) return;
     const from = byId.get(node.parentId);
-    if (from) edges.push({ from, to: node, id: `${from.id}-${node.id}` });
+    if (from) pushEdge(from, node);
   });
   return edges;
 }
@@ -2470,7 +2486,14 @@ function Canvas(props: {
     const nextParentId = deleted?.parentId;
     const next = nodesRef.current
       .filter((node) => node.id !== id)
-      .map((node) => node.parentId === id ? { ...node, parentId: nextParentId } : node);
+      .map((node) => {
+        const nextInputs = node.inputIds?.filter((inputId) => inputId !== id);
+        return {
+          ...node,
+          parentId: node.parentId === id ? nextParentId : node.parentId,
+          inputIds: nextInputs?.length ? nextInputs : undefined
+        };
+      });
     nodesRef.current = next;
     setNodes(next);
     if (selectedNode === id) setSelectedNode(null);
@@ -2606,15 +2629,48 @@ function Canvas(props: {
 
   function organizeCanvas() {
     const normalized = normalizeWorkflowNodes(nodesRef.current, shouldUseDefaultWorkflow(nodesRef.current));
-    const next = normalized.map((node, index) => {
-      const depth = node.id === "input-image" ? 0 : node.id === "brand" ? 1 : node.id === "prompt" ? 2 : node.id === "output" ? 3 : Math.max(1, normalized.findIndex((item) => item.id === node.parentId) + 1);
-      const siblings = normalized.filter((item) => (item.parentId ?? "") === (node.parentId ?? "") && !coreNodeIds.includes(item.id));
-      const siblingIndex = siblings.findIndex((item) => item.id === node.id);
-      const row = coreNodeIds.includes(node.id) ? 0 : Math.max(0, siblingIndex);
+    const byId = new Map(normalized.map((node) => [node.id, node]));
+    const depthCache = new Map<string, number>();
+    const depthOf = (node: WorkflowNode, trail = new Set<string>()): number => {
+      if (node.id === "input-image") return 0;
+      if (node.id === "brand") return 1;
+      if (node.id === "prompt") return 2;
+      const cached = depthCache.get(node.id);
+      if (typeof cached === "number") return cached;
+      if (trail.has(node.id)) return 3;
+      trail.add(node.id);
+      const parentIds = [...(node.inputIds ?? []), ...(node.parentId ? [node.parentId] : [])]
+        .filter((parentId) => parentId && byId.has(parentId));
+      const depth = parentIds.length
+        ? Math.max(...parentIds.map((parentId) => depthOf(byId.get(parentId)!, new Set(trail)))) + 1
+        : 3;
+      depthCache.set(node.id, depth);
+      return depth;
+    };
+    const depths = normalized.map((node) => ({ node, depth: depthOf(node) }));
+    const columns = new Map<number, WorkflowNode[]>();
+    depths.forEach(({ node, depth }) => {
+      columns.set(depth, [...(columns.get(depth) ?? []), node]);
+    });
+    const rowById = new Map<string, number>();
+    Array.from(columns.entries()).forEach(([depth, column]) => {
+      const sorted = [...column].sort((a, b) => {
+        const ay = typeof a.y === "number" ? a.y : 0;
+        const by = typeof b.y === "number" ? b.y : 0;
+        return ay - by || normalized.findIndex((item) => item.id === a.id) - normalized.findIndex((item) => item.id === b.id);
+      });
+      sorted.forEach((node, row) => rowById.set(node.id, row));
+      columns.set(depth, sorted);
+    });
+    const next = normalized.map((node) => {
+      const depth = depthCache.get(node.id) ?? depthOf(node);
+      const row = rowById.get(node.id) ?? 0;
+      const columnSize = columns.get(depth)?.length ?? 1;
+      const yBase = Math.max(80, 230 - ((columnSize - 1) * 300) / 2);
       return {
         ...node,
-        x: 88 + depth * 310,
-        y: coreNodeIds.includes(node.id) ? 190 + index * 36 : 160 + row * 286,
+        x: 88 + depth * 340,
+        y: yBase + row * 300,
         edgeOffsetY: 0
       };
     });
@@ -2626,6 +2682,11 @@ function Canvas(props: {
   const edges = graphEdges(visibleNodes);
   const outputNodes = visibleNodes.filter((node) => node.type === "output");
   const refs = nodes.find((node) => node.id === "input-image")?.refs ?? [];
+  const worldSize = useMemo(() => {
+    const maxX = Math.max(2200, ...visibleNodes.map((node) => (node.x ?? 0) + (node.w ?? 230) + 180));
+    const maxY = Math.max(900, ...visibleNodes.map((node) => (node.y ?? 0) + (node.h ?? 238) + 180));
+    return { width: maxX, height: maxY };
+  }, [visibleNodes]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -2647,6 +2708,40 @@ function Canvas(props: {
     if (Math.abs(event.deltaY) < 2) return;
     const direction = event.deltaY > 0 ? -1 : 1;
     props.setViewport((current) => ({ ...current, scale: Math.min(1.6, Math.max(0.32, current.scale + direction * 0.06)) }));
+  }
+
+  function fitCanvas() {
+    const domNodes = Array.from(document.querySelectorAll<HTMLElement>(".rh-node")).map((element) => ({
+      x: Number.parseFloat(element.style.left || "0"),
+      y: Number.parseFloat(element.style.top || "0"),
+      w: Number.parseFloat(element.style.width || "230"),
+      h: Number.parseFloat(element.style.minHeight || element.style.height || "238")
+    })).filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y));
+    const fitNodes = domNodes.length ? domNodes : visibleNodes.map((node) => ({
+      x: node.x ?? 0,
+      y: node.y ?? 0,
+      w: node.w ?? 230,
+      h: node.h ?? 238
+    }));
+    if (!fitNodes.length) {
+      props.setViewport({ x: 76, y: 64, scale: window.innerWidth < 800 ? 0.42 : 0.72 });
+      return;
+    }
+    const rect = document.querySelector(".rh-canvas")?.getBoundingClientRect();
+    const viewportWidth = rect?.width ?? window.innerWidth;
+    const viewportHeight = rect?.height ?? window.innerHeight;
+    const minX = Math.min(...fitNodes.map((node) => node.x));
+    const minY = Math.min(...fitNodes.map((node) => node.y));
+    const maxX = Math.max(...fitNodes.map((node) => node.x + node.w));
+    const maxY = Math.max(...fitNodes.map((node) => node.y + node.h));
+    const usableWidth = Math.max(360, viewportWidth - 170);
+    const usableHeight = Math.max(260, viewportHeight - 280);
+    const scale = Math.min(0.86, Math.max(0.24, Math.min(usableWidth / Math.max(1, maxX - minX), usableHeight / Math.max(1, maxY - minY))));
+    props.setViewport({
+      x: Math.round(84 - minX * scale),
+      y: Math.round(96 - minY * scale),
+      scale
+    });
   }
 
   return (
@@ -2697,7 +2792,7 @@ function Canvas(props: {
             </div>
           </div>
         )}
-        <svg className="rh-lines" viewBox="0 0 2200 900">
+        <svg className="rh-lines" viewBox={`0 0 ${worldSize.width} ${worldSize.height}`}>
           {edges.map((edge) => {
             const x1 = (edge.from.x ?? 0) + (edge.from.w ?? 230);
             const y1 = (edge.from.y ?? 0) + 118;
@@ -2789,7 +2884,7 @@ function Canvas(props: {
         <button type="button" title="缩小" onClick={() => props.setViewport((current) => ({ ...current, scale: Math.max(0.32, current.scale - 0.08) }))}><ZoomOut /></button>
         <strong>{Math.round(props.viewport.scale * 100)}%</strong>
         <button type="button" title="放大" onClick={() => props.setViewport((current) => ({ ...current, scale: Math.min(1.6, current.scale + 0.08) }))}><ZoomIn /></button>
-        <button type="button" title="适配" onClick={() => props.setViewport({ x: 76, y: 64, scale: window.innerWidth < 800 ? 0.42 : 0.72 })}><Maximize2 /></button>
+        <button type="button" title="适配" onClick={fitCanvas}><Maximize2 /></button>
       </div>
       {canvasMenu && (
         <div className="rh-canvas-menu" style={{ left: canvasMenu.x, top: canvasMenu.y }} onPointerDown={(event) => event.stopPropagation()}>

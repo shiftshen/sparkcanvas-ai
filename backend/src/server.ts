@@ -94,6 +94,7 @@ type WorkflowNode = {
   title: string;
   body: string;
   parentId?: string;
+  inputIds?: string[];
   preview?: string;
   refs?: ReferenceItem[];
   edgeOffsetY?: number;
@@ -277,6 +278,7 @@ const workflowNodeSchema = z.object({
   title: z.string().min(1),
   body: z.string(),
   parentId: z.string().optional(),
+  inputIds: z.array(z.string()).optional(),
   preview: z.string().optional(),
   edgeOffsetY: z.number().optional(),
   refs: z.array(z.object({
@@ -1123,6 +1125,10 @@ async function migrateDb() {
     const beforeAutoReferenceCleanup = frame.workflowNodes.length;
     frame.workflowNodes = frame.workflowNodes.filter((node) => !node.id.startsWith("ref-") && node.id !== "model");
     if (frame.workflowNodes.length !== beforeAutoReferenceCleanup) changed = true;
+    if (frame.workflowNodes.some((node) => node.type === "output" && node.id !== "output") && frame.workflowNodes.some((node) => node.id === "output")) {
+      frame.workflowNodes = frame.workflowNodes.filter((node) => node.id !== "output");
+      changed = true;
+    }
     const outputNode = frame.workflowNodes.find((node) => node.id === "output");
     if (outputNode?.parentId === "model") {
       outputNode.parentId = "prompt";
@@ -3176,6 +3182,12 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
       const scriptNodeId = `script-${target}-${index}`;
       const videoNodeId = `video-${target}-${index}`;
       const composeNodeId = `compose-${target}-${index}`;
+      const segmentNodeIds = segmentPlan.map((segment) => `${videoNodeId}-seg-${segment.index + 1}`);
+      const segmentColumnX = nextX + 430;
+      const composeX = segmentColumnX + 360;
+      const segmentStartY = Math.max(90, 360 - (segmentPlan.length - 1) * 145);
+      const segmentGapY = 300;
+      const composeY = segmentStartY + ((segmentPlan.length - 1) * segmentGapY) / 2;
       nodes.push({
         id: scriptNodeId,
         type: "script",
@@ -3193,16 +3205,16 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
       if (needsCompose) {
         segmentPlan.forEach((segment) => {
           nodes.push({
-            id: `${videoNodeId}-seg-${segment.index + 1}`,
+            id: segmentNodeIds[segment.index],
             type: "video",
             title: `视频片段 ${segment.index + 1}/${segmentPlan.length}`,
             body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 第 ${segment.index + 1} 段图生视频，模型固定生成 ${segment.modelSeconds}s，最终使用 ${segment.targetSeconds}s${segment.trim ? "，进入合成节点后裁切" : ""}。每段单独使用关键帧、旁白/配音提示和同一品牌约束。`,
-            parentId: segment.index === 0 ? scriptNodeId : `${videoNodeId}-seg-${segment.index}`,
+            parentId: scriptNodeId,
             preview: "#111827",
             refs: referenceItems,
-            x: nextX + 420 + segment.index * 285,
-            y: 400,
-            w: 260,
+            x: segmentColumnX,
+            y: segmentStartY + segment.index * segmentGapY,
+            w: 280,
             h: 260
           });
         });
@@ -3211,12 +3223,13 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
           type: "compose",
           title: "视频合成剪辑",
           body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 最终成片 ${durationSeconds}s；模型固定 ${videoModelClipSeconds()}s/段；${videoSegmentSummary(durationSeconds)}。统一音乐床、旁白音色、音量、字幕语言、转场节奏和品牌收尾；避免看出两个不配套的视频。`,
-          parentId: `${videoNodeId}-seg-${segmentPlan.length}`,
+          parentId: scriptNodeId,
+          inputIds: segmentNodeIds,
           preview: "#0f766e",
           refs: referenceItems,
-          x: nextX + 420 + segmentPlan.length * 285,
-          y: 400,
-          w: 300,
+          x: composeX,
+          y: composeY,
+          w: 320,
           h: 260
         });
         parentForVideoOutput = composeNodeId;
@@ -3242,8 +3255,8 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
         body: `最终交付 ${labelForOutputTarget(target)}。来源: ${parentForVideoOutput}。`,
         parentId: parentForVideoOutput,
         preview: "#0f172a",
-        x: needsCompose ? nextX + 760 + segmentPlan.length * 285 : nextX + 730,
-        y: 400,
+        x: needsCompose ? composeX + 390 : nextX + 730,
+        y: needsCompose ? composeY : 400,
         w: 250,
         h: 260
       });

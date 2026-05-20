@@ -1857,9 +1857,9 @@ svg {
 
 .rh-canvas-controls {
   position: fixed;
-  left: 16px;
-  bottom: 16px;
-  z-index: 43;
+  left: 104px;
+  bottom: 212px;
+  z-index: 72;
   display: inline-grid;
   grid-auto-flow: column;
   align-items: center;
@@ -5035,7 +5035,7 @@ svg {
 
   .rh-canvas-controls {
     left: 70px;
-    bottom: 10px;
+    bottom: 206px;
     max-width: calc(100vw - 84px);
     overflow-x: auto;
   }
