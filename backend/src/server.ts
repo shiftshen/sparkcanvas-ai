@@ -192,7 +192,7 @@ const dataDir = path.resolve(__dirname, "../data");
 const dataFile = process.env.SPARKCANVAS_DATA_FILE ?? path.join(dataDir, "sparkcanvas.json");
 const projectRoot = path.resolve(__dirname, "../..");
 const frontendPublicDir = path.join(projectRoot, "frontend", "public");
-const generatedDir = path.join(frontendPublicDir, "generated");
+const generatedDir = process.env.SPARKCANVAS_GENERATED_DIR ?? path.join(frontendPublicDir, "generated");
 const defaultAiBaseUrl = "https://api.yijiarj.cn/v1";
 const defaultImageGenBaseUrl = defaultAiBaseUrl;
 
@@ -745,6 +745,11 @@ function assetMatchesPath(asset: Asset, pathKey: string) {
   return rest.length === 0 || rest.every((part) => text.includes(part.replace(/_/g, " ")));
 }
 
+function replaceCalToken(prompt: string, raw: string, replacement: string) {
+  const pattern = new RegExp(`${escapeRegExp(raw)}(?![\\p{L}\\p{N}_.-])`, "gu");
+  return prompt.replace(pattern, replacement);
+}
+
 function resolvePromptAssets(prompt: string, currentBrand?: Brand): ResolvedPromptAssets {
   prompt = normalizeLegacyPromptRefs(prompt);
   const refs = parsePromptAssetRefs(prompt, currentBrand);
@@ -779,7 +784,7 @@ function resolvePromptAssets(prompt: string, currentBrand?: Brand): ResolvedProm
         brand.forbiddenWords?.length ? `禁用: ${brand.forbiddenWords.join(", ")}` : ""
       ].filter(Boolean).join("；");
       textReferences.push({ key: `${brandKey(brand)}.brand_package`, value: brandValue, raw: ref.raw });
-      expandedPrompt = expandedPrompt.split(ref.raw).join(`参考品牌 ${brand.name} 的完整品牌素材、视觉风格和文案约束`);
+      expandedPrompt = replaceCalToken(expandedPrompt, ref.raw, `参考品牌 ${brand.name} 的完整品牌素材、视觉风格和文案约束`);
       continue;
     }
     if (ref.type === "text") {
@@ -789,7 +794,7 @@ function resolvePromptAssets(prompt: string, currentBrand?: Brand): ResolvedProm
         continue;
       }
       textReferences.push({ key: ref.fullKey, value, raw: ref.raw });
-      expandedPrompt = expandedPrompt.split(ref.raw).join(`"${value}"`);
+      expandedPrompt = replaceCalToken(expandedPrompt, ref.raw, `"${value}"`);
       continue;
     }
 
@@ -806,7 +811,7 @@ function resolvePromptAssets(prompt: string, currentBrand?: Brand): ResolvedProm
       color: asset.color,
       imageUrl: asset.imageUrl
     });
-    expandedPrompt = expandedPrompt.split(ref.raw).join(`参考图片 ${ref.fullKey}（${asset.title}）`);
+    expandedPrompt = replaceCalToken(expandedPrompt, ref.raw, `参考图片 ${ref.fullKey}（${asset.title}）`);
   }
 
   const ast: CalAst = {
@@ -2887,6 +2892,9 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
   const brand = frameBrand(frame);
   const colors = neutralBrandColor(brand);
   const selectedModel = models.find((item) => item.id === input.modelId) ?? models.find((item) => item.id === frame.modelId) ?? models[0];
+  if (selectedModel.type !== "image") {
+    return res.status(400).json({ message: "Selected model is not an image generation model" });
+  }
   if (input.settings) {
     frame.settings = { ...defaultSettings(frame.prompt, frame.settings), ...input.settings };
   }
@@ -2895,7 +2903,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
     ...(node.parentId ? (frame.workflowNodes.find((item) => item.id === node.parentId)?.refs ?? []) : []),
     ...(node.refs ?? [])
   ].filter((reference, index, list) => list.findIndex((item) => item.id === reference.id) === index);
-  const shouldInjectBrand = Boolean(input.settings?.brandInject);
+  const shouldInjectBrand = input.settings?.brandInject ?? frame.settings.brandInject;
   const executablePrompt = executableImagePrompt(input.prompt?.trim() || node.body || frame.prompt, Boolean(brand && shouldInjectBrand) ? brand : undefined, node.title || "canvas image", frame.settings);
   const outputName = `node-${frame.id}-${node.id}-${Date.now().toString(36)}`;
   let imageUrl = fallbackImageDataUrl("Skill unavailable");

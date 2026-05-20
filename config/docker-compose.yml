@@ -19,6 +19,8 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=4100
+      - SPARKCANVAS_DATA_FILE=/app/data/sparkcanvas.json
+      - SPARKCANVAS_GENERATED_DIR=/app/data/generated
       - PUBLIC_URL=https://xmanx.com
       - API_BASE_URL=https://xmanx.com/api
       - YIJIARJ_BASE_URL=${YIJIARJ_BASE_URL:-https://api.yijiarj.cn/v1}

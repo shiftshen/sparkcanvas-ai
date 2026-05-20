@@ -1131,8 +1131,9 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!frames.some((frame) => frame.status === "generating")) return;
-    const timer = window.setInterval(() => void loadWorkspace(), 700);
+    const shouldRefresh = frames.some((frame) => frame.status === "generating" || frame.outputs.some((output) => output.kind === "video" && output.videoId && !output.videoUrl));
+    if (!shouldRefresh) return;
+    const timer = window.setInterval(() => void loadWorkspace(), 1400);
     return () => window.clearInterval(timer);
   }, [frames]);
 
@@ -1482,6 +1483,7 @@ function App() {
           assets={assets}
           aiStatus={aiStatus}
           aiDiagnostics={aiDiagnostics}
+          credits={user.credits}
           onGenerate={(controls, promptOverride) => void generate(promptOverride ?? prompt, undefined, controls)}
           onCreateProject={() => void createProject({ brandId: projectBrand?.id ?? null })}
           onUpdateFrame={(patch) => activeFrame && void updateFrame(activeFrame.id, patch)}
@@ -1953,6 +1955,12 @@ function Canvas(props: {
     return node;
   }
 
+  function closeNodeEditor() {
+    setSelectedNode(null);
+    props.setEditingNodeId(null);
+    setNodeGeneration(null);
+  }
+
   function updateNode(id: string, patch: Partial<WorkflowNode>, save = false) {
     setNodes((current) => {
       const next = current.map((node) => node.id === id ? { ...node, ...patch } : node);
@@ -2157,14 +2165,14 @@ function Canvas(props: {
           <Wand2 />
           <div><strong>元素选择模式</strong><small>{activeSelectedNode.type === "reference" || activeSelectedNode.type === "image" || activeSelectedNode.type === "output" ? "点击图片预览，底部编辑生成参数" : "底部固定面板可编辑当前节点"}</small></div>
           <button type="button" onClick={() => props.setEditingNodeId(activeSelectedNode.id)}><Route />返回节点</button>
-          <button type="button" onClick={() => { setSelectedNode(null); props.setEditingNodeId(null); }}><X />退出</button>
+          <button type="button" onClick={closeNodeEditor}><X />退出</button>
         </div>
       )}
       <section className="rh-world" style={{ transform: `translate(${props.viewport.x}px, ${props.viewport.y}px) scale(${props.viewport.scale})` }}>
         {props.frame && (
           <div className="rh-project-title">
-            <strong>{props.frame.settings?.brandInject ? `${props.frame.brandName || props.activeBrand?.name || "Brand"} Canvas` : props.frame.title}</strong>
-            <small>{props.frame.status === "generating" ? `Generating ${props.frame.progress}%` : `${props.frame.settings?.brandInject ? "品牌启用" : "品牌关闭"} · Ready`}</small>
+            <strong>{props.frame.title}</strong>
+            <small>{props.frame.status === "generating" ? `Generating ${props.frame.progress}%` : `品牌: ${props.frame.brandName || props.activeBrand?.name || "无"} · ${props.frame.settings?.brandInject ? "自动注入" : "仅显式引用"} · Ready`}</small>
           </div>
         )}
         {props.frame && visibleNodes.length === 0 && (
@@ -2286,7 +2294,7 @@ function Canvas(props: {
             frameSettings={props.frame?.settings ?? defaultSettings}
             framePrompt={props.frame?.prompt ?? ""}
             output={nodes.find((node) => node.id === props.editingNodeId)?.type === "output" && props.editingNodeId ? outputForNode(props.frame, outputNodes, props.editingNodeId) : undefined}
-            onClose={() => props.setEditingNodeId(null)}
+            onClose={closeNodeEditor}
             onSave={(patch) => props.editingNodeId && saveNode(props.editingNodeId, patch)}
             onGenerate={(nodePrompt, modelId, settings) => {
               if (!props.editingNodeId) return;
@@ -3174,6 +3182,7 @@ function BottomComposer(props: {
   assets: Asset[];
   aiStatus: AiStatus | null;
   aiDiagnostics: AiDiagnostics | null;
+  credits: number;
   onGenerate: (controls: WorkflowControls, promptOverride?: string) => void;
   onCreateProject: () => void;
   onUpdateFrame: (patch: Partial<Pick<Frame, "settings" | "modelId">> & { brandId?: string | null; brandInject?: boolean }) => void;
@@ -3239,15 +3248,35 @@ function BottomComposer(props: {
   const referencePreview = buildPromptReferencePreview(props.prompt, mentionItems);
   const filteredMentionItems = filterMentionItems(mentionItems, props.prompt).slice(0, 10);
   const activeQuery = activeReferenceQuery(props.prompt);
+  const selectedBrandName = props.frame?.brandId
+    ? props.brands.find((brand) => brand.id === props.frame?.brandId)?.name ?? props.activeBrand?.name ?? "Brand"
+    : "无品牌";
+  const hasPrompt = Boolean(props.prompt.trim());
+  const isGenerating = props.frame?.status === "generating";
+  const generateBlockReason = !hasPrompt
+    ? "请输入一句自然语言或 CAL 指令"
+    : props.credits <= 0
+      ? "积分不足，无法提交生成任务"
+      : isGenerating
+        ? `当前画布生成中 ${props.frame?.progress ?? 0}%`
+        : "";
+  const canGenerate = !generateBlockReason;
   function insertMention(item: MentionItem) {
     props.setPrompt(insertReferenceToken(props.prompt, item.token));
   }
   function updateProjectBrand(brandId: string) {
     const hasBrand = Boolean(brandId);
+    const nextInject = hasBrand ? (props.frame?.brandId ? settings.brandInject : true) : false;
     props.onUpdateFrame({
       brandId: hasBrand ? brandId : null,
-      settings: { ...settings, brandInject: hasBrand },
-      brandInject: hasBrand
+      settings: { ...settings, brandInject: nextInject },
+      brandInject: nextInject
+    });
+  }
+  function updateBrandInject(enabled: boolean) {
+    props.onUpdateFrame({
+      settings: { ...settings, brandInject: Boolean(props.frame?.brandId && enabled) },
+      brandInject: Boolean(props.frame?.brandId && enabled)
     });
   }
   async function optimizeCurrentPrompt() {
@@ -3270,7 +3299,7 @@ function BottomComposer(props: {
     }
   }
   async function generateWithOptimization() {
-    if (!props.prompt.trim()) return;
+    if (!canGenerate) return;
     const shouldOptimize = !workflowMode || !/->/.test(props.prompt);
     const nextPrompt = shouldOptimize ? await optimizeCurrentPrompt() : props.prompt;
     props.onGenerate({ outputTarget, orientation, preset: currentPreset.id }, nextPrompt || props.prompt);
@@ -3310,6 +3339,15 @@ function BottomComposer(props: {
           <option value="">无品牌</option>
           {props.brands.map((brand) => <option value={brand.id} key={brand.id}>{brand.name}</option>)}
         </select>
+        <button
+          type="button"
+          className={`rh-brand-inject ${settings.brandInject ? "active" : ""}`}
+          onClick={() => updateBrandInject(!settings.brandInject)}
+          disabled={!props.frame?.brandId}
+          title={props.frame?.brandId ? `项目品牌：${selectedBrandName}。${settings.brandInject ? "生成时自动注入完整品牌上下文" : "只使用提示词里显式 $ 引用的品牌素材"}` : "未绑定项目品牌"}
+        >
+          <Palette />{settings.brandInject ? "注入" : "显式"}
+        </button>
         <select value={outputTarget} onChange={(event) => updateOutputTarget(event.target.value as WorkflowOutputTarget)} title="输出文件格式">
           <option value="jpg">JPG</option>
           <option value="png">PNG</option>
@@ -3322,7 +3360,7 @@ function BottomComposer(props: {
         </select>
         <button type="button" className="rh-optimize" onClick={() => void optimizeCurrentPrompt()} disabled={optimizing || !props.prompt.trim()} title="把自然语言优化为 CAL 工作流"><Wand2 />{optimizing ? "优化中" : "优化"}</button>
         <button type="button" className="rh-advanced-toggle" onClick={() => setAdvancedOpen((value) => !value)} title="高级参数"><SlidersHorizontal /></button>
-        <button type="button" className="rh-send" onClick={() => void generateWithOptimization()} title={`生成当前画布，结果进入输出节点：${referencePreview.images.length} 张参考图 / ${referencePreview.texts.length} 个文本字段`}><Send /></button>
+        <button type="button" className="rh-send" onClick={() => void generateWithOptimization()} disabled={!canGenerate || optimizing} title={generateBlockReason || `生成当前画布，结果进入输出节点：${referencePreview.images.length} 张参考图 / ${referencePreview.texts.length} 个文本字段`}><Send /></button>
       </div>
       {advancedOpen && (
         <div className="rh-composer-advanced">
@@ -3337,6 +3375,8 @@ function BottomComposer(props: {
         <span>
           {props.frame?.status === "generating"
             ? `生成中 ${props.frame.progress}% · 完成后显示在输出图节点`
+            : generateBlockReason
+              ? generateBlockReason
             : props.frame?.outputs?.some((output) => output.imageUrl)
               ? "已生成 · 图片显示在画布输出图节点"
             : props.aiDiagnostics?.runtime.helpOk

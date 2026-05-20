@@ -3990,6 +3990,7 @@ svg {
 
 .rh-composer-row select,
 .rh-brand-select,
+.rh-brand-inject,
 .rh-optimize,
 .rh-advanced-toggle,
 .rh-composer-slider,
@@ -4011,6 +4012,10 @@ svg {
   flex-basis: 108px;
 }
 
+.rh-brand-inject {
+  flex: 0 0 76px;
+}
+
 .rh-composer-row .rh-preset-select {
   flex: 1 1 236px;
   min-width: 188px;
@@ -4026,6 +4031,7 @@ svg {
 }
 
 .rh-optimize,
+.rh-brand-inject,
 .rh-advanced-toggle {
   display: inline-flex;
   align-items: center;
@@ -4039,9 +4045,16 @@ svg {
 }
 
 .rh-optimize svg,
+.rh-brand-inject svg,
 .rh-advanced-toggle svg {
   width: 15px;
   height: 15px;
+}
+
+.rh-brand-inject.active {
+  color: #bbf7d0;
+  background: rgba(22, 163, 74, 0.18);
+  border-color: rgba(74, 222, 128, 0.28);
 }
 
 .rh-composer-advanced {
@@ -4333,14 +4346,14 @@ svg {
 @media (max-width: 900px) {
   .rh-composer {
     left: 64px !important;
-    right: 10px !important;
+    right: 8px !important;
     bottom: 10px !important;
     width: auto !important;
     height: auto !important;
-    min-height: 124px !important;
+    min-height: 136px !important;
     transform: none;
     grid-template-columns: 48px minmax(0, 1fr) !important;
-    grid-template-rows: 48px auto 8px !important;
+    grid-template-rows: 64px auto 8px !important;
     overflow: visible;
   }
 
@@ -4351,9 +4364,26 @@ svg {
   }
 
   .rh-composer-row {
-    grid-template-columns: repeat(8, max-content);
+    display: grid !important;
+    grid-template-columns: minmax(96px, 1fr) minmax(82px, 0.75fr) 42px 42px !important;
     overflow-x: auto !important;
     padding-bottom: 2px;
+  }
+
+  .rh-composer-row .rh-brand-select,
+  .rh-composer-row .rh-preset-select,
+  .rh-composer-row .rh-brand-inject,
+  .rh-composer-row .rh-workflow-pill {
+    display: none !important;
+  }
+
+  .rh-composer-row select,
+  .rh-optimize,
+  .rh-advanced-toggle,
+  .rh-composer .rh-send {
+    flex: none !important;
+    width: 100% !important;
+    min-width: 0 !important;
   }
 
   .rh-selection-pill {

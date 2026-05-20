@@ -125,6 +125,14 @@ try {
   });
   const invalidGenerateBody = await invalidGenerate.json();
   assert(invalidGenerate.status === 400 && invalidGenerateBody.message === "Invalid request payload", "invalid payloads should return JSON 400 errors");
+  const invalidCount = await fetch(`${baseUrl}/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ prompt: "invalid count", settings: { count: 7 } })
+  });
+  assert(invalidCount.status === 400, "invalid generation settings should return 400");
+  const missingTask = await fetch(`${baseUrl}/tasks/not-found`, { headers: { Authorization: `Bearer ${token}` } });
+  assert(missingTask.status === 404, "missing task should return 404");
 
   const brand = await request("/brands", {
     method: "POST",
@@ -218,6 +226,15 @@ try {
   assert(resolvedRefs.textReferences.some((reference) => reference.key.endsWith(".copy.slogan") && reference.value === brand.slogan), "$copy.slogan should resolve to current brand slogan");
   assert(resolvedRefs.lockedTexts.includes("会员免费锅底") && resolvedRefs.tags.includes("高级感") && resolvedRefs.params["尺寸"] === "1080x1350", "CAL parser should extract locked text, tags and params");
   assert(resolvedRefs.prompt.includes(`"${brand.slogan}"`) && resolvedRefs.finalPrompt.includes("图片资源"), "resolved payload should expand text and keep image reference summary");
+  const prefixRefs = await request("/ai/resolve-references", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "同时参考 $logo 和 $logo.hero",
+      brandId: brand.id,
+      brandInject: false
+    })
+  });
+  assert(prefixRefs.prompt.includes("参考图片") && prefixRefs.prompt.includes("$logo.hero"), "CAL token replacement should not let $logo corrupt $logo.hero");
 
   const legacyRefs = await request("/ai/resolve-references", {
     method: "POST",
@@ -318,6 +335,12 @@ try {
   assert(plainGeneratedNode.node.body.startsWith("马\n模型:"), "plain prompt generation should not prepend brand workflow context");
   assert(!plainGeneratedNode.node.body.includes("XMANX") && !plainGeneratedNode.node.body.includes("xmanx.com"), "plain prompt generation should not include XMANX unless referenced");
   assert(plainGeneratedNode.node.refs?.[0]?.imageUrl?.startsWith("data:image/svg+xml") || plainGeneratedNode.node.refs?.[0]?.imageUrl?.startsWith("/generated/"), "generated image node should keep a displayable image on canvas");
+  const invalidImageModel = await fetch(`${baseUrl}/canvas/frames/${emptyFrame.id}/nodes/${plainImageNode.id}/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ prompt: "马", modelId: "yijiarj-grok-video-720p" })
+  });
+  assert(invalidImageModel.status === 400, "image node generation should reject non-image models");
   const plainAudioNode = {
     id: "node_plain_audio",
     type: "audio",
@@ -549,7 +572,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "brand", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "legacy-reference-alias", "model", "parameters", "workflow-nodes", "output-presets", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "brand", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "model", "model-type-guard", "parameters", "workflow-nodes", "output-presets", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));
