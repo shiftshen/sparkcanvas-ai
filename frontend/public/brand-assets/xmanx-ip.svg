@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="XMANX brand IP reference">
+  <rect width="1200" height="800" fill="#0b0f19"/>
+  <circle cx="600" cy="305" r="150" fill="#f97316"/>
+  <circle cx="600" cy="305" r="116" fill="#111827"/>
+  <rect x="438" y="438" width="324" height="210" rx="74" fill="#f8fafc"/>
+  <rect x="478" y="466" width="244" height="110" rx="32" fill="#111827"/>
+  <circle cx="540" cy="520" r="18" fill="#f97316"/>
+  <circle cx="660" cy="520" r="18" fill="#f97316"/>
+  <path d="M548 560c30 22 74 22 104 0" stroke="#f8fafc" stroke-width="12" fill="none" stroke-linecap="round"/>
+  <path d="M396 518h-78M882 518h-78" stroke="#f97316" stroke-width="24" stroke-linecap="round"/>
+  <path d="M600 190v-70M536 130h128" stroke="#f8fafc" stroke-width="18" stroke-linecap="round"/>
+  <text x="600" y="712" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-size="54" fill="#fff">XM NAVIGATOR</text>
+</svg>

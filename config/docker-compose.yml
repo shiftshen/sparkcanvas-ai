@@ -1,0 +1,31 @@
+services:
+  frontend:
+    image: sparkcanvas-frontend:latest
+    build:
+      context: ../frontend
+    ports:
+      - "80:80"
+    environment:
+      - PUBLIC_URL=https://xmanx.com
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    image: sparkcanvas-backend:latest
+    build:
+      context: ../backend
+    environment:
+      - NODE_ENV=production
+      - PORT=4100
+      - PUBLIC_URL=https://xmanx.com
+      - API_BASE_URL=https://xmanx.com/api
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      - sparkcanvas_data:/app/data
+    expose:
+      - "4100"
+    restart: unless-stopped
+
+volumes:
+  sparkcanvas_data:

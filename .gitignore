@@ -1,0 +1,11 @@
+node_modules
+dist
+frontend/public/generated/
+.env
+.env.*
+auth.json
+config/auth.json
+backend/data/*.json
+frontend/tsconfig.tsbuildinfo
+npm-debug.log*
+.DS_Store

@@ -1,0 +1,5 @@
+{
+  "OPENAI_API_KEY": "sk-your-key",
+  "IMAGE_GEN_BASE_URL": "https://api.otcbot.com/v1",
+  "IMAGE_GEN_MODEL": "gpt-5.4"
+}

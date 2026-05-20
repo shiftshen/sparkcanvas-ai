@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="XMANX model reference">
+  <rect width="1200" height="800" fill="#10131b"/>
+  <rect x="0" y="574" width="1200" height="226" fill="#181c26"/>
+  <circle cx="610" cy="215" r="86" fill="#f2c7a5"/>
+  <path d="M512 330h196l70 276H442l70-276Z" fill="#f8fafc"/>
+  <path d="M512 330h196l32 126H480l32-126Z" fill="#111827"/>
+  <text x="610" y="416" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-size="56" fill="#f97316">XM</text>
+  <path d="M442 606h142v118H424l18-118Zm194 0h142l18 118H636V606Z" fill="#0f172a"/>
+  <path d="M512 340 390 518M708 340l122 178" stroke="#f2c7a5" stroke-width="40" stroke-linecap="round"/>
+  <text x="600" y="84" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-size="42" fill="#fff">FIXED AI MODEL REFERENCE</text>
+</svg>

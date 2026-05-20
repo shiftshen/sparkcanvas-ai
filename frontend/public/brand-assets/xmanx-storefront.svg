@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="XMANX storefront reference">
+  <rect width="1200" height="800" fill="#eef2f7"/>
+  <rect x="92" y="92" width="1016" height="616" rx="34" fill="#fff" stroke="#cbd5e1" stroke-width="10"/>
+  <rect x="92" y="92" width="1016" height="92" rx="34" fill="#111827"/>
+  <text x="162" y="153" font-family="Arial Black, Arial, sans-serif" font-size="42" fill="#fff">XMANX.COM</text>
+  <rect x="144" y="236" width="450" height="330" rx="22" fill="#111827"/>
+  <rect x="644" y="236" width="410" height="82" rx="18" fill="#f97316"/>
+  <rect x="644" y="350" width="350" height="34" rx="17" fill="#cbd5e1"/>
+  <rect x="644" y="410" width="300" height="34" rx="17" fill="#cbd5e1"/>
+  <rect x="644" y="486" width="210" height="70" rx="22" fill="#111827"/>
+  <circle cx="370" cy="398" r="118" fill="#f97316"/>
+  <text x="370" y="421" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-size="66" fill="#fff">XM</text>
+</svg>
