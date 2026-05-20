@@ -3334,9 +3334,32 @@ svg {
   border-radius: 7px;
 }
 
+.rh-video-preview video {
+  width: 100%;
+  max-height: 108px;
+  object-fit: contain;
+  border-radius: 7px;
+  background: #05070d;
+}
+
 .rh-video-preview span {
   color: #d1d5db;
   font-weight: 900;
+  text-align: center;
+  white-space: normal;
+}
+
+.rh-video-preview small {
+  max-width: 100%;
+  color: #9ca3af;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  white-space: normal;
+}
+
+.rh-video-preview small.warning {
+  color: #fca5a5;
 }
 
 .rh-video-editor-footer {
@@ -3918,6 +3941,7 @@ svg {
   padding: 12px !important;
   border-radius: 12px !important;
   background: rgba(33, 33, 32, 0.98) !important;
+  z-index: 260 !important;
 }
 
 .rh-image-editor {
@@ -4195,9 +4219,49 @@ svg {
 .rh-video-editor .rh-video-editor-footer {
   grid-column: 1 / -1 !important;
   grid-row: 4 !important;
-  display: grid !important;
-  grid-template-columns: 150px 142px 38px 1fr 38px 38px auto auto minmax(112px, auto);
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.rh-video-editor .rh-video-editor-footer > select,
+.rh-video-editor .rh-video-editor-footer > button,
+.rh-video-editor .rh-video-editor-footer > small {
+  flex: 0 0 auto;
+}
+
+.rh-video-editor .rh-video-editor-footer > select:nth-of-type(1) {
+  width: 218px;
+}
+
+.rh-video-editor .rh-video-editor-footer > select:nth-of-type(2) {
+  width: 124px;
+}
+
+.rh-video-editor .rh-video-editor-footer > select:nth-of-type(3) {
+  width: 76px;
+}
+
+.rh-video-editor .rh-video-editor-footer > select:nth-of-type(4) {
+  width: 92px;
+}
+
+.rh-video-editor .rh-video-editor-footer > span {
+  flex: 1 0 16px;
+}
+
+.rh-video-editor .rh-video-editor-footer .submit {
+  position: sticky;
+  right: 0;
+  z-index: 3;
+  flex: 0 0 124px;
+  box-shadow: -12px 0 18px rgba(33, 33, 32, 0.86);
 }
 
 .rh-audio-editor {

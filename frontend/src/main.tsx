@@ -103,6 +103,10 @@ type WorkflowNode = {
   inputIds?: string[];
   preview?: string;
   refs?: ReferenceItem[];
+  imageUrl?: string;
+  fileUrl?: string;
+  videoId?: string;
+  videoUrl?: string;
   edgeOffsetY?: number;
   x?: number;
   y?: number;
@@ -633,7 +637,7 @@ function nodeExecutionSummary(node: WorkflowNode, output?: Frame["outputs"][numb
     const segment = firstMatch(text, [/片段\s*(\d+\/\d+)/, /第\s*(\d+)\s*段/]);
     const target = firstMatch(text, [/最终使用\s*(\d+s)/, /final segment target\s*(\d+s)/i]);
     const model = firstMatch(text, [/模型固定(?:生成|单次输出)?\s*(\d+s)/, /model must generate a\s*(\d+s)/i]);
-    const status = output?.videoUrl ? "MP4 已生成" : /任务已创建|videoId|MP4 分段任务/.test(text) ? "等待 MP4 返回" : /失败|failed|error/i.test(text) ? "生成失败" : "未生成";
+    const status = node.videoUrl || output?.videoUrl ? "MP4 已生成" : node.videoId || /任务已创建|videoId|MP4 分段任务/.test(text) ? "等待 MP4 返回" : /失败|failed|error/i.test(text) ? "生成失败" : "未生成";
     return {
       title: segment ? `图生视频 ${segment}` : "图生视频片段",
       detail: status,
@@ -1440,7 +1444,9 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const shouldRefresh = frames.some((frame) => frame.status === "generating" || frame.outputs.some((output) => output.kind === "video" && output.videoId && !output.videoUrl));
+    const shouldRefresh = frames.some((frame) => frame.status === "generating"
+      || frame.outputs.some((output) => output.kind === "video" && output.videoId && !output.videoUrl)
+      || frame.workflowNodes.some((node) => node.type === "video" && node.videoId && !node.videoUrl));
     if (!shouldRefresh) return;
     const timer = window.setInterval(() => void loadWorkspace(), 1400);
     return () => window.clearInterval(timer);
@@ -3071,15 +3077,18 @@ function NodeCard(props: {
       return true;
     })
     .sort((a, b) => (previewPriority[a.role] ?? 20) - (previewPriority[b.role] ?? 20))[0];
+  const nodeVideoUrl = props.node.videoUrl ?? props.output?.videoUrl;
+  const nodeVideoId = props.node.videoId ?? props.output?.videoId;
+  const nodePosterUrl = props.node.imageUrl ?? props.output?.imageUrl;
   const imageUrl = isVideoOutput
-    ? (props.output?.videoUrl ? props.output.imageUrl : undefined)
+    ? (nodeVideoUrl ? nodePosterUrl : undefined)
     : props.output?.imageUrl ?? firstRef?.imageUrl;
   const title = props.output?.title ?? firstRef?.title ?? props.node.title;
-  const canPreview = isVideoOutput ? Boolean(props.output?.videoUrl) : Boolean(imageUrl);
+  const canPreview = isVideoOutput ? Boolean(nodeVideoUrl) : Boolean(imageUrl);
   const downloadUrl = props.output?.kind === "document"
     ? props.output.fileUrl
     : props.output?.kind === "video"
-      ? props.output.videoUrl
+      ? nodeVideoUrl
       : imageUrl;
   const downloadExt = props.output?.kind === "document" ? "pdf" : props.output?.kind === "video" ? "mp4" : "png";
   const downloadTitle = props.output?.title ?? title;
@@ -3106,11 +3115,11 @@ function NodeCard(props: {
           style={imageUrl ? { backgroundImage: `url(${imageUrl})` } : { background: `linear-gradient(135deg, ${props.node.preview ?? "#f97316"}, #10131a)` }}
         >
           {!imageUrl && <Image />}
-          <span>{props.node.type === "output" ? (isVideoOutput ? props.output?.videoUrl ? "MP4 ready" : "MP4 pending" : imageUrl ? "Preview output" : "Empty output") : props.refs.length ? `${props.refs.length} refs` : "Add image"}</span>
+          <span>{props.node.type === "output" ? (isVideoOutput ? nodeVideoUrl ? "MP4 ready" : nodeVideoId ? "MP4 pending" : "Empty output" : imageUrl ? "Preview output" : "Empty output") : props.refs.length ? `${props.refs.length} refs` : "Add image"}</span>
           {typeof props.generationProgress === "number" && <div className="rh-node-generating"><b>生成中 {props.generationProgress}%</b><i><em style={{ width: `${props.generationProgress}%` }} /></i></div>}
           <div className="rh-image-node-actions" onClick={(event) => event.stopPropagation()}>
             <button type="button" title="编辑/生成" onClick={props.onEdit}><Wand2 /></button>
-            <button type="button" title="预览" onClick={() => canPreview && props.onPreview({ title, subtitle: props.output?.copy ?? props.node.body, imageUrl, videoUrl: props.output?.videoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!canPreview}><Expand /></button>
+            <button type="button" title="预览" onClick={() => canPreview && props.onPreview({ title, subtitle: props.output?.copy ?? props.node.body, imageUrl, videoUrl: nodeVideoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!canPreview}><Expand /></button>
             <button type="button" title={props.output?.kind === "document" ? "下载PDF" : props.output?.kind === "video" ? "下载MP4" : "下载图片"} onClick={() => downloadFile(downloadUrl, downloadTitle, downloadExt)} disabled={!downloadUrl}><Download /></button>
           </div>
         </div>
@@ -3164,8 +3173,8 @@ function NodeCard(props: {
           </div>
           <div className="rh-image-node-actions" onClick={(event) => event.stopPropagation()}>
             <button type="button" title="编辑/生成" onClick={props.onEdit}><Wand2 /></button>
-            <button type="button" title="预览" onClick={() => props.output?.videoUrl && props.onPreview({ title, subtitle: props.node.body, imageUrl, videoUrl: props.output?.videoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!props.output?.videoUrl}><Expand /></button>
-            <button type="button" title="下载MP4" onClick={() => downloadFile(props.output?.videoUrl, downloadTitle, "mp4")} disabled={!props.output?.videoUrl}><Download /></button>
+            <button type="button" title="预览" onClick={() => nodeVideoUrl && props.onPreview({ title, subtitle: props.node.body, imageUrl: nodePosterUrl, videoUrl: nodeVideoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!nodeVideoUrl}><Expand /></button>
+            <button type="button" title="下载MP4" onClick={() => downloadFile(nodeVideoUrl, downloadTitle, "mp4")} disabled={!nodeVideoUrl}><Download /></button>
           </div>
         </div>
       ) : props.node.type === "compose" ? (
@@ -3331,6 +3340,9 @@ function NodeEditor({
   ].filter((item, index, list) => item.imageUrl && list.findIndex((candidate) => candidate.imageUrl === item.imageUrl) === index);
   const isVideoOutput = draft.type === "output" && output?.kind === "video";
   const isDocumentOutput = draft.type === "output" && output?.kind === "document";
+  const currentVideoUrl = draft.videoUrl ?? output?.videoUrl;
+  const currentVideoId = draft.videoId ?? output?.videoId;
+  const currentVideoPoster = draft.imageUrl ?? output?.imageUrl;
   const canGenerateImage = draft.type === "image" || draft.type === "reference" || (draft.type === "output" && !isVideoOutput && !isDocumentOutput);
   const promptPlaceholder = promptTemplateForNode(draft.type, output?.kind);
   const mentionItems = buildMentionItems(activeBrand, assets);
@@ -3875,6 +3887,16 @@ function NodeEditor({
       const currentDraft = draft;
       if (!currentDraft) return;
       setGenerating(true);
+      setGenerationMessage("正在创建视频任务...");
+      setGenerationProgress(12);
+      onGenerationProgress(12);
+      const timer = window.setInterval(() => {
+        setGenerationProgress((current) => {
+          const next = Math.min(88, current + (current < 45 ? 6 : 3));
+          onGenerationProgress(next);
+          return next;
+        });
+      }, 1000);
       onSave({ title: currentDraft.title, body: currentDraft.body });
       try {
         const prompt = isVideoOutput ? `${framePrompt}\n\n${currentDraft.body || currentDraft.title}`.trim() : currentDraft.body || currentDraft.title;
@@ -3888,10 +3910,26 @@ function NodeEditor({
         }));
         if (result?.node) {
           setDraft(result.node);
-          onSave({ title: result.node.title, body: result.node.body });
+          onSave({
+            title: result.node.title,
+            body: result.node.body,
+            refs: result.node.refs,
+            imageUrl: result.node.imageUrl,
+            videoId: result.node.videoId,
+            videoUrl: result.node.videoUrl
+          });
         }
+        setGenerationMessage(result?.videoUrl ? "MP4 已返回，可预览/下载。" : result?.videoId ? `视频任务已创建：${result.videoId}。等待模型返回 MP4。` : "视频配置已保存，但没有返回 videoId。请检查视频模型配置。");
+        setGenerationProgress(100);
+        onGenerationProgress(100);
+        window.setTimeout(() => onGenerationProgress(null), 500);
+      } catch (error) {
+        setGenerationMessage(error instanceof Error ? `视频生成失败：${error.message}` : "视频生成失败：未知错误");
+        throw error;
       } finally {
+        window.clearInterval(timer);
         setGenerating(false);
+        window.setTimeout(() => setGenerationProgress(0), 500);
       }
     }
 
@@ -3921,8 +3959,9 @@ function NodeEditor({
           <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />
         )}
         <div className="rh-video-preview">
-          {output?.videoUrl && output.imageUrl ? <img src={output.imageUrl} alt={draft.title} /> : <Play />}
-          <span>{generating ? "正在创建视频任务，请等待返回视频ID" : output?.videoUrl ? "最终 MP4 已生成，可预览/下载" : output?.videoId ? `视频任务已创建但尚未返回 MP4：${output.videoId}` : draft.body ? "视频配置已保存，未生成前仅显示占位符" : "空视频节点"}</span>
+          {currentVideoUrl ? <video src={currentVideoUrl} poster={currentVideoPoster} muted playsInline controls /> : <Play />}
+          <span>{generating ? `正在创建视频任务 ${generationProgress}%` : currentVideoUrl ? "MP4 已生成，可预览/下载" : currentVideoId ? `视频任务已创建但尚未返回 MP4：${currentVideoId}` : draft.body ? "视频配置已保存，未生成前仅显示占位符" : "空视频节点"}</span>
+          {generationMessage && <small className={/失败|没有返回|检查/i.test(generationMessage) ? "warning" : ""}>{generationMessage}</small>}
         </div>
         <div className="rh-video-editor-footer">
           <select value={videoModel} onChange={(event) => setVideoModel(event.target.value)}>
@@ -3947,7 +3986,8 @@ function NodeEditor({
           <button type="button" title="参数"><SlidersHorizontal /></button>
           <button type="button">1个</button>
           <small>♦ 135</small>
-          {output?.videoUrl && <button type="button" onClick={() => downloadFile(output.videoUrl, draft.title, "mp4")}><ArrowDownToLine />下载MP4</button>}
+          {currentVideoUrl && <button type="button" onClick={() => downloadFile(currentVideoUrl, draft.title, "mp4")}><ArrowDownToLine />下载MP4</button>}
+          {currentVideoUrl && <button type="button" onClick={() => onPreview({ title: draft.title, subtitle: draft.body, imageUrl: currentVideoPoster, videoUrl: currentVideoUrl, color: draft.preview, nodeId: draft.id })}><Expand />预览</button>}
           <button type="button" className="submit" title={isVideoOutput ? "创建或刷新视频任务" : "生成视频"} aria-label={isVideoOutput ? "生成MP4" : "生成视频"} onClick={() => void handleVideoGenerate()} disabled={generating || !(draft.body || framePrompt).trim()}>
             {generating ? <Loader2 className="spin" /> : <Send />}
             <span>{generating ? "创建中" : isVideoOutput ? "生成MP4" : "生成视频"}</span>

@@ -750,14 +750,24 @@ try {
   if (smokeVideoA && smokeVideoB) {
     const composeFrameWithVideos = {
       ...composeNode.frame,
-      workflowNodes: composeNode.frame.workflowNodes.map((node) => node.id === "node_smoke_compose" ? {
-        ...node,
-        refs: [
-          ...(node.refs ?? []),
-          { id: "smoke_video_a", role: "generated-video", title: "历史视频 A", description: "smoke local mp4", color: "#ef4444", imageUrl: smokeVideoA },
-          { id: "smoke_video_b", role: "generated-video", title: "历史视频 B", description: "smoke local mp4", color: "#3b82f6", imageUrl: smokeVideoB }
-        ]
-      } : node)
+      workflowNodes: [
+        ...composeNode.frame.workflowNodes.map((node) => {
+          if (node.id === "node_smoke_video") return { ...node, videoId: "smoke-a", videoUrl: smokeVideoA };
+          if (node.id === "node_smoke_compose") {
+            return {
+              ...node,
+              inputIds: ["node_smoke_video", "node_smoke_video_b"],
+              refs: [
+                ...(node.refs ?? []),
+                { id: "smoke_video_a", role: "generated-video", title: "历史视频 A", description: "smoke local mp4", color: "#ef4444", imageUrl: smokeVideoA },
+                { id: "smoke_video_b", role: "generated-video", title: "历史视频 B", description: "smoke local mp4", color: "#3b82f6", imageUrl: smokeVideoB }
+              ]
+            };
+          }
+          return node;
+        }),
+        { id: "node_smoke_video_b", type: "video", title: "Smoke video B", body: "第二段 smoke MP4", parentId: "node_smoke_script", videoId: "smoke-b", videoUrl: smokeVideoB, preview: "#3b82f6" }
+      ]
     };
     await request(`/canvas/frames/${generated.frame.id}`, {
       method: "PATCH",

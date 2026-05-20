@@ -97,6 +97,10 @@ type WorkflowNode = {
   inputIds?: string[];
   preview?: string;
   refs?: ReferenceItem[];
+  imageUrl?: string;
+  fileUrl?: string;
+  videoId?: string;
+  videoUrl?: string;
   edgeOffsetY?: number;
   x?: number;
   y?: number;
@@ -280,6 +284,10 @@ const workflowNodeSchema = z.object({
   parentId: z.string().optional(),
   inputIds: z.array(z.string()).optional(),
   preview: z.string().optional(),
+  imageUrl: z.string().optional(),
+  fileUrl: z.string().optional(),
+  videoId: z.string().optional(),
+  videoUrl: z.string().optional(),
   edgeOffsetY: z.number().optional(),
   refs: z.array(z.object({
     id: z.string(),
@@ -2088,6 +2096,14 @@ async function refreshPendingVideoOutputs(limit = 2) {
   const config = serviceConfig("video");
   let changed = false;
   for (const frame of db.frames) {
+    for (const node of frame.workflowNodes) {
+      const localPath = localGeneratedVideoPath(node.videoUrl);
+      if (node.type === "video" && node.videoUrl && localPath && !(await usableVideoFile(localPath))) {
+        delete node.videoUrl;
+        node.body = appendCopyNote(node.body, "本地 MP4 文件无有效视频内容，已恢复为等待状态。");
+        changed = true;
+      }
+    }
     for (const output of frame.outputs) {
       const localPath = localGeneratedVideoPath(output.videoUrl);
       if (output.kind === "video" && output.videoUrl && localPath && !(await usableVideoFile(localPath))) {
@@ -2101,10 +2117,10 @@ async function refreshPendingVideoOutputs(limit = 2) {
     if (changed) await persistDb();
     return;
   }
-  const pending = db.frames.flatMap((frame) => frame.outputs
+  const pendingOutputs = db.frames.flatMap((frame) => frame.outputs
     .filter((output) => output.kind === "video" && output.videoId && !output.videoUrl)
     .map((output) => ({ frame, output }))).slice(0, limit);
-  const results = await Promise.all(pending.map(async ({ frame, output }) => {
+  const outputResults = await Promise.all(pendingOutputs.map(async ({ frame, output }) => {
     try {
       const videoIds = output.videoId!.split(",").map((item) => item.trim()).filter(Boolean);
       const checks = await Promise.all(videoIds.map(async (videoId) => {
@@ -2133,7 +2149,44 @@ async function refreshPendingVideoOutputs(limit = 2) {
     }
     return false;
   }));
-  if (changed || results.some(Boolean)) await persistDb();
+  const remainingLimit = Math.max(0, limit - pendingOutputs.length);
+  const pendingNodes = remainingLimit
+    ? db.frames.flatMap((frame) => frame.workflowNodes
+      .filter((node) => node.type === "video" && node.videoId && !node.videoUrl)
+      .map((node) => ({ frame, node }))).slice(0, remainingLimit)
+    : [];
+  const nodeResults = await Promise.all(pendingNodes.map(async ({ frame, node }) => {
+    try {
+      const videoIds = node.videoId!.split(",").map((item) => item.trim()).filter(Boolean);
+      const checks = await Promise.all(videoIds.map(async (videoId) => {
+        const data = await getJson(`${config.baseUrl}/videos/${videoId}`, config.apiKey, 3000);
+        return { videoId, url: videoUrlFromResponse(data), status: videoStatusFromResponse(data) };
+      }));
+      const urls = checks.map((item) => item.url).filter(Boolean);
+      const statuses = checks.map((item) => item.status).filter(Boolean);
+      if (urls.length === videoIds.length) {
+        const durationSeconds = videoDurationSeconds(frame.settings);
+        const segmentPlan = videoSegmentPlan(durationSeconds);
+        const composedUrl = urls.length === 1
+          ? urls[0]
+          : videoIds.length > 1 || videoNeedsCompose(durationSeconds)
+          ? await composeLocalVideos(urls, segmentPlan, `xmanx-${frame.id}-${node.id}-refresh-final`)
+          : urls[0];
+        if (composedUrl) {
+          node.videoUrl = composedUrl;
+          node.body = appendCopyNote(node.body, `MP4 文件已生成: ${composedUrl}`);
+        }
+        return true;
+      } else if (statuses.length) {
+        node.body = appendCopyNote(node.body, `视频任务状态: ${statuses.join(" / ")}`);
+        return true;
+      }
+    } catch {
+      // Workspace loading must not fail just because a remote video status check is unavailable.
+    }
+    return false;
+  }));
+  if (changed || outputResults.some(Boolean) || nodeResults.some(Boolean)) await persistDb();
 }
 
 type VideoRunResult = {
@@ -4286,6 +4339,9 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   if (node.type !== "output") node.type = "video";
   node.title = node.title || "Video";
   node.body = videoPlan;
+  if (videoId) node.videoId = videoId;
+  if (videoUrl) node.videoUrl = videoUrl;
+  if (videoUrl && firstFrameUrl) node.imageUrl = firstFrameUrl;
   if (firstFrameUrl) {
     upsertNodeReference(node, {
       id: `first_frame_${node.id}`,
@@ -4390,8 +4446,13 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-compose", async (req, res) =
   const durationSeconds = videoDurationSeconds({ duration: settings.duration ?? `${frame.settings.duration || 20}s` });
   const segmentPlan = videoSegmentPlan(durationSeconds);
   const videoNodes = frame.workflowNodes.filter((item) => item.type === "video" || /seg|片段|video|mp4/i.test(`${item.id} ${item.title}`));
+  const inputVideoNodes = (node.inputIds ?? [])
+    .map((id) => frame.workflowNodes.find((item) => item.id === id))
+    .filter((item): item is WorkflowNode => Boolean(item));
   const videoOutputs = frame.outputs.filter((output) => output.kind === "video");
   const segmentUrls = [
+    ...inputVideoNodes.flatMap((item) => item.videoUrl ? [item.videoUrl] : []),
+    ...videoNodes.flatMap((item) => item.videoUrl ? [item.videoUrl] : []),
     ...videoOutputs.flatMap((output) => output.videoUrl ? [output.videoUrl] : []),
     ...(node.refs ?? []).map((reference) => reference.imageUrl ?? "").filter((url) => /\.mp4($|\?)/i.test(url)),
     ...videoNodes.flatMap((item) => (item.refs ?? []).map((reference) => reference.imageUrl ?? "").filter((url) => /\.mp4($|\?)/i.test(url)))
