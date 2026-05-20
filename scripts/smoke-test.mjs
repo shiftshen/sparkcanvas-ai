@@ -196,17 +196,27 @@ try {
       logoText: "DAPOT",
       primaryColor: "#E60012",
       accentColor: "#FFB400",
-      tone: "Friendly Thai local restaurant service tone",
-      market: "Thailand buffet hot pot restaurant",
+      tone: "Friendly, warm, helpful, professional, quick-response Thai local restaurant service tone. Default language is Thai.",
+      market: "Thailand buffet hot pot restaurant, self-service dining, drinks, dessert, social food experience, Facebook and TikTok restaurant marketing",
       slogan: "Eat the World in One Hot Pot",
-      visualStyle: "red black gold hot pot restaurant marketing",
+      industry: "Thailand buffet hot pot restaurant",
+      targetAudience: "Thai young customers, students, office workers, couples, families, female customers, food lovers and social media users.",
+      brandStory: "DAPOT is a new-generation hot pot brand under CHINDA HOTPOT with buffet sets, drinks, sauce station and social dining experiences.",
+      ipName: "น้องดาพอต / Dapot Buddy",
+      ipDescription: "A high-quality 3D cartoon female virtual store manager with brown hair, small golden bull horns, black DAPOT uniform, red apron and warm service personality.",
+      logoUsage: "Use the DAPOT logo clearly on red, black, white or warm restaurant backgrounds. Do not blur, stretch, distort, recolor, crop or cover the logo.",
+      visualStyle: "Clean commercial 3D cartoon visuals, modern Thai restaurant marketing style, red-black-gold brand color system, warm lighting and appetizing hot pot food photography.",
+      sceneKeywords: ["hot pot restaurant", "buffet hot pot", "self-service food bar", "sauce station", "drink station", "TikTok cover", "Facebook ad", "LINE sticker"],
+      forbiddenWords: ["blurred logo", "distorted logo", "wrong brand name", "wrong Thai spelling", "unreadable text", "competitor logo"],
       assetRoles: [
         { role: "logo", title: "DAPOT Logo", description: "red black gold restaurant logo", color: "#E60012" },
         { role: "ip", title: "Dapot Buddy", description: "3D cartoon virtual store manager", color: "#FFB400" },
         { role: "product", title: "Hot pot buffet", description: "299 399 499 buffet sets", color: "#E60012" }
-      ]
+      ],
+      autoInject: true
     })
   });
+  assert(dapotBrand.ipName.includes("Dapot Buddy") && dapotBrand.visualStyle.includes("red-black-gold"), "DAPOT detailed brand profile should be stored");
   await request("/assets", {
     method: "POST",
     body: JSON.stringify({ title: "DAPOT Logo Image", type: "logo", brandId: dapotBrand.id, color: "#E60012", meta: "$logo · dapot logo image", imageUrl: "/brand-assets/generated/xmanx-logo.png" })
@@ -215,16 +225,21 @@ try {
     method: "POST",
     body: JSON.stringify({ title: "DAPOT IP Image", type: "model", brandId: dapotBrand.id, color: "#FFB400", meta: "$ip · Dapot Buddy image", imageUrl: "/brand-assets/generated/xmanx-ip.png" })
   });
+  await request("/assets", {
+    method: "POST",
+    body: JSON.stringify({ title: "DAPOT Hot Pot Product", type: "product", brandId: dapotBrand.id, color: "#E60012", meta: "$product · hot pot buffet product image", imageUrl: "/brand-assets/generated/xmanx-product.png" })
+  });
   const dapotRefs = await request("/ai/resolve-references", {
     method: "POST",
     body: JSON.stringify({
-      prompt: "@imgen /生成海报 使用 $dapot $dapot.logo $dapot.ip，显示 $copy.slogan -> JPG",
+      prompt: "@imgen /生成海报 使用 $dapot $dapot.logo $dapot.ip $dapot.product，显示 $copy.slogan -> JPG",
       brandId: dapotBrand.id,
       brandInject: true
     })
   });
   assert(dapotRefs.brandKey === "dapot", "brand key should prefer brand name over market first word");
-  assert(dapotRefs.imageReferences.some((reference) => reference.role === "logo") && dapotRefs.imageReferences.some((reference) => reference.role === "ip"), "$dapot.* references should resolve to real DAPOT image assets");
+  assert(["logo", "ip", "product"].every((role) => dapotRefs.imageReferences.some((reference) => reference.role === role && reference.imageUrl)), "$dapot.* references should resolve to real DAPOT logo/IP/product image assets");
+  assert(dapotRefs.finalPrompt.includes("Eat the World in One Hot Pot") && dapotRefs.finalPrompt.includes("DAPOT"), "DAPOT resolved prompt should include brand text context");
   assert(dapotRefs.warnings.length === 0, `DAPOT CAL references should resolve without warnings: ${dapotRefs.warnings.join("; ")}`);
 
   const asset = await request("/assets", {
@@ -684,7 +699,7 @@ try {
   const reloadedInputRefs = reloadedSavedFrame?.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [];
   assert(reloadedInputRefs.some((ref) => ref.id === "ref_smoke_png_upload" && ref.imageUrl?.startsWith("/generated/brand-assets/")), "materialized uploaded PNG reference should survive workspace reload without base64");
   assert(migratedEmptyFrame?.workflowNodes.some((node) => node.id === plainImageNode.id && node.refs?.length), "workspace should keep generated image nodes on canvas");
-  assert(after.assets.length === initial.assets.length + 8, "only manually created brand materials should be added to assets");
+  assert(after.assets.length === initial.assets.length + 9, "only manually created brand materials should be added to assets");
   assert(after.frames[0].status === "success", "latest frame should be successful");
 
   const exported = await request("/workspace/export");
@@ -692,7 +707,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "dapot-brand-profile", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));

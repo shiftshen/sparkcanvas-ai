@@ -318,6 +318,12 @@ const i18n = {
       optimizing: "优化中",
       advanced: "高级参数",
       newCanvas: "新建项目画布",
+      newShort: "新建",
+      run: "运行",
+      rerun: "重跑",
+      generatedOnCanvas: "已生成 · 图片显示在画布输出图节点",
+      rerunExisting: "输入框为空，将重跑当前画布已有工作流",
+      runCurrentCal: "运行当前 CAL，结果进入输出节点",
       width: "宽",
       height: "高",
       strength: "参考强度",
@@ -376,6 +382,12 @@ const i18n = {
       optimizing: "Optimizing",
       advanced: "Advanced parameters",
       newCanvas: "New project canvas",
+      newShort: "New",
+      run: "Run",
+      rerun: "Rerun",
+      generatedOnCanvas: "Generated · images are visible on the canvas output node",
+      rerunExisting: "Composer is empty; rerun the current canvas workflow",
+      runCurrentCal: "Run current CAL into the output node",
       width: "W",
       height: "H",
       strength: "Reference strength",
@@ -426,21 +438,27 @@ const i18n = {
       placeholder: "สร้างภาพแคมเปญ 5.1 สำหรับ xmanx",
       contentLanguage: "ภาษาคอนเทนต์",
       brandNone: "ไม่มีแบรนด์",
-      injectOn: "Inject",
-      injectOff: "Explicit",
+      injectOn: "ใช้แบรนด์",
+      injectOff: "อ้างอิงเอง",
       outputFormat: "รูปแบบไฟล์",
       preset: "การใช้งานและขนาด",
-      optimize: "Optimize",
-      optimizing: "Optimizing",
-      advanced: "Advanced",
+      optimize: "ปรับพรอมป์",
+      optimizing: "กำลังปรับ",
+      advanced: "ตั้งค่าเพิ่มเติม",
       newCanvas: "สร้างแคนวาสใหม่",
+      newShort: "ใหม่",
+      run: "รัน",
+      rerun: "รันซ้ำ",
+      generatedOnCanvas: "สร้างแล้ว · รูปจะแสดงบนโหนดผลลัพธ์ในแคนวาส",
+      rerunExisting: "ช่องว่างอยู่ ระบบจะรันเวิร์กโฟลว์เดิมอีกครั้ง",
+      runCurrentCal: "รัน CAL ปัจจุบันไปยังโหนดผลลัพธ์",
       width: "W",
       height: "H",
-      strength: "Reference strength",
-      duration: "Duration",
+      strength: "น้ำหนักภาพอ้างอิง",
+      duration: "ระยะเวลา",
       needPrompt: "พิมพ์ภาษาธรรมชาติหรือคำสั่ง CAL",
       noCredits: "เครดิตไม่พอสำหรับการสร้าง",
-      generating: "Generating",
+      generating: "กำลังสร้าง",
       ready: "Skill ready · runtime ok",
       keyMissing: "Skill key missing"
     },
@@ -492,6 +510,12 @@ const i18n = {
     optimizing: string;
     advanced: string;
     newCanvas: string;
+    newShort: string;
+    run: string;
+    rerun: string;
+    generatedOnCanvas: string;
+    rerunExisting: string;
+    runCurrentCal: string;
     width: string;
     height: string;
     strength: string;
@@ -1726,6 +1750,49 @@ function App() {
 
 function LoginScreen({ locale, setLocale, error, onLogin }: { locale: Locale; setLocale: (locale: Locale) => void; error: string; onLogin: () => void }) {
   const copy = i18n[locale].login;
+  const workflowBadge = locale === "zh" ? "产品逻辑" : locale === "th" ? "ตรรกะผลิตภัณฑ์" : "Product Logic";
+  const workflowTitle = locale === "zh"
+    ? "一句话不是直接出图，而是生成可控工作流"
+    : locale === "th"
+      ? "หนึ่งประโยคจะกลายเป็นเวิร์กโฟลว์ที่แก้ไขได้"
+      : "One sentence becomes an editable workflow";
+  const workflow = locale === "zh"
+    ? [
+      ["1", "品牌资产库", "上传 Logo、IP、产品、模特、门店和文案，形成可复用的 $dapot.logo 变量。"],
+      ["2", "CAL 编译器", "把一句话优化为 @智能体 /命令 $资源 %风格 -> 文件格式 的执行语言。"],
+      ["3", "画布执行", "自动创建图片、文本、脚本、视频、PDF 节点，节点都能继续编辑和重跑。"],
+      ["4", "交付资产", "JPG、PNG、PDF、MP4 进入画布和素材库，可下载、替换、版本回退。"]
+    ]
+    : locale === "th"
+      ? [
+        ["1", "คลังแบรนด์", "อัปโหลดโลโก้ IP สินค้า โมเดล ร้าน และข้อความ เพื่อใช้ซ้ำเป็นตัวแปร $dapot.logo"],
+        ["2", "ตัวแปลง CAL", "เปลี่ยนประโยคเดียวเป็น @agent /command $asset %style -> รูปแบบไฟล์"],
+        ["3", "รันบนแคนวาส", "สร้างโหนดรูปภาพ ข้อความ สคริปต์ วิดีโอ และ PDF ที่แก้ไขหรือรันใหม่ได้"],
+        ["4", "ไฟล์ส่งมอบ", "JPG, PNG, PDF และ MP4 กลับเข้าแคนวาส/คลัง素材 เพื่อดาวน์โหลด แทนที่ และย้อนเวอร์ชัน"]
+      ]
+      : [
+        ["1", "Brand kit", "Upload logo, IP, product, model, storefront, and copy as reusable $dapot.logo variables."],
+        ["2", "CAL compiler", "Turn one sentence into @agent /command $asset %style -> output format."],
+        ["3", "Canvas execution", "Create image, text, script, video, and PDF nodes that stay editable."],
+        ["4", "Deliverables", "JPG, PNG, PDF, and MP4 return to canvas/assets for download, replacement, and rollback."]
+      ];
+  const examples = locale === "zh"
+    ? [
+      "@imgen /生成海报 使用 $dapot.logo $dapot.ip $dapot.product，为 DAPOT 生成 5.1 活动海报 -> JPG",
+      "@imgen /写视频脚本 使用 $logo $product %TikTok，生成竖屏短视频分镜 -> MP4",
+      "@imgen /生成菜单指南 使用 $brand $product，展示 $copy.slogan -> PDF"
+    ]
+    : locale === "th"
+      ? [
+        "@imgen /generate-poster use $dapot.logo $dapot.ip $dapot.product, create a Thai 5.1 campaign -> JPG",
+        "@imgen /write-video-script use $logo $product %TikTok, vertical short video storyboard -> MP4",
+        "@imgen /generate-guide use $brand $product, show $copy.slogan -> PDF"
+      ]
+      : [
+        "@imgen /generate-poster use $dapot.logo $dapot.ip $dapot.product -> JPG",
+        "@imgen /write-video-script use $logo $product %TikTok -> MP4",
+        "@imgen /generate-guide use $brand $product, show $copy.slogan -> PDF"
+      ];
   return (
     <main className="rh-login">
       <nav className="rh-site-nav">
@@ -1764,6 +1831,24 @@ function LoginScreen({ locale, setLocale, error, onLogin }: { locale: Locale; se
             <p>{body}</p>
           </article>
         ))}
+      </section>
+      <section className="rh-site-workflow">
+        <div>
+          <span className="rh-site-badge">{workflowBadge}</span>
+          <h2>{workflowTitle}</h2>
+        </div>
+        <div className="rh-site-flow">
+          {workflow.map(([step, title, body]) => (
+            <article key={step}>
+              <code>{step}</code>
+              <strong>{title}</strong>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
+        <div className="rh-site-code-examples">
+          {examples.map((example) => <code key={example}>{example}</code>)}
+        </div>
       </section>
       <section id="cal-guide" className="rh-site-guide">
         <div>
@@ -3645,7 +3730,7 @@ function BottomComposer(props: {
   }
   return (
     <div className={`rh-composer ${workflowMode ? "workflow" : ""}`}>
-      <button type="button" className="rh-add" onClick={props.onCreateProject} title={t.newCanvas}><Plus /><span>New</span></button>
+      <button type="button" className="rh-add" onClick={props.onCreateProject} title={t.newCanvas}><Plus /><span>{t.newShort}</span></button>
       <textarea value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} placeholder={composerExample} aria-label={composerExample} />
       {referencePreview.total > 0 && (
         <div className="rh-composer-refs">
@@ -3702,7 +3787,7 @@ function BottomComposer(props: {
         </select>
         <button type="button" className="rh-optimize" onClick={() => void optimizeCurrentPrompt()} disabled={optimizing || !props.prompt.trim()} title="CAL"><Wand2 />{optimizing ? t.optimizing : t.optimize}</button>
         <button type="button" className="rh-advanced-toggle" onClick={() => setAdvancedOpen((value) => !value)} title={t.advanced}><SlidersHorizontal /></button>
-        <button type="button" className="rh-send" onClick={() => void generateWithOptimization()} disabled={!canGenerate || optimizing} title={generateBlockReason || (isUsingFramePrompt ? "重新运行当前画布工作流" : `运行当前 CAL，结果进入输出节点：${referencePreview.images.length} 张参考图 / ${referencePreview.texts.length} 个文本字段`)}>{optimizing ? <Loader2 className="spin" /> : <Play />}<span>{isUsingFramePrompt ? "重跑" : "运行"}</span></button>
+        <button type="button" className="rh-send" onClick={() => void generateWithOptimization()} disabled={!canGenerate || optimizing} title={generateBlockReason || (isUsingFramePrompt ? t.rerunExisting : `${t.runCurrentCal}: ${referencePreview.images.length} images / ${referencePreview.texts.length} text refs`)}>{optimizing ? <Loader2 className="spin" /> : <Play />}<span>{isUsingFramePrompt ? t.rerun : t.run}</span></button>
       </div>
       {advancedOpen && (
         <div className="rh-composer-advanced">
@@ -3722,9 +3807,9 @@ function BottomComposer(props: {
             : generateBlockReason
               ? generateBlockReason
             : isUsingFramePrompt
-              ? "输入框为空，将重跑当前画布已有工作流"
+              ? t.rerunExisting
             : props.frame?.outputs?.some((output) => output.imageUrl)
-              ? "已生成 · 图片显示在画布输出图节点"
+              ? t.generatedOnCanvas
             : props.aiDiagnostics?.runtime.helpOk
               ? props.aiDiagnostics.runtime.canAttemptGeneration ? t.ready : "Skill runtime ok · key missing"
             : props.aiStatus?.imageGeneration.configured

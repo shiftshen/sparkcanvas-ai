@@ -352,6 +352,7 @@ svg {
 .rh-site-hero,
 .rh-site-stats,
 .rh-site-features,
+.rh-site-workflow,
 .rh-site-guide {
   width: min(1180px, calc(100vw - 36px));
   margin: 0 auto;
@@ -547,6 +548,70 @@ svg {
   margin: 0;
   color: #9ca3af;
   line-height: 1.6;
+}
+
+.rh-site-workflow {
+  margin-bottom: 34px;
+  padding: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+  background: rgba(16, 19, 29, 0.78);
+}
+
+.rh-site-workflow h2 {
+  max-width: 760px;
+  margin: 14px 0 18px;
+  font-size: 30px;
+  line-height: 1.15;
+}
+
+.rh-site-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.rh-site-flow article {
+  min-height: 168px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 8px;
+  background: rgba(5, 7, 13, 0.62);
+}
+
+.rh-site-flow code {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: #111827;
+  background: #a7f3d0;
+  font-weight: 950;
+}
+
+.rh-site-flow p {
+  margin: 0;
+  color: #9ca3af;
+  line-height: 1.55;
+}
+
+.rh-site-code-examples {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.rh-site-code-examples code {
+  display: block;
+  overflow-x: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #bbf7d0;
+  background: rgba(2, 6, 23, 0.84);
+  white-space: nowrap;
 }
 
 .rh-site-guide {
@@ -3330,6 +3395,7 @@ svg {
 
 @media (max-width: 900px) {
   .rh-site-hero,
+  .rh-site-workflow,
   .rh-site-guide {
     grid-template-columns: 1fr;
   }
@@ -3340,12 +3406,25 @@ svg {
   }
 
   .rh-site-stats,
-  .rh-site-features {
+  .rh-site-features,
+  .rh-site-flow {
     grid-template-columns: 1fr;
   }
 
   .rh-site-copy h1 {
     font-size: 42px;
+  }
+
+  .rh-site-workflow {
+    padding: 14px;
+  }
+
+  .rh-site-workflow h2 {
+    font-size: 24px;
+  }
+
+  .rh-site-flow article {
+    min-height: auto;
   }
 
   .rh-topbar {
