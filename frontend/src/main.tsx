@@ -1031,6 +1031,7 @@ function App() {
     try {
       const result = await api.post<TextGenerateResponse>(`/canvas/frames/${activeFrame.id}/nodes/${nodeId}/generate-text`, { prompt: nodePrompt, model: modelId, translate, mode });
       setFrames((current) => current.map((frame) => frame.id === result.frame.id ? result.frame : frame));
+      return result;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "文本节点生成失败");
       throw caught;
@@ -1043,6 +1044,7 @@ function App() {
     try {
       const result = await api.post<ScriptGenerateResponse>(`/canvas/frames/${activeFrame.id}/nodes/${nodeId}/generate-script`, { prompt: nodePrompt, model: modelId, translate });
       setFrames((current) => current.map((frame) => frame.id === result.frame.id ? result.frame : frame));
+      return result;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "脚本节点生成失败");
       throw caught;
@@ -1055,6 +1057,7 @@ function App() {
     try {
       const result = await api.post<VideoGenerateResponse>(`/canvas/frames/${activeFrame.id}/nodes/${nodeId}/generate-video`, { prompt: nodePrompt, model: modelId, settings });
       setFrames((current) => current.map((frame) => frame.id === result.frame.id ? result.frame : frame));
+      return result;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "视频节点保存失败");
       throw caught;
@@ -1067,6 +1070,7 @@ function App() {
     try {
       const result = await api.post<AudioGenerateResponse>(`/canvas/frames/${activeFrame.id}/nodes/${nodeId}/generate-audio`, { prompt: nodePrompt, model: modelId, settings });
       setFrames((current) => current.map((frame) => frame.id === result.frame.id ? result.frame : frame));
+      return result;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "音频节点保存失败");
       throw caught;
@@ -1539,10 +1543,10 @@ function Canvas(props: {
   setEditingNodeId: (nodeId: string | null) => void;
   onUpdateFrame: (patch: Partial<Pick<Frame, "prompt" | "modelId" | "settings" | "brandId" | "brandContext" | "workflowNodes" | "outputs">>) => void | Promise<Frame | void>;
   onGenerateNode: (nodeId: string, nodePrompt: string, modelId?: string, settings?: Partial<GenerationSettings>) => NodeGenerateResponse | void | Promise<NodeGenerateResponse | void>;
-  onGenerateTextNode: (nodeId: string, nodePrompt: string, modelId: string, translate: boolean, mode?: string) => void | Promise<void>;
-  onGenerateScriptNode: (nodeId: string, nodePrompt: string, modelId: string, translate: boolean) => void | Promise<void>;
-  onGenerateVideoNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean }) => void | Promise<void>;
-  onGenerateAudioNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean }) => void | Promise<void>;
+  onGenerateTextNode: (nodeId: string, nodePrompt: string, modelId: string, translate: boolean, mode?: string) => TextGenerateResponse | void | Promise<TextGenerateResponse | void>;
+  onGenerateScriptNode: (nodeId: string, nodePrompt: string, modelId: string, translate: boolean) => ScriptGenerateResponse | void | Promise<ScriptGenerateResponse | void>;
+  onGenerateVideoNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean }) => VideoGenerateResponse | void | Promise<VideoGenerateResponse | void>;
+  onGenerateAudioNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean }) => AudioGenerateResponse | void | Promise<AudioGenerateResponse | void>;
 }) {
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   const [nodes, setNodes] = useState<WorkflowNode[]>(() => props.frame ? normalizeWorkflowNodes(props.frame.workflowNodes, shouldUseDefaultWorkflow(props.frame.workflowNodes)) : []);
@@ -2118,10 +2122,10 @@ function NodeEditor({
   onClose: () => void;
   onSave: (patch: Partial<WorkflowNode>) => void;
   onGenerate: (prompt: string, modelId?: string, settings?: Partial<GenerationSettings>) => NodeGenerateResponse | void | Promise<NodeGenerateResponse | void>;
-  onGenerateText: (prompt: string, modelId: string, translate: boolean, mode?: string) => void | Promise<void>;
-  onGenerateScript: (prompt: string, modelId: string, translate: boolean) => void | Promise<void>;
-  onGenerateVideo: (prompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean }) => void | Promise<void>;
-  onGenerateAudio: (prompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean }) => void | Promise<void>;
+  onGenerateText: (prompt: string, modelId: string, translate: boolean, mode?: string) => TextGenerateResponse | void | Promise<TextGenerateResponse | void>;
+  onGenerateScript: (prompt: string, modelId: string, translate: boolean) => ScriptGenerateResponse | void | Promise<ScriptGenerateResponse | void>;
+  onGenerateVideo: (prompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean }) => VideoGenerateResponse | void | Promise<VideoGenerateResponse | void>;
+  onGenerateAudio: (prompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean }) => AudioGenerateResponse | void | Promise<AudioGenerateResponse | void>;
   onGenerationProgress: (progress: number | null) => void;
   onPreview: (target: PreviewTarget) => void;
 }) {
@@ -2383,7 +2387,7 @@ function NodeEditor({
           </select>
           <label className="rh-mini-range"><SlidersHorizontal /><input type="range" min={0} max={100} value={imageStrength} onChange={(event) => setImageStrength(Number(event.target.value))} /></label>
           <small>♦ 14</small>
-          <button type="button" className="submit" onClick={() => void handleGenerate()} disabled={generating || !imagePromptReady}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
+          <button type="button" className="submit" title="生成图片" aria-label="生成图片" onClick={() => void handleGenerate()} disabled={generating || !imagePromptReady}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
         </div>
         <div className="rh-editor-actions compact">
           <label className="rh-file-action"><Upload />{imageUrl ? "替换" : "上传图片"}<input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleUploadReference(file); event.currentTarget.value = ""; }} /></label>
@@ -2428,7 +2432,11 @@ function NodeEditor({
       setGenerating(true);
       onSave({ title: currentDraft.title, body: currentDraft.body });
       try {
-        await Promise.resolve(onGenerateText(currentDraft.body || currentDraft.title, textModel, translateText, textMode));
+        const result = await Promise.resolve(onGenerateText(currentDraft.body || currentDraft.title, textModel, translateText, textMode));
+        if (result?.node) {
+          setDraft(result.node);
+          onSave({ title: result.node.title, body: result.node.body, refs: result.node.refs });
+        }
       } finally {
         setGenerating(false);
       }
@@ -2464,7 +2472,7 @@ function NodeEditor({
           <button type="button" onClick={() => void handleTransformDraft("optimize")} title="优化 CAL"><Wand2 /></button>
           <button type="button" className={translateText ? "active" : ""} onClick={() => void handleTransformDraft("translate")} title="调用文本模型翻译"><Languages /></button>
           <small>♦ 6</small>
-          <button type="button" className="submit" onClick={() => void handleTextGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
+          <button type="button" className="submit" title="生成文本" aria-label="生成文本" onClick={() => void handleTextGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
         </div>
         <button type="button" className="rh-text-close" onClick={onClose}><X /></button>
       </aside>
@@ -2502,13 +2510,17 @@ function NodeEditor({
       setGenerating(true);
       onSave({ title: currentDraft.title, body: currentDraft.body });
       try {
-        await Promise.resolve(onGenerateAudio(currentDraft.body || currentDraft.title, audioModel, {
+        const result = await Promise.resolve(onGenerateAudio(currentDraft.body || currentDraft.title, audioModel, {
           mode: audioMode,
           duration: audioDuration,
           scene: audioScene,
           loop: audioLoop,
           translate: translateAudio
         }));
+        if (result?.node) {
+          setDraft(result.node);
+          onSave({ title: result.node.title, body: result.node.body });
+        }
       } finally {
         setGenerating(false);
       }
@@ -2559,7 +2571,7 @@ function NodeEditor({
           <button type="button" onClick={() => void handleTransformDraft("optimize")} title="优化 CAL"><Wand2 /></button>
           <button type="button" className={translateAudio ? "active" : ""} onClick={() => void handleTransformDraft("translate")} title="调用文本模型翻译"><Languages /></button>
           <small>♦ 18</small>
-          <button type="button" className="submit" onClick={() => void handleAudioGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
+          <button type="button" className="submit" title="生成音频配置" aria-label="生成音频配置" onClick={() => void handleAudioGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
         </div>
       </aside>
     );
@@ -2572,7 +2584,11 @@ function NodeEditor({
       setGenerating(true);
       onSave({ title: currentDraft.title, body: currentDraft.body });
       try {
-        await Promise.resolve(onGenerateScript(currentDraft.body || currentDraft.title, scriptModel, translateScript));
+        const result = await Promise.resolve(onGenerateScript(currentDraft.body || currentDraft.title, scriptModel, translateScript));
+        if (result?.node) {
+          setDraft(result.node);
+          onSave({ title: result.node.title, body: result.node.body });
+        }
       } finally {
         setGenerating(false);
       }
@@ -2597,7 +2613,7 @@ function NodeEditor({
           <button type="button" onClick={() => void handleTransformDraft("optimize")} title="优化 CAL"><Wand2 /></button>
           <button type="button" className={translateScript ? "active" : ""} onClick={() => void handleTransformDraft("translate")} title="调用文本模型翻译"><Languages /></button>
           <small>♦ 6</small>
-          <button type="button" className="submit" onClick={() => void handleScriptGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
+          <button type="button" className="submit" title="生成脚本" aria-label="生成脚本" onClick={() => void handleScriptGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
         </div>
         <button type="button" className="rh-script-close" onClick={onClose}><X /></button>
       </aside>
@@ -2611,13 +2627,17 @@ function NodeEditor({
       setGenerating(true);
       onSave({ title: currentDraft.title, body: currentDraft.body });
       try {
-        await Promise.resolve(onGenerateVideo(currentDraft.body || currentDraft.title, videoModel, {
+        const result = await Promise.resolve(onGenerateVideo(currentDraft.body || currentDraft.title, videoModel, {
           mode: videoMode,
           ratio: videoRatio,
           duration: "5s",
           sound: videoSound,
           translate: translateVideo
         }));
+        if (result?.node) {
+          setDraft(result.node);
+          onSave({ title: result.node.title, body: result.node.body });
+        }
       } finally {
         setGenerating(false);
       }
@@ -2669,7 +2689,7 @@ function NodeEditor({
           <button type="button" title="参数"><SlidersHorizontal /></button>
           <button type="button">1个</button>
           <small>♦ 135</small>
-          <button type="button" className="submit" onClick={() => void handleVideoGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
+          <button type="button" className="submit" title="生成视频配置" aria-label="生成视频配置" onClick={() => void handleVideoGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
         </div>
       </aside>
     );
@@ -2800,7 +2820,7 @@ function ImagePreview({ preview, onClose, onSaveAsset }: { preview: PreviewTarge
       <section className="rh-preview" onClick={(event) => event.stopPropagation()}>
         <div className="rh-preview-head">
           <div><strong>{preview.title}</strong><small>{preview.subtitle}</small></div>
-          <button type="button" onClick={onClose}><X /></button>
+          <button type="button" title="关闭预览" aria-label="关闭预览" onClick={onClose}><X /></button>
         </div>
         <div className="rh-preview-image" style={preview.imageUrl ? { backgroundImage: `url(${preview.imageUrl})` } : { background: preview.color ?? "#111827" }}>{!preview.imageUrl && <Image />}</div>
         <div className="rh-preview-actions">

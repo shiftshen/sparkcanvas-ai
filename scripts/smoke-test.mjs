@@ -279,6 +279,28 @@ try {
   assert(plainGeneratedNode.node.body.startsWith("马\n模型:"), "plain prompt generation should not prepend brand workflow context");
   assert(!plainGeneratedNode.node.body.includes("XMANX") && !plainGeneratedNode.node.body.includes("xmanx.com"), "plain prompt generation should not include XMANX unless referenced");
   assert(plainGeneratedNode.node.refs?.[0]?.imageUrl?.startsWith("data:image/svg+xml") || plainGeneratedNode.node.refs?.[0]?.imageUrl?.startsWith("/generated/"), "generated image node should keep a displayable image on canvas");
+  const plainAudioNode = {
+    id: "node_plain_audio",
+    type: "audio",
+    title: "Audio",
+    body: "simple beat",
+    parentId: plainImageNode.id,
+    preview: "#7c3aed",
+    x: 420,
+    y: 160,
+    w: 230,
+    h: 238
+  };
+  await request(`/canvas/frames/${emptyFrame.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ workflowNodes: [plainGeneratedNode.node, plainAudioNode] })
+  });
+  const plainAudioGenerated = await request(`/canvas/frames/${emptyFrame.id}/nodes/${plainAudioNode.id}/generate-audio`, {
+    method: "POST",
+    body: JSON.stringify({ prompt: "simple beat", model: "gpt-5.4", settings: { mode: "配乐", duration: "15s", scene: "广告短视频", loop: false, translate: false } })
+  });
+  assert(/品牌约束:\s*无品牌/.test(plainAudioGenerated.audioPlan), `unbranded audio nodes should stay unbranded: ${plainAudioGenerated.audioPlan}`);
+  assert(!plainAudioGenerated.audioPlan.includes("XMANX") && !plainAudioGenerated.audioPlan.includes("xmanx.com"), "unbranded audio nodes should not inject XMANX unless referenced");
 
   const generated = await request("/generate", {
     method: "POST",

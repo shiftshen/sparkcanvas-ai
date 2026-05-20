@@ -987,6 +987,22 @@ function neutralBrandColor(brand?: Brand) {
   };
 }
 
+function brandLabel(brand?: Brand) {
+  return brand?.name ?? "无品牌";
+}
+
+function brandVisualStyle(brand?: Brand) {
+  return brand?.visualStyle ?? "通用商业视觉，结构清晰，画面干净，适合继续连接下游 AI 节点。";
+}
+
+function brandTone(brand?: Brand) {
+  return brand?.tone ?? "通用、清晰、可控";
+}
+
+function frameContextBrand(frame: Pick<CanvasFrame, "brandId" | "settings">) {
+  return frame.settings?.brandInject ? frameBrand(frame) : undefined;
+}
+
 function estimateCost(prompt: string, mode: CanvasFrame["mode"], templateCost?: number) {
   if (templateCost) return templateCost;
   if (prompt.includes("视频") || prompt.toLowerCase().includes("video")) return 36;
@@ -2318,25 +2334,26 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
     mode: z.enum(["story", "table"]).optional()
   }).parse(req.body);
 
-  const brand = findBrand(frame.brandId);
+  const brand = frameBrand(frame);
+  const contextBrand = frameContextBrand(frame);
   const source = input.prompt.trim();
   const resolved = resolvePromptAssets(source, brand);
   const translated = input.translate
-    ? `English prompt: ${resolved.prompt}. Keep CAL resource intent and ${brand.name} visual language.`
+    ? `English prompt: ${resolved.prompt}. Keep CAL resource intent${brand ? ` and ${brand.name} visual language` : ""}.`
     : resolved.prompt;
-  const storyboardRefs = buildReferenceItems(brand, 4);
+  const storyboardRefs = contextBrand ? buildReferenceItems(contextBrand, 4) : [];
   const fallbackText = input.mode === "table"
     ? [
         "| 镜号 | 参考图 | 时长 | 画面描述 | 角色 | 角色描述 | 景别 | 角色动作 | 情绪 | 光影氛围 | 音效 | 分镜提示词 | 视频运动提示词 |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-        `| 1 | ${storyboardRefs[0]?.title ?? "品牌素材"} | 3s | ${translated} 的品牌开场 | ${brand.ipName} | ${brand.ipDescription} | 特写 | 建立产品与角色关系 | 克制专业 | ${brand.visualStyle} | 轻节奏铺底 | 清晰商品层级 | 摄影机缓慢推进 |`,
+        `| 1 | ${storyboardRefs[0]?.title ?? "参考素材"} | 3s | ${translated} 的开场 | ${contextBrand?.ipName ?? "主角/产品"} | ${contextBrand?.ipDescription ?? "按提示词定义主体"} | 特写 | 建立产品与角色关系 | 克制专业 | ${brandVisualStyle(contextBrand)} | 轻节奏铺底 | 清晰商品层级 | 摄影机缓慢推进 |`,
         `| 2 | ${storyboardRefs[1]?.title ?? "产品参考"} | 4s | 展示核心卖点与动作 | 固定模特 | 城市场景电商模特 | 中景 | 拿起或展示商品 | 自信 | 黑橙高对比 | 节奏增强 | 商品质感突出 | 横移跟随主体动作 |`,
-        `| 3 | ${storyboardRefs[2]?.title ?? "Logo 参考"} | 3s | 收束到 Logo 与行动号召 | ${brand.logoText} | 品牌标识 | 全景 | 定格收尾 | 干净有力 | 明暗清晰 | 收尾音 | 品牌域名与主视觉统一 | 轻微拉远后定格 |`
+        `| 3 | ${storyboardRefs[2]?.title ?? "收尾参考"} | 3s | 收束到行动号召 | ${contextBrand?.logoText ?? "CTA"} | ${contextBrand ? "品牌标识" : "画面收尾"} | 全景 | 定格收尾 | 干净有力 | 明暗清晰 | 收尾音 | 主视觉统一 | 轻微拉远后定格 |`
       ].join("\n")
     : [
         translated,
         "",
-        `品牌约束: ${brand.name}; ${brand.visualStyle}`,
+        `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
         "输出要求: 结构清晰，可直接作为下游图片、脚本或视频节点提示词。"
       ].join("\n");
   let generatedText = fallbackText;
@@ -2346,9 +2363,9 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
         `任务: ${input.mode === "table" ? "生成标准 Markdown 分镜故事版表格，表头必须包含 镜号、参考图、时长、画面描述、音效、分镜提示词、视频运动提示词。" : "生成可直接进入画布下游节点的文本故事或提示词。"}`,
         `用户输入: ${translated}`,
         `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
-        `品牌: ${brand.name}`,
-        `品牌风格: ${brand.visualStyle}`,
-        `品牌语气: ${brand.tone}`
+        `品牌: ${brandLabel(contextBrand)}`,
+        `品牌风格: ${brandVisualStyle(contextBrand)}`,
+        `品牌语气: ${brandTone(contextBrand)}`
       ].join("\n"),
       input.model
     );
@@ -2380,14 +2397,15 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
     translate: z.boolean().optional()
   }).parse(req.body);
 
-  const brand = findBrand(frame.brandId);
+  const brand = frameBrand(frame);
+  const contextBrand = frameContextBrand(frame);
   const source = input.prompt.trim();
   const resolved = resolvePromptAssets(source, brand);
   const fallbackScript = [
     `分镜脚本: ${node.title || "Script"}`,
     "",
     `剧情目标: ${resolved.prompt}`,
-    `品牌约束: ${brand.name}; ${brand.visualStyle}`,
+    `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
     "",
     "镜头 1",
     "- 时长: 3s",
@@ -2416,8 +2434,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
         "任务: 生成可执行的视频分镜脚本，分镜清晰，包含镜头、时长、画面、运动、音效、品牌收束。",
         `剧情目标: ${resolved.prompt}`,
         `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
-        `品牌: ${brand.name}`,
-        `品牌风格: ${brand.visualStyle}`,
+        `品牌: ${brandLabel(contextBrand)}`,
+        `品牌风格: ${brandVisualStyle(contextBrand)}`,
         input.translate ? "同时整理为英文视频模型易读结构。" : ""
       ].filter(Boolean).join("\n"),
       input.model
@@ -2453,7 +2471,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
     }).optional()
   }).parse(req.body);
 
-  const brand = findBrand(frame.brandId);
+  const brand = frameBrand(frame);
+  const contextBrand = frameContextBrand(frame);
   const settings = input.settings ?? {};
   const resolved = resolvePromptAssets(input.prompt.trim(), brand);
   const prompt = resolved.prompt;
@@ -2463,7 +2482,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
       [
         prompt,
         `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
-        `品牌约束: ${brand.name}; ${brand.visualStyle}`,
+        `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
         "输出要求: 商业广告视频，可用于后续合成节点。"
       ].join("\n"),
       input.model || serviceConfig("video").model,
@@ -2485,7 +2504,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
     `规格: ${settings.ratio ?? "16:9 · 720P · 5s"}`,
     `声音: ${settings.sound === false ? "关闭" : "开启"}`,
     `翻译: ${settings.translate ? "开启" : "关闭"}`,
-    `品牌约束: ${brand.name}; ${brand.visualStyle}`,
+    `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
     ...(generationLines.length ? generationLines : ["执行状态: 已保存视频生成配置，未配置视频 API Key。"])
   ].join("\n");
 
@@ -2515,7 +2534,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
     }).optional()
   }).parse(req.body);
 
-  const brand = findBrand(frame.brandId);
+  const brand = frameBrand(frame);
+  const contextBrand = frameContextBrand(frame);
   const settings = input.settings ?? {};
   const resolved = resolvePromptAssets(input.prompt.trim(), brand);
   const prompt = resolved.prompt;
@@ -2529,7 +2549,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
     `循环: ${settings.loop ? "开启" : "关闭"}`,
     `翻译: ${settings.translate ? "开启" : "关闭"}`,
     `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
-    `品牌约束: ${brand.name}; ${brand.tone}; ${brand.visualStyle}`,
+    `品牌约束: ${brandLabel(contextBrand)}; ${brandTone(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
     "执行状态: 已保存音频生成配置，等待接入真实音频生成 skill。"
   ].join("\n");
 
