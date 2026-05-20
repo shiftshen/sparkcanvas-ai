@@ -1936,14 +1936,14 @@ function SideDrawer(props: {
 }) {
   const drawerTitle = i18n[props.locale].drawer;
   return (
-    <aside className="rh-drawer">
+    <aside className={`rh-drawer ${props.panel}`}>
       <div className="rh-drawer-head">
         <strong>{drawerTitle[props.panel]}</strong>
         <button type="button" onClick={props.onClose}><PanelLeftClose /></button>
       </div>
       {props.panel === "projects" && <ProjectPanel frames={props.frames} brands={props.brands} activeBrand={props.activeBrand} selectedFrameId={props.selectedFrameId} onSelect={props.onSelectFrame} onCreate={props.onCreateProject} onUpdateFrame={props.onUpdateFrame} />}
-      {props.panel === "assets" && <AssetPanel assets={props.assets} selection={props.assetSelection} onSelect={props.onSelectAsset} onAddAssets={props.onAddAssets} onUpload={props.onUpload} onUpdate={props.onUpdateAsset} onDelete={props.onDeleteAsset} />}
-      {props.panel === "brand" && props.activeBrand && <BrandPanel brands={props.brands} brand={props.activeBrand} assets={props.assets} onCreate={props.onCreateBrand} onSelect={props.onSelectBrand} onSave={props.onSaveBrand} onUpload={props.onUpload} />}
+      {props.panel === "assets" && <AssetPanel assets={props.assets} brands={props.brands} activeBrand={props.activeBrand} selection={props.assetSelection} onSelect={props.onSelectAsset} onAddAssets={props.onAddAssets} onUpload={props.onUpload} onUpdate={props.onUpdateAsset} onDelete={props.onDeleteAsset} />}
+      {props.panel === "brand" && props.activeBrand && <BrandPanel brands={props.brands} brand={props.activeBrand} assets={props.assets} onCreate={props.onCreateBrand} onSelect={props.onSelectBrand} onSave={props.onSaveBrand} onUpload={props.onUpload} onUpdateAsset={props.onUpdateAsset} onDeleteAsset={props.onDeleteAsset} />}
       {props.panel === "templates" && <TemplatePanel templates={props.templates} onUse={props.onUseTemplate} />}
       {props.panel === "history" && <HistoryPanel frames={props.frames} selectedFrameId={props.selectedFrameId} onSelect={props.onSelectFrame} />}
       {props.panel === "tutorial" && <TutorialPanel locale={props.locale} />}
@@ -2023,6 +2023,8 @@ function ProjectPanel({
 
 function AssetPanel(props: {
   assets: Asset[];
+  brands: Brand[];
+  activeBrand?: Brand;
   selection: string[];
   onSelect: (id: string) => void;
   onAddAssets: () => void;
@@ -2031,21 +2033,38 @@ function AssetPanel(props: {
   onDelete: (id: string) => void;
 }) {
   const [uploadType, setUploadType] = useState<Asset["type"]>("upload");
+  const [brandFilter, setBrandFilter] = useState(props.activeBrand?.id ?? "all");
+  useEffect(() => {
+    if (props.activeBrand?.id) setBrandFilter(props.activeBrand.id);
+  }, [props.activeBrand?.id]);
+  const filteredAssets = brandFilter === "all" ? props.assets : props.assets.filter((asset) => asset.brandId === brandFilter);
+  const uploadBrandId = brandFilter === "all" ? props.activeBrand?.id : brandFilter;
   return (
     <div className="rh-assets">
-      <div className="rh-upload-row">
-        <select value={uploadType} onChange={(event) => setUploadType(event.target.value as Asset["type"])}>
-          <option value="logo">Logo</option>
-          <option value="product">Product</option>
-          <option value="model">IP / Model</option>
-          <option value="upload">Scene</option>
-        </select>
-        <label><Upload />上传<input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && props.onUpload(event.target.files[0], uploadType)} /></label>
+      <div className="rh-assets-toolbar">
+        <label>
+          品牌
+          <select value={brandFilter} onChange={(event) => setBrandFilter(event.target.value)}>
+            <option value="all">全部品牌</option>
+            {props.brands.map((brand) => <option value={brand.id} key={brand.id}>{brand.name}</option>)}
+          </select>
+        </label>
+        <label>
+          类型
+          <select value={uploadType} onChange={(event) => setUploadType(event.target.value as Asset["type"])}>
+            <option value="logo">Logo</option>
+            <option value="product">Product</option>
+            <option value="model">IP / Model</option>
+            <option value="upload">Menu / Scene</option>
+          </select>
+        </label>
+        <label className="rh-upload-inline"><Upload />上传<input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && props.onUpload(event.target.files[0], uploadType, { brandId: uploadBrandId })} /></label>
       </div>
       <button className="rh-primary-wide" type="button" onClick={props.onAddAssets} disabled={props.selection.length === 0}>加入当前画布参考 ({props.selection.length})</button>
       <div className="rh-asset-grid">
-        {props.assets.map((asset) => (
+        {filteredAssets.map((asset) => (
           <article className={props.selection.includes(asset.id) ? "selected" : ""} key={asset.id}>
+            <code className="rh-asset-code">{assetReferenceToken(asset, props.brands.find((brand) => brand.id === asset.brandId))}</code>
             <button type="button" className="rh-asset-thumb" onClick={() => props.onSelect(asset.id)} style={asset.imageUrl ? { backgroundImage: `url(${asset.imageUrl})` } : { background: asset.color }}>
               {!asset.imageUrl && <Image />}
             </button>
@@ -2079,7 +2098,9 @@ function BrandPanel({
   onCreate,
   onSelect,
   onSave,
-  onUpload
+  onUpload,
+  onUpdateAsset,
+  onDeleteAsset
 }: {
   brands: Brand[];
   brand: Brand;
@@ -2088,6 +2109,8 @@ function BrandPanel({
   onSelect: (id: string) => void;
   onSave: (brand: Brand) => void;
   onUpload: (file: File, type: Asset["type"], options?: AssetUploadOptions) => void;
+  onUpdateAsset: (id: string, patch: Partial<Pick<Asset, "title" | "type" | "meta" | "color" | "imageUrl">>) => void;
+  onDeleteAsset: (id: string) => void;
 }) {
   const [draft, setDraft] = useState(brand);
   useEffect(() => setDraft(brand), [brand]);
@@ -2187,7 +2210,25 @@ function BrandPanel({
       <label className="rh-brand-upload"><Upload />上传补充素材<input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && onUpload(event.target.files[0], "upload", { brandId: brand.id, meta: "$asset · supplemental brand reference", color: draft.accentColor })} /></label>
       <div className="rh-brand-assets">
         {brandAssets.filter((asset) => asset.imageUrl).map((asset) => (
-          <span key={asset.id} title={`${mentionTokenForRole(assetRole(asset))} ${asset.title}`} style={{ backgroundImage: `url(${asset.imageUrl})` }} />
+          <article key={asset.id}>
+            <button type="button" className="rh-brand-asset-thumb" title={asset.title} style={{ backgroundImage: `url(${asset.imageUrl})` }} />
+            <div className="rh-brand-asset-fields">
+              <code>{assetReferenceToken(asset, brand)}</code>
+              <input value={assetReferenceToken(asset, brand)} onChange={(event) => onUpdateAsset(asset.id, { meta: updateAssetMetaToken(asset.meta, event.target.value) })} aria-label="品牌素材引用标签" />
+              <input value={asset.title} onChange={(event) => onUpdateAsset(asset.id, { title: event.target.value })} aria-label="品牌素材名称" />
+              <select value={asset.type} onChange={(event) => onUpdateAsset(asset.id, { type: event.target.value as Asset["type"] })} aria-label="品牌素材类型">
+                <option value="logo">Logo</option>
+                <option value="product">Product</option>
+                <option value="model">IP / Model</option>
+                <option value="upload">Menu / Scene</option>
+              </select>
+              <textarea value={asset.meta} onChange={(event) => onUpdateAsset(asset.id, { meta: event.target.value })} aria-label="品牌素材说明" />
+              <div>
+                {asset.imageUrl && <button type="button" onClick={() => downloadImage(asset.imageUrl, asset.title)}><Download />下载</button>}
+                <button type="button" onClick={() => onDeleteAsset(asset.id)}><Trash2 />删除</button>
+              </div>
+            </div>
+          </article>
         ))}
       </div>
     </div>
