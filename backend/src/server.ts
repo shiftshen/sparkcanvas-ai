@@ -270,9 +270,16 @@ const outputSchema = z.object({
 
 let db: Db = undefined as unknown as Db;
 const runningTimers = new Map<string, NodeJS.Timeout>();
+const autoCoreNodeIds = new Set(["input-image", "brand", "prompt", "output", "model"]);
 
 function now() {
   return new Date().toISOString();
+}
+
+function isEmptyAutoWorkflowFrame(frame: CanvasFrame) {
+  if (frame.prompt.trim()) return false;
+  if (!frame.workflowNodes?.length) return true;
+  return frame.workflowNodes.every((node) => autoCoreNodeIds.has(node.id));
 }
 
 function defaultBrandDetails(brand: Partial<Brand> & Pick<Brand, "id" | "name" | "logoText" | "primaryColor" | "accentColor" | "tone" | "market">): Brand {
@@ -799,6 +806,20 @@ async function migrateDb() {
       frame.modelId = model.id;
       frame.modelName = model.name;
       changed = true;
+    }
+    if (isEmptyAutoWorkflowFrame(frame)) {
+      if (frame.workflowNodes.length || frame.outputs.length || frame.brandContext || frame.finalPrompt || frame.steps.length) {
+        frame.workflowNodes = [];
+        frame.outputs = [];
+        frame.brandContext = "";
+        frame.finalPrompt = "";
+        frame.steps = [];
+        frame.status = "ready";
+        frame.progress = 0;
+        frame.updatedAt = timestamp;
+        changed = true;
+      }
+      continue;
     }
     if (!frame.workflowNodes) {
       frame.workflowNodes = buildWorkflowNodes(frame.prompt, brand, model, frame.settings, frame.brandContext, frame.brandInjected);
@@ -1960,6 +1981,17 @@ app.patch("/canvas/frames/:id", async (req, res) => {
   frame.brandInjected = frame.settings.brandInject;
   frame.brandContext = frame.brandInjected ? nextBrandContext : "";
   frame.finalPrompt = buildFinalPrompt(frame.prompt, nextBrandContext, frame.brandInjected, brand);
+  if (isEmptyAutoWorkflowFrame(frame)) {
+    frame.workflowNodes = [];
+    frame.outputs = [];
+    frame.brandContext = "";
+    frame.finalPrompt = "";
+    frame.steps = [];
+    frame.status = "ready";
+    frame.progress = 0;
+    await persistDb();
+    return res.json(frame);
+  }
   frame.workflowNodes = manualWorkflowNodes
     ?? (frame.workflowNodes.length === 0 && !frame.prompt.trim()
       ? []

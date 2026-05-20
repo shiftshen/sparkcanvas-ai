@@ -671,16 +671,17 @@ function buildPromptReferencePreview(prompt: string, items: MentionItem[]) {
 
 function activeReferenceQuery(prompt: string) {
   const normalized = prompt.replace(/＠/g, "@").replace(/＃/g, "#").replace(/＄/g, "$").replace(/％/g, "%").replace(/\s+$/g, "");
-  const match = normalized.match(/([@/$%])([^@/$%\s]*)$/u);
+  const match = normalized.match(/([@#/$%])([^@#/$%\s]*)$/u);
   if (!match) return null;
-  return { symbol: match[1] as "@" | "/" | "$" | "%", query: match[2].toLowerCase() };
+  return { symbol: match[1] as "@" | "#" | "/" | "$" | "%", query: match[2].toLowerCase() };
 }
 
 function filterMentionItems(items: MentionItem[], prompt: string) {
   const active = activeReferenceQuery(prompt);
   if (!active) return [];
   const pool = items.filter((item) => {
-    if (active.symbol === "@") return item.kind === "agent";
+    if (active.symbol === "@") return item.kind === "agent" || item.kind === "resource";
+    if (active.symbol === "#") return item.kind === "copy";
     if (active.symbol === "/") return item.kind === "command";
     if (active.symbol === "$") return item.kind === "resource" || item.kind === "copy";
     if (active.symbol === "%") return item.kind === "tag";
@@ -1014,6 +1015,13 @@ function App() {
     }
   }
 
+  const topMentionItems = buildMentionItems(activeBrand, assets);
+  const topActiveQuery = activeReferenceQuery(prompt);
+  const topFilteredMentionItems = filterMentionItems(topMentionItems, prompt).slice(0, 10);
+  function insertTopMention(item: MentionItem) {
+    setPrompt(insertReferenceToken(prompt, item.token));
+  }
+
   if (loading) return <div className="rh-loading"><Loader2 className="spin" /> SparkCanvas</div>;
   if (!user) return <LoginScreen error={error} onLogin={() => void login().catch((caught) => setError(caught instanceof Error ? caught.message : "登录失败"))} />;
 
@@ -1023,7 +1031,8 @@ function App() {
         <div className="rh-logo"><span>SC</span><div><strong>SparkCanvas</strong><small>{activeBrand?.name ?? "XMANX"}</small></div></div>
         <div className="rh-top-prompt">
           <Sparkles />
-          <input value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void generate(); }} placeholder="一句话生成品牌图片..." />
+          <input value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void generate(); }} placeholder='@设计师 /生成海报 使用 $logo，#slogan 兼容旧写法' />
+          {topActiveQuery && <MentionPopover items={topFilteredMentionItems} compact onPick={insertTopMention} />}
           <button type="button" onClick={() => void generate()} disabled={!prompt.trim()}><Send />生成</button>
         </div>
         <div className="rh-top-meta">
@@ -2616,8 +2625,8 @@ function BottomComposer(props: {
       )}
       {activeQuery && (
         <div className="rh-mention-popover">
-          <strong>{activeQuery.symbol === "@" ? "@ 智能体" : activeQuery.symbol === "/" ? "/ 命令" : activeQuery.symbol === "$" ? "$ 资源/文案" : "% 标签"}</strong>
-          <em>{activeQuery.symbol === "$" ? "图片资源会作为真实参考图传入 skill，文案资源会展开" : "按 CAL 语言规则生成结构化执行参数"}</em>
+          <strong>{activeQuery.symbol === "@" ? "@ 智能体 / 兼容图片引用" : activeQuery.symbol === "#" ? "# 文本引用兼容" : activeQuery.symbol === "/" ? "/ 命令" : activeQuery.symbol === "$" ? "$ 资源/文案" : "% 标签"}</strong>
+          <em>{activeQuery.symbol === "$" || activeQuery.symbol === "#" || activeQuery.symbol === "@" ? "图片资源会作为真实参考图传入 skill，文本资源会展开；旧 @/# 会自动转 CAL" : "按 CAL 语言规则生成结构化执行参数"}</em>
           {filteredMentionItems.map((item) => (
             <button type="button" key={`${item.group}_${item.id}_${item.token}`} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(item)}>
               <span style={item.imageUrl ? { backgroundImage: `url(${item.imageUrl})` } : { background: item.color }}>{!item.imageUrl ? item.token.slice(0, 2) : ""}</span>

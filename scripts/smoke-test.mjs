@@ -229,6 +229,19 @@ try {
     body: JSON.stringify({ settings: { ratio: "4:5", count: 1, quality: "hd", strength: 72, brandInject: true } })
   });
   assert(emptyFrameSettings.workflowNodes.length === 0, "settings changes on empty canvas must not inject default nodes");
+  const emptyFrameLegacyCoreCleanup = await request(`/canvas/frames/${emptyFrame.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      workflowNodes: [
+        { id: "input-image", type: "image", title: "Reference", body: "", x: 0, y: 0 },
+        { id: "brand", type: "brand", title: "Brand", body: "", parentId: "input-image", x: 260, y: 0 },
+        { id: "prompt", type: "prompt", title: "Prompt", body: "", parentId: "brand", x: 520, y: 0 },
+        { id: "output", type: "output", title: "Output", body: "", parentId: "prompt", x: 780, y: 0 }
+      ],
+      outputs: []
+    })
+  });
+  assert(emptyFrameLegacyCoreCleanup.workflowNodes.length === 0, "legacy auto core nodes should be cleaned from empty canvases");
 
   const generated = await request("/generate", {
     method: "POST",
@@ -342,6 +355,8 @@ try {
   assert(moved.finalPrompt.includes("AI launch kit for xmanx.com") && !moved.finalPrompt.includes("$copy.brand_name XMANX Smoke"), `resource references should still resolve without full brand context injection: ${moved.finalPrompt}`);
 
   const after = await request("/workspace");
+  const migratedEmptyFrame = after.frames.find((frame) => frame.id === emptyFrame.id);
+  assert(migratedEmptyFrame?.workflowNodes.length === 0, "workspace should keep cleaned empty canvases empty");
   assert(after.assets.length === initial.assets.length + 4, "only manually created brand materials should be added to assets");
   assert(after.frames[0].status === "success", "latest frame should be successful");
 

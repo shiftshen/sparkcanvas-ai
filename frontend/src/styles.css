@@ -457,12 +457,30 @@ svg {
 }
 
 .rh-top-prompt {
+  position: relative;
   min-width: 0;
   height: 38px;
   padding: 0 6px 0 12px;
   border-radius: 999px;
   background: #10131d;
   border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.rh-top-prompt .rh-node-mentions.compact {
+  position: absolute;
+  left: 14px;
+  top: calc(100% + 8px);
+  bottom: auto;
+  width: min(560px, calc(100vw - 120px));
+  max-height: 360px;
+  display: grid;
+  align-items: stretch;
+  z-index: 180;
+  padding: 10px;
+  background: rgba(16, 19, 29, 0.98);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.52);
 }
 
 .rh-top-prompt input {
