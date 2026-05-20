@@ -2137,6 +2137,80 @@ svg {
   cursor: pointer;
 }
 
+.rh-gallery-picker {
+  position: fixed;
+  z-index: 136;
+  width: min(420px, calc(100vw - 24px));
+  max-height: min(460px, calc(100vh - 24px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  color: #e5e7eb;
+  background: rgba(20, 24, 32, 0.98);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.52);
+}
+
+.rh-gallery-picker > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rh-gallery-picker > div:first-child button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.rh-gallery-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  overflow: auto;
+}
+
+.rh-gallery-picker-grid button {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 7px;
+  border-radius: 10px;
+  color: #d1d5db;
+  background: rgba(255, 255, 255, 0.06);
+  text-align: left;
+}
+
+.rh-gallery-picker-grid button:hover {
+  background: rgba(167, 243, 208, 0.12);
+}
+
+.rh-gallery-picker-grid span {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  background-color: #080b12;
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.rh-gallery-picker-grid small {
+  overflow: hidden;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .rh-node-generating b {
   padding: 7px 11px;
   border-radius: 8px;

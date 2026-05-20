@@ -2234,6 +2234,7 @@ function Canvas(props: {
   const [minimapOpen, setMinimapOpen] = useState(false);
   const [gridSnap, setGridSnap] = useState(true);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
+  const [galleryPicker, setGalleryPicker] = useState<{ x: number; y: number; worldX: number; worldY: number; anchorId?: string } | null>(null);
   const dragRef = useRef<{ id: string; x: number; y: number; cx: number; cy: number } | null>(null);
   const edgeDragRef = useRef<{ id: string; offset: number; cy: number } | null>(null);
   const nodesRef = useRef(nodes);
@@ -2287,6 +2288,7 @@ function Canvas(props: {
     setSelectedNode(node.id);
     props.setEditingNodeId(node.id);
     setCanvasMenu(null);
+    setGalleryPicker(null);
     commit(next);
     return node;
   }
@@ -2295,6 +2297,7 @@ function Canvas(props: {
     setSelectedNode(null);
     props.setEditingNodeId(null);
     setNodeGeneration(null);
+    setGalleryPicker(null);
   }
 
   function updateNode(id: string, patch: Partial<WorkflowNode>, save = false) {
@@ -2386,6 +2389,7 @@ function Canvas(props: {
     setSelectedNode(null);
     props.setEditingNodeId(null);
     setCanvasMenu(null);
+    setGalleryPicker(null);
     panRef.current = { x: event.clientX, y: event.clientY, vx: props.viewport.x, vy: props.viewport.y };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -2415,14 +2419,21 @@ function Canvas(props: {
     if (node) saveNode(node.id, { parentId: anchorId });
   }
 
-  function addGalleryAssetAt(x: number, y: number, anchorId?: string) {
-    const asset = imageAssets[0];
+  function addGalleryAssetAt(asset: Asset, x: number, y: number, anchorId?: string) {
     if (!asset) {
       addCanvasNode("reference", x, y);
       return;
     }
     const node = addCanvasNode("reference", x, y, [assetToRef(asset)]);
     if (node && anchorId) saveNode(node.id, { parentId: anchorId });
+    setGalleryPicker(null);
+    setCanvasMenu(null);
+  }
+
+  function openGalleryPickerAt(x: number, y: number, worldX: number, worldY: number, anchorId?: string) {
+    if (!imageAssets.length) return;
+    setGalleryPicker({ x, y, worldX, worldY, anchorId });
+    setCanvasMenu(null);
   }
 
   function openCanvasMenuAt(clientX: number, clientY: number) {
@@ -2603,7 +2614,18 @@ function Canvas(props: {
                     }}
                   />
                 </label>
-                <button type="button" onClick={() => addGalleryAssetAt((node.x ?? 0) + 300, node.y ?? 180, node.id)} disabled={imageAssets.length === 0} title={imageAssets.length ? "使用当前品牌素材库第一张图片" : "素材库没有可用图片"}><Library />从图库选择</button>
+                <button
+                  type="button"
+                  onClick={() => openGalleryPickerAt(
+                    props.viewport.x + ((node.x ?? 0) + (node.w ?? 230) + 110) * props.viewport.scale,
+                    props.viewport.y + ((node.y ?? 0) + 110) * props.viewport.scale,
+                    (node.x ?? 0) + 300,
+                    node.y ?? 180,
+                    node.id
+                  )}
+                  disabled={imageAssets.length === 0}
+                  title={imageAssets.length ? "打开当前品牌素材图库并选择一张图片" : "素材库没有可用图片"}
+                ><Library />从图库选择</button>
               </div>
             </div>
           );
@@ -2648,8 +2670,24 @@ function Canvas(props: {
           <button type="button" onClick={() => addCanvasNode("script", canvasMenu.worldX, canvasMenu.worldY)}><Sparkles />添加脚本 <small>Beta</small></button>
           <strong>添加资源</strong>
           <label><Upload />上传图片<input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImageAt(file, canvasMenu.worldX, canvasMenu.worldY); event.currentTarget.value = ""; }} /></label>
-          <button type="button" onClick={() => addGalleryAssetAt(canvasMenu.worldX, canvasMenu.worldY)} disabled={imageAssets.length === 0} title={imageAssets.length ? "使用当前品牌素材库第一张图片" : "素材库没有可用图片"}><Library />从图库选择</button>
+          <button type="button" onClick={() => openGalleryPickerAt(canvasMenu.x, canvasMenu.y, canvasMenu.worldX, canvasMenu.worldY)} disabled={imageAssets.length === 0} title={imageAssets.length ? "打开当前品牌素材图库并选择一张图片" : "素材库没有可用图片"}><Library />从图库选择</button>
           <button type="button" onClick={() => setCanvasMenu(null)}><X />关闭</button>
+        </div>
+      )}
+      {galleryPicker && (
+        <div className="rh-gallery-picker" style={{ left: galleryPicker.x, top: galleryPicker.y }} onPointerDown={(event) => event.stopPropagation()}>
+          <div>
+            <strong>选择素材</strong>
+            <button type="button" onClick={() => setGalleryPicker(null)}><X /></button>
+          </div>
+          <div className="rh-gallery-picker-grid">
+            {imageAssets.slice(0, 12).map((asset) => (
+              <button type="button" key={asset.id} onClick={() => addGalleryAssetAt(asset, galleryPicker.worldX, galleryPicker.worldY, galleryPicker.anchorId)}>
+                <span style={{ backgroundImage: `url(${asset.imageUrl})` }} />
+                <small>{asset.title}</small>
+              </button>
+            ))}
+          </div>
         </div>
       )}
       {minimapOpen && (
