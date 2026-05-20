@@ -125,8 +125,11 @@ type MentionItem = ReferenceItem & {
 };
 
 type AssetUploadOptions = {
+  assetId?: string;
+  brandId?: string;
   title?: string;
   meta?: string;
+  color?: string;
 };
 
 type GenerationSettings = {
@@ -1233,7 +1236,6 @@ function App() {
   const frameBrand = activeFrame?.brandId ? brands.find((brand) => brand.id === activeFrame.brandId) : undefined;
   const projectBrand = activeFrame ? frameBrand : activeBrand;
   const model = models.find((item) => item.id === activeFrame?.modelId) ?? models[0];
-  const activeBrandAssets = projectBrand ? assets.filter((asset) => asset.brandId === projectBrand.id) : [];
   const t = i18n[locale];
 
   function setLocale(nextLocale: Locale) {
@@ -1435,17 +1437,36 @@ function App() {
   }
 
   async function createAsset(file: File, type: Asset["type"] = "upload", options: AssetUploadOptions = {}) {
-    if (!activeBrand) return;
-    const imageUrl = await readFileAsDataUrl(file);
-    const asset = await api.post<Asset>("/assets", {
-      title: options.title ?? file.name.replace(/\.[^.]+$/, ""),
+    const targetBrand = options.brandId ? brands.find((brand) => brand.id === options.brandId) : activeBrand;
+    if (!targetBrand) {
+      setError("请先选择一个品牌，再上传品牌图片。");
+      return;
+    }
+    setError("");
+    const title = options.title ?? (file.name.replace(/\.[^.]+$/, "") || "uploaded image");
+    const params = new URLSearchParams({
+      title,
       type,
-      color: activeBrand.accentColor,
-      meta: options.meta ?? "uploaded reference",
-      imageUrl,
-      brandId: activeBrand.id
+      brandId: targetBrand.id,
+      color: options.color ?? targetBrand.accentColor,
+      meta: options.meta ?? "uploaded reference"
     });
-    setAssets((current) => [asset, ...current]);
+    if (options.assetId) params.set("assetId", options.assetId);
+    try {
+      const response = await fetch(`/api/assets/upload?${params.toString()}`, {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream", ...authHeaders() },
+        body: file
+      });
+      if (!response.ok) throw new Error(await apiErrorMessage(response, "上传品牌图片失败"));
+      const asset = await response.json() as Asset;
+      setAssets((current) => options.assetId
+        ? current.map((item) => item.id === asset.id ? asset : item)
+        : [asset, ...current]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "上传品牌图片失败");
+      throw caught;
+    }
   }
 
   async function deleteAsset(assetId: string) {
@@ -1453,7 +1474,7 @@ function App() {
     setAssets((current) => current.filter((asset) => asset.id !== assetId));
   }
 
-  async function updateAsset(assetId: string, patch: Partial<Pick<Asset, "title" | "type" | "meta" | "color">>) {
+  async function updateAsset(assetId: string, patch: Partial<Pick<Asset, "title" | "type" | "meta" | "color" | "imageUrl">>) {
     const updated = await api.patch<Asset>(`/assets/${assetId}`, patch);
     setAssets((current) => current.map((asset) => asset.id === updated.id ? updated : asset));
   }
@@ -1612,7 +1633,7 @@ function App() {
             locale={locale}
             frames={frames}
             selectedFrameId={activeFrame?.id}
-            assets={activeBrandAssets}
+            assets={assets}
             brands={brands}
             activeBrand={activeBrand}
             templates={templates}
@@ -1770,7 +1791,7 @@ function SideDrawer(props: {
   onSelectAsset: (id: string) => void;
   onAddAssets: () => void;
   onUpload: (file: File, type: Asset["type"], options?: AssetUploadOptions) => void;
-  onUpdateAsset: (id: string, patch: Partial<Pick<Asset, "title" | "type" | "meta" | "color">>) => void;
+  onUpdateAsset: (id: string, patch: Partial<Pick<Asset, "title" | "type" | "meta" | "color" | "imageUrl">>) => void;
   onDeleteAsset: (id: string) => void;
   onSaveBrand: (brand: Brand) => void;
   onUseTemplate: (template: Template) => void;
@@ -1869,7 +1890,7 @@ function AssetPanel(props: {
   onSelect: (id: string) => void;
   onAddAssets: () => void;
   onUpload: (file: File, type: Asset["type"], options?: AssetUploadOptions) => void;
-  onUpdate: (id: string, patch: Partial<Pick<Asset, "title" | "type" | "meta" | "color">>) => void;
+  onUpdate: (id: string, patch: Partial<Pick<Asset, "title" | "type" | "meta" | "color" | "imageUrl">>) => void;
   onDelete: (id: string) => void;
 }) {
   const [uploadType, setUploadType] = useState<Asset["type"]>("upload");
@@ -1982,8 +2003,11 @@ function BrandPanel({
                       const file = event.target.files?.[0];
                       if (!file) return;
                       onUpload(file, slot.assetType, {
+                        assetId: asset?.id,
+                        brandId: brand.id,
                         title: `${draft.name} ${slot.title}`,
-                        meta: `${slot.token} · ${slot.hint}`
+                        meta: `${slot.token} · ${slot.hint}`,
+                        color: draft.accentColor
                       });
                       event.currentTarget.value = "";
                     }}
@@ -2013,7 +2037,7 @@ function BrandPanel({
         <label>强调<input type="color" value={draft.accentColor} onChange={(event) => setDraft({ ...draft, accentColor: event.target.value })} /></label>
       </div>
       <button className="rh-primary-wide" type="button" onClick={() => onSave(draft)}><RefreshCw />保存品牌</button>
-      <label className="rh-brand-upload"><Upload />上传补充素材<input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && onUpload(event.target.files[0], "upload", { meta: "$asset · supplemental brand reference" })} /></label>
+      <label className="rh-brand-upload"><Upload />上传补充素材<input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && onUpload(event.target.files[0], "upload", { brandId: brand.id, meta: "$asset · supplemental brand reference", color: draft.accentColor })} /></label>
       <div className="rh-brand-assets">
         {brandAssets.filter((asset) => asset.imageUrl).map((asset) => (
           <span key={asset.id} title={`${mentionTokenForRole(assetRole(asset))} ${asset.title}`} style={{ backgroundImage: `url(${asset.imageUrl})` }} />

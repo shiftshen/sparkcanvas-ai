@@ -199,6 +199,7 @@ const dataFile = process.env.SPARKCANVAS_DATA_FILE ?? path.join(dataDir, "sparkc
 const projectRoot = path.resolve(__dirname, "../..");
 const frontendPublicDir = path.join(projectRoot, "frontend", "public");
 const generatedDir = process.env.SPARKCANVAS_GENERATED_DIR ?? path.join(frontendPublicDir, "generated");
+const brandUploadDir = path.join(generatedDir, "brand-assets");
 const defaultAiBaseUrl = "https://api.yijiarj.cn/v1";
 const defaultImageGenBaseUrl = defaultAiBaseUrl;
 
@@ -427,13 +428,14 @@ function createAsset(title: string, type: Asset["type"], brandId: string, color:
   return { id: nanoid(8), title, type, brandId, color, meta, imageUrl, createdAt: now() };
 }
 
-function assetTypeToReferenceRole(type: Asset["type"], title = ""): BrandAssetRole["role"] {
+function assetTypeToReferenceRole(type: Asset["type"], title = "", meta = ""): BrandAssetRole["role"] {
+  const text = `${title} ${meta}`;
   if (type === "logo") return "logo";
   if (type === "product") return "product";
-  if (type === "model" && /ip|navigator|mascot|角色|吉祥物|主理人/i.test(title)) return "ip";
+  if (type === "model" && /(?:^|[\s_$.-])ip(?:$|[\s_$.-])|navigator|mascot|角色|吉祥物|主理人/i.test(text)) return "ip";
   if (type === "model") return "model";
-  if (type === "upload" && /store|storefront|店铺|门店|官网|直播间|电商页面/i.test(title)) return "storefront";
-  if (type === "upload" && /environment|scene|background|环境|场景|背景|空间|氛围/i.test(title)) return "environment";
+  if (type === "upload" && /store|storefront|店铺|门店|官网|直播间|电商页面/i.test(text)) return "storefront";
+  if (type === "upload" && /environment|scene|background|环境|场景|背景|空间|氛围/i.test(text)) return "environment";
   if (type === "upload") return "general";
   return "general";
 }
@@ -798,7 +800,7 @@ function textValueForPath(brand: Brand, pathKey: string) {
 
 function assetMatchesPath(asset: Asset, pathKey: string) {
   if (!pathKey) return true;
-  const role = assetTypeToReferenceRole(asset.type, asset.title);
+  const role = assetTypeToReferenceRole(asset.type, asset.title, asset.meta);
   const text = `${asset.title} ${asset.meta}`.toLowerCase();
   const [head, ...rest] = pathKey.split(".");
   if (head === "brand") return role === "logo";
@@ -867,7 +869,7 @@ function resolvePromptAssets(prompt: string, currentBrand?: Brand): ResolvedProm
     }
     imageReferences.push({
       id: `asset_${asset.id}`,
-      role: assetTypeToReferenceRole(asset.type, asset.title),
+      role: assetTypeToReferenceRole(asset.type, asset.title, asset.meta),
       title: asset.title,
       description: `${ref.fullKey} · ${asset.meta}`,
       color: asset.color,
@@ -1093,10 +1095,16 @@ async function migrateDb() {
     });
     const inputNode = frame.workflowNodes.find((node) => node.id === "input-image");
     if (inputNode) {
-      const nextRefs = buildReferenceItems(brand);
-      if (JSON.stringify(inputNode.refs ?? []) !== JSON.stringify(nextRefs)) {
+      const brandRefs = buildReferenceItems(brand);
+      const existingRefs = inputNode.refs ?? [];
+      const nextRefs = [...existingRefs, ...brandRefs].filter((reference, index, list) => (
+        list.findIndex((item) => item.id === reference.id || (item.imageUrl && item.imageUrl === reference.imageUrl)) === index
+      ));
+      if (JSON.stringify(existingRefs) !== JSON.stringify(nextRefs)) {
         inputNode.refs = nextRefs;
-        inputNode.body = nextRefs.map((asset) => `${asset.role}: ${asset.title}`).join(" / ");
+        if (!inputNode.body.trim() || inputNode.body === existingRefs.map((asset) => `${asset.role}: ${asset.title}`).join(" / ")) {
+          inputNode.body = nextRefs.map((asset) => `${asset.role}: ${asset.title}`).join(" / ");
+        }
         changed = true;
       }
     }
@@ -1284,7 +1292,7 @@ function buildBrandContext(brand: Brand) {
   const materialLines = db.assets
     .filter((asset) => asset.brandId === brand.id && !asset.type.startsWith("generated_") && asset.imageUrl)
     .slice(0, 12)
-    .map((asset) => `${mentionForRole(assetTypeToReferenceRole(asset.type, asset.title))} ${asset.title} [image]；${asset.meta}`)
+    .map((asset) => `${mentionForRole(assetTypeToReferenceRole(asset.type, asset.title, asset.meta))} ${asset.title} [image]；${asset.meta}`)
     .join("\n");
   return [
     `$copy.brand_name ${brand.name}`,
@@ -1981,12 +1989,41 @@ function imageExtensionForSkill(format: "png" | "jpeg" | "webp") {
 function detectImageExtension(filePath: string): "png" | "jpg" | "webp" | undefined {
   if (!existsSync(filePath)) return undefined;
   const bytes = readFileSync(filePath);
+  return detectImageExtensionFromBuffer(bytes);
+}
+
+function detectImageExtensionFromBuffer(bytes: Buffer): "png" | "jpg" | "webp" | undefined {
   if (bytes.length < 12) return undefined;
   const header = bytes.subarray(0, 12);
   if (header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "png";
   if (header.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return "jpg";
   if (header.subarray(0, 4).toString("ascii") === "RIFF" && header.subarray(8, 12).toString("ascii") === "WEBP") return "webp";
   return undefined;
+}
+
+function safeUploadSlug(value = "asset") {
+  return value
+    .toLowerCase()
+    .replace(/https?:\/\//g, "")
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "asset";
+}
+
+async function storeAssetImageBuffer(bytes: Buffer, title: string) {
+  const ext = detectImageExtensionFromBuffer(bytes);
+  if (!ext) throw new Error("Uploaded file is not a valid PNG/JPEG/WEBP image");
+  await mkdir(brandUploadDir, { recursive: true });
+  const filename = `${Date.now().toString(36)}-${safeUploadSlug(title)}.${ext}`;
+  await writeFile(path.join(brandUploadDir, filename), bytes);
+  return `/generated/brand-assets/${filename}`;
+}
+
+async function materializeAssetImageUrl(imageUrl: string | undefined, title: string) {
+  const match = imageUrl?.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
+  if (!match) return imageUrl;
+  if (!["png", "jpeg", "jpg", "webp"].includes(match[1].toLowerCase())) return imageUrl;
+  return storeAssetImageBuffer(Buffer.from(match[2], "base64"), title);
 }
 
 function fallbackImageDataUrl(label = "Image generation unavailable") {
@@ -2389,7 +2426,7 @@ function buildReferenceItems(brand: Brand, limit = 6): ReferenceItem[] {
     .filter((asset) => asset.brandId === brand.id && !asset.type.startsWith("generated_") && asset.imageUrl)
     .map((asset) => ({
       id: `asset_${asset.id}`,
-      role: assetTypeToReferenceRole(asset.type, asset.title),
+      role: assetTypeToReferenceRole(asset.type, asset.title, asset.meta),
       title: asset.title,
       description: asset.meta,
       color: asset.color,
@@ -2858,6 +2895,38 @@ app.patch("/brands/:id", async (req, res) => {
   res.json(brand);
 });
 
+app.post("/assets/upload", express.raw({ type: ["image/png", "image/jpeg", "image/jpg", "image/webp", "application/octet-stream"], limit: "25mb" }), async (req, res) => {
+  const input = z.object({
+    assetId: z.string().optional(),
+    title: z.string().min(1),
+    type: z.enum(["upload", "logo", "product", "model", "generated_image", "generated_video"]).default("upload"),
+    brandId: z.string().optional(),
+    color: z.string().default("#e2e8f0"),
+    meta: z.string().default("manual asset")
+  }).parse(req.query);
+  const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  if (!bytes.length) return res.status(400).json({ message: "Uploaded image is empty" });
+  const imageUrl = await storeAssetImageBuffer(bytes, input.title);
+  if (input.assetId) {
+    const existing = db.assets.find((item) => item.id === input.assetId);
+    if (!existing) return res.status(404).json({ message: "Asset not found" });
+    Object.assign(existing, {
+      title: input.title,
+      type: input.type,
+      brandId: input.brandId ?? existing.brandId,
+      color: input.color,
+      meta: input.meta,
+      imageUrl
+    });
+    await persistDb();
+    return res.json(existing);
+  }
+  const asset = createAsset(input.title, input.type, input.brandId ?? activeBrand().id, input.color, input.meta, imageUrl);
+  db.assets.unshift(asset);
+  await persistDb();
+  res.status(201).json(asset);
+});
+
 app.get("/assets", (_req, res) => {
   res.json(db.assets);
 });
@@ -2871,7 +2940,8 @@ app.post("/assets", async (req, res) => {
     meta: z.string().default("manual asset"),
     imageUrl: z.string().optional()
   }).parse(req.body);
-  const asset = createAsset(input.title, input.type, input.brandId ?? activeBrand().id, input.color, input.meta, input.imageUrl);
+  const imageUrl = await materializeAssetImageUrl(input.imageUrl, input.title);
+  const asset = createAsset(input.title, input.type, input.brandId ?? activeBrand().id, input.color, input.meta, imageUrl);
   db.assets.unshift(asset);
   await persistDb();
   res.status(201).json(asset);
@@ -2887,7 +2957,8 @@ app.patch("/assets/:id", async (req, res) => {
     meta: z.string().optional(),
     imageUrl: z.string().optional()
   }).parse(req.body);
-  Object.assign(asset, input);
+  const imageUrl = input.imageUrl === undefined ? undefined : await materializeAssetImageUrl(input.imageUrl, input.title ?? asset.title);
+  Object.assign(asset, { ...input, ...(imageUrl !== undefined ? { imageUrl } : {}) });
   await persistDb();
   res.json(asset);
 });

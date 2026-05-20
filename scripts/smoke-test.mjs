@@ -44,6 +44,21 @@ async function request(pathname, options = {}) {
   return response.json();
 }
 
+async function uploadAssetImage(params) {
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=", "base64");
+  const query = new URLSearchParams(params);
+  const response = await fetch(`${baseUrl}/assets/upload?${query.toString()}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "image/png",
+      Authorization: `Bearer ${token}`
+    },
+    body: png
+  });
+  if (!response.ok) throw new Error(`POST /assets/upload failed: ${response.status} ${await response.text()}`);
+  return response.json();
+}
+
 async function waitForServer() {
   const started = Date.now();
   while (Date.now() - started < 8000) {
@@ -214,6 +229,28 @@ try {
       imageUrl: "/brand-assets/generated/xmanx-ip.png"
     })
   });
+  const uploadedBrandImage = await uploadAssetImage({
+    title: "Smoke Supplemental Brand Upload",
+    type: "upload",
+    brandId: brand.id,
+    color: "#64748b",
+    meta: "$storefront · supplemental brand reference"
+  });
+  assert(uploadedBrandImage.brandId === brand.id && uploadedBrandImage.imageUrl?.startsWith("/generated/brand-assets/"), "binary brand upload should be stored as a generated file URL");
+  const replacedBrandImage = await uploadAssetImage({
+    assetId: uploadedBrandImage.id,
+    title: "Smoke Supplemental Brand Upload Replaced",
+    type: "upload",
+    brandId: brand.id,
+    color: "#64748b",
+    meta: "$storefront · replaced brand reference"
+  });
+  assert(replacedBrandImage.id === uploadedBrandImage.id && replacedBrandImage.imageUrl !== uploadedBrandImage.imageUrl, "brand slot replacement should patch the existing asset image instead of creating a duplicate");
+  const workspaceAfterBrandUpload = await request("/workspace");
+  const reloadedBrandUpload = workspaceAfterBrandUpload.assets.find((item) => item.id === uploadedBrandImage.id);
+  assert(reloadedBrandUpload?.imageUrl?.startsWith("/generated/brand-assets/") && reloadedBrandUpload.title.includes("Replaced"), "uploaded brand image should persist and reload through workspace");
+  const uploadedImageResponse = await fetch(`${baseUrl}${reloadedBrandUpload.imageUrl}`);
+  assert(uploadedImageResponse.ok && uploadedImageResponse.headers.get("content-type")?.includes("image"), "uploaded brand image URL should render as an image");
 
   const resolvedRefs = await request("/ai/resolve-references", {
     method: "POST",
@@ -237,6 +274,15 @@ try {
     })
   });
   assert(prefixRefs.prompt.includes("参考图片") && prefixRefs.prompt.includes("$logo.hero"), "CAL token replacement should not let $logo corrupt $logo.hero");
+  const storefrontRefs = await request("/ai/resolve-references", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "参考 $storefront 生成门店活动首图",
+      brandId: brand.id,
+      brandInject: false
+    })
+  });
+  assert(storefrontRefs.imageReferences.some((reference) => reference.imageUrl === replacedBrandImage.imageUrl && reference.role === "storefront"), "$storefront should resolve to the uploaded brand slot image");
 
   const legacyRefs = await request("/ai/resolve-references", {
     method: "POST",
@@ -595,7 +641,7 @@ try {
   const after = await request("/workspace");
   const migratedEmptyFrame = after.frames.find((frame) => frame.id === emptyFrame.id);
   assert(migratedEmptyFrame?.workflowNodes.some((node) => node.id === plainImageNode.id && node.refs?.length), "workspace should keep generated image nodes on canvas");
-  assert(after.assets.length === initial.assets.length + 4, "only manually created brand materials should be added to assets");
+  assert(after.assets.length === initial.assets.length + 5, "only manually created brand materials should be added to assets");
   assert(after.frames[0].status === "success", "latest frame should be successful");
 
   const exported = await request("/workspace/export");
@@ -603,7 +649,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));
