@@ -756,6 +756,12 @@ svg {
   height: 14px;
 }
 
+.rh-top-meta .rh-credit-refill {
+  color: #0f172a;
+  background: #bbf7d0;
+  border: 1px solid rgba(34, 197, 94, 0.32);
+}
+
 .rh-rail {
   position: fixed;
   left: 10px;

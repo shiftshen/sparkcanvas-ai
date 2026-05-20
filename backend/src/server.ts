@@ -76,7 +76,7 @@ type CanvasFrame = {
   taskId?: string;
   steps: string[];
   workflowNodes: WorkflowNode[];
-  outputs: Array<{ id: string; title: string; kind: OutputKind; gradient: string; copy: string; imageUrl?: string; videoId?: string; videoUrl?: string }>;
+  outputs: Array<{ id: string; title: string; kind: OutputKind; gradient: string; copy: string; imageUrl?: string; fileUrl?: string; videoId?: string; videoUrl?: string }>;
   createdAt: string;
   updatedAt: string;
 };
@@ -271,6 +271,7 @@ const outputSchema = z.object({
   gradient: z.string(),
   copy: z.string(),
   imageUrl: z.string().optional(),
+  fileUrl: z.string().optional(),
   videoId: z.string().optional(),
   videoUrl: z.string().optional()
 });
@@ -1083,11 +1084,25 @@ async function persistDb() {
 
 async function repairInterruptedGenerations() {
   let changed = false;
+  async function repairDocumentArtifacts(frame: CanvasFrame) {
+    for (const output of frame.outputs) {
+      if (output.kind !== "document" || output.fileUrl) continue;
+      try {
+        output.fileUrl = await createPdfArtifact(frame, output, `xmanx-${frame.id}-${output.id || "document"}`);
+        output.copy = appendCopyNote(output.copy, `PDF 文件已生成: ${output.fileUrl}`);
+        changed = true;
+      } catch (error) {
+        output.copy = appendCopyNote(output.copy, `PDF 导出待重试：${error instanceof Error ? error.message.slice(0, 120) : "pdf unavailable"}`);
+        changed = true;
+      }
+    }
+  }
   for (const frame of db.frames) {
     if (frame.status !== "generating") continue;
     const task = db.tasks.find((item) => item.id === frame.taskId);
     if (task && runningTimers.has(task.id)) continue;
     ensureFrameOutputPreviews(frame, "上次生成被中断，已自动补齐可见预览。");
+    await repairDocumentArtifacts(frame);
     frame.status = "success";
     frame.progress = 100;
     frame.updatedAt = now();
@@ -1102,8 +1117,14 @@ async function repairInterruptedGenerations() {
   for (const frame of db.frames) {
     if (frame.status !== "success" || !frame.outputs.some((output) => !output.imageUrl)) continue;
     ensureFrameOutputPreviews(frame, "历史工作流已补齐可见预览。");
+    await repairDocumentArtifacts(frame);
     frame.updatedAt = now();
     changed = true;
+  }
+  for (const frame of db.frames) {
+    if (frame.status !== "success" || !frame.outputs.some((output) => output.kind === "document" && !output.fileUrl)) continue;
+    await repairDocumentArtifacts(frame);
+    frame.updatedAt = now();
   }
   if (changed) await persistDb();
 }
@@ -1989,6 +2010,79 @@ function appendCopyNote(copy: string, note: string) {
   return copy.includes(note) ? copy : `${copy} · ${note}`;
 }
 
+function wrapPdfLine(line: string, limit = 34) {
+  const chars = Array.from(line.replace(/\s+/g, " ").trim());
+  const rows: string[] = [];
+  for (let index = 0; index < chars.length; index += limit) rows.push(chars.slice(index, index + limit).join(""));
+  return rows.length ? rows : [""];
+}
+
+function pdfTextHex(text: string) {
+  let hex = "";
+  for (let index = 0; index < text.length; index += 1) {
+    hex += text.charCodeAt(index).toString(16).padStart(4, "0");
+  }
+  return hex;
+}
+
+async function writeSimplePdf(filePath: string, title: string, lines: string[]) {
+  const cleanLines = [title, ...lines]
+    .flatMap((line) => wrapPdfLine(line, 36))
+    .slice(0, 28);
+  const stream = [
+    "BT",
+    "/F1 18 Tf",
+    "72 778 Td",
+    ...cleanLines.flatMap((line, index) => [
+      index === 1 ? "/F1 11 Tf" : "",
+      `<${pdfTextHex(line || " ")}> Tj`,
+      "0 -24 Td"
+    ]).filter(Boolean),
+    "ET"
+  ].join("\n");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 6 0 R >>",
+    "<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [5 0 R] >>",
+    "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 2 >> >>",
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(body));
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(body);
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  body += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, body);
+}
+
+async function createPdfArtifact(frame: CanvasFrame, output: CanvasFrame["outputs"][number], outputName: string) {
+  const fileName = `${outputName}.pdf`;
+  const filePath = path.join(generatedDir, fileName);
+  const docNodes = nodesForOutput(frame, output).filter((node) => node.type !== "output");
+  const lines = [
+    `项目: ${frame.title}`,
+    `品牌: ${frame.brandName || "未绑定品牌"}`,
+    `状态: ${frame.brandInjected ? "自动注入品牌上下文" : "仅使用显式 CAL 引用"}`,
+    `目标: ${output.title}`,
+    "",
+    ...docNodes.flatMap((node) => [`${node.title}:`, node.body]),
+    "",
+    "最终提示词:",
+    frame.finalPrompt || frame.prompt,
+    "",
+    output.copy
+  ].filter(Boolean);
+  await writeSimplePdf(filePath, output.title || frame.title, lines);
+  return `/generated/${fileName}`;
+}
+
 function ensureFrameOutputPreviews(frame: CanvasFrame, note = "已补齐可见预览。") {
   const brand = frameBrand(frame);
   const colors = neutralBrandColor(brand);
@@ -2037,22 +2131,28 @@ async function fillFrameOutputs(frame: CanvasFrame) {
   const visualDraftNode = frame.workflowNodes.find((node) => node.id === "visual-draft");
   let sharedVisualUrl = visualDraftNode?.refs?.find((item) => item.imageUrl && ["visual", "generated", "document-preview", "video-preview"].includes(item.role))?.imageUrl;
   let sharedVisualNote = "";
+  const needsMasterVisualGeneration = frame.outputs.some((output) => output.kind === "image" || output.kind === "video");
 
   if (visualDraftNode && !sharedVisualUrl) {
-    try {
-      const generated = await runImageGenerationSkill(
-        executableImagePrompt(frame.prompt, brand, "master campaign visual for poster/PDF cover/video first frame", frame.settings),
-        refs,
-        `xmanx-${frame.id}-visual`,
-        model.model,
-        frame.settings,
-        Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "180000")
-      );
-      sharedVisualUrl = generated ?? fallbackImage;
-      if (!generated) sharedVisualNote = "主视觉使用降级预览：未配置有效图片生成 Key。";
-    } catch (error) {
+    if (!needsMasterVisualGeneration) {
       sharedVisualUrl = fallbackImage;
-      sharedVisualNote = `主视觉使用降级预览：${error instanceof Error ? error.message.slice(0, 120) : "image skill unavailable"}`;
+      sharedVisualNote = "PDF-only 工作流已跳过图片生成，使用结构预览封面。";
+    } else {
+      try {
+        const generated = await runImageGenerationSkill(
+          executableImagePrompt(frame.prompt, brand, "master campaign visual for poster/PDF cover/video first frame", frame.settings),
+          refs,
+          `xmanx-${frame.id}-visual`,
+          model.model,
+          frame.settings,
+          Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "180000")
+        );
+        sharedVisualUrl = generated ?? fallbackImage;
+        if (!generated) sharedVisualNote = "主视觉使用降级预览：未配置有效图片生成 Key。";
+      } catch (error) {
+        sharedVisualUrl = fallbackImage;
+        sharedVisualNote = `主视觉使用降级预览：${error instanceof Error ? error.message.slice(0, 120) : "image skill unavailable"}`;
+      }
     }
     const visualRef = generatedReference(
       `generated_${visualDraftNode.id}_${Date.now().toString(36)}`,
@@ -2066,7 +2166,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
 
   for (const [index, output] of frame.outputs.entries()) {
     const outputNode = matchOutputNode(frame, output, index);
-    if (output.imageUrl) {
+    if (output.imageUrl && !(output.kind === "document" && !output.fileUrl)) {
       const existingRef = generatedReference(`generated_${outputNode?.id ?? output.id}_${Date.now().toString(36)}_${index}`, output, outputNode?.preview ?? neutralBrandColor(brand).accent);
       upsertNodeReference(outputNode, existingRef);
       continue;
@@ -2114,7 +2214,12 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         output.copy = appendCopyNote(output.copy, `MP4 视频任务创建失败：${error instanceof Error ? error.message.slice(0, 140) : "video unavailable"}`);
       }
     } else {
-      output.copy = appendCopyNote(output.copy, "已生成 PDF 工作流预览；当前版本先输出封面/结构，后续接入真实导出文件。");
+      try {
+        output.fileUrl = await createPdfArtifact(frame, output, `xmanx-${frame.id}-${output.id || "document"}`);
+        output.copy = appendCopyNote(output.copy, `PDF 文件已生成: ${output.fileUrl}`);
+      } catch (error) {
+        output.copy = appendCopyNote(output.copy, `PDF 导出失败，已保留封面/结构预览：${error instanceof Error ? error.message.slice(0, 120) : "pdf unavailable"}`);
+      }
     }
     const ref = generatedReference(
       `generated_${outputNode?.id ?? output.id}_${Date.now().toString(36)}_${index}`,
@@ -2537,6 +2642,15 @@ app.use((req, res, next) => {
 });
 
 app.get("/me", (_req, res) => {
+  res.json(db.user);
+});
+
+app.post("/me/credits/refill", async (_req, res) => {
+  if (process.env.NODE_ENV === "production" && process.env.DEMO_CREDIT_REFILL !== "true") {
+    return res.status(403).json({ message: "Demo credit refill is disabled in production" });
+  }
+  db.user.credits = Math.max(db.user.credits, 1260);
+  await persistDb();
   res.json(db.user);
 });
 

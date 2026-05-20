@@ -161,7 +161,7 @@ type Frame = {
   taskId?: string;
   steps: string[];
   workflowNodes: WorkflowNode[];
-  outputs: Array<{ id: string; title: string; kind: "image" | "video" | "document"; gradient: string; copy: string; imageUrl?: string; videoId?: string; videoUrl?: string }>;
+  outputs: Array<{ id: string; title: string; kind: "image" | "video" | "document"; gradient: string; copy: string; imageUrl?: string; fileUrl?: string; videoId?: string; videoUrl?: string }>;
   createdAt: string;
   updatedAt?: string;
 };
@@ -1157,6 +1157,16 @@ function App() {
     }
   }
 
+  async function refillDemoCredits() {
+    setError("");
+    try {
+      const nextUser = await api.post<User>("/me/credits/refill", {});
+      setUser(nextUser);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "演示积分恢复失败");
+    }
+  }
+
   async function updateFrame(frameId: string, patch: FramePatch) {
     const updated = await api.patch<Frame>(`/canvas/frames/${frameId}`, patch);
     setFrames((current) => current.map((frame) => frame.id === updated.id ? updated : frame));
@@ -1405,7 +1415,7 @@ function App() {
           <select className="rh-lang-select" value={locale} onChange={(event) => setLocale(event.target.value as Locale)} aria-label="Language">
             {localeOptions.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}
           </select>
-          <strong>{user.credits}</strong>
+          {user.credits <= 0 ? <button type="button" className="rh-credit-refill" onClick={() => void refillDemoCredits()} title="恢复本地演示积分">Refill</button> : <strong>{user.credits}</strong>}
         </div>
       </header>
 
@@ -3131,7 +3141,7 @@ function NodeEditor({
         <div className="rh-node-editor-head">
           <div>
             <strong>{draft.title}</strong>
-            <small>PDF 当前是封面/结构预览，尚未导出真实 PDF 文件。</small>
+            <small>{output?.fileUrl ? "PDF 文件已生成，可下载。" : "PDF 将基于当前结构导出，封面预览会保留在画布中。"}</small>
           </div>
           <button type="button" onClick={onClose}><X /></button>
         </div>
@@ -3139,7 +3149,7 @@ function NodeEditor({
         <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} onBlur={() => onSave({ body: draft.body })} placeholder={promptPlaceholder} />
         <div className="rh-editor-actions">
           <button type="button" onClick={() => { onSave({ title: draft.title, body: draft.body }); onClose(); }}>保存结构</button>
-          <button type="button" disabled>PDF 导出待接入</button>
+          <button type="button" onClick={() => downloadFile(output?.fileUrl, draft.title, "pdf")} disabled={!output?.fileUrl}>下载PDF</button>
         </div>
       </aside>
     );

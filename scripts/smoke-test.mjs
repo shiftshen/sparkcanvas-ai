@@ -97,6 +97,8 @@ try {
   });
   token = login.token;
   assert(login.user?.credits === 1260, "demo login should return seeded credits");
+  const refilledUser = await request("/me/credits/refill", { method: "POST", body: JSON.stringify({}) });
+  assert(refilledUser.credits === 1260, "local demo credit refill should keep demo account testable");
 
   const initial = await request("/workspace");
   assert(initial.brands.some((brand) => brand.id === "brand_xmanx" && brand.active), "XMANX should be the active default brand");
@@ -431,8 +433,9 @@ try {
   const multiOutputCompleted = await waitForTask(multiOutputGenerated.taskId);
   assert(multiOutputCompleted.task.progress === 100 && multiOutputCompleted.frame.progress === 100, "multi-output workflow should finish at 100%, not stay at 96%");
   assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "document" && output.title.includes("PDF")), "CAL -> pdf should create a document output");
+  assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "document" && output.fileUrl?.endsWith(".pdf")), "CAL -> pdf should generate a downloadable PDF artifact");
   assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "video" && output.title.includes("MP4")), "CAL -> mp4 should create a video output");
-  assert(multiOutputCompleted.frame.outputs.every((output) => output.imageUrl && (output.copy.includes("预览") || output.kind === "image")), "every workflow output should have a visible preview or explicit preview note");
+  assert(multiOutputCompleted.frame.outputs.every((output) => output.imageUrl && (output.copy.includes("预览") || output.kind === "image" || output.fileUrl || output.videoId || output.videoUrl)), "every workflow output should have a visible preview or concrete artifact status");
   assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id.startsWith("doc-pdf") && node.type === "process"), "CAL -> pdf should create an editable document/text node");
   assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id.startsWith("video-mp4") && node.type === "video"), "CAL -> mp4 should create a video generation node");
   assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id === "visual-draft" && node.refs?.some((ref) => ref.imageUrl)), "multi-output workflow should place a visible visual draft on the canvas");
@@ -572,7 +575,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "brand", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "model", "model-type-guard", "parameters", "workflow-nodes", "output-presets", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "model", "model-type-guard", "parameters", "workflow-nodes", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));
