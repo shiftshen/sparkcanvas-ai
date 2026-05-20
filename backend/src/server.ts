@@ -460,8 +460,9 @@ function normalizeKey(value = "") {
 }
 
 function brandKey(brand: Brand) {
+  const nameKey = normalizeKey(brand.name);
   const marketKey = normalizeKey(brand.market.split(/\s+/)[0] ?? "");
-  return marketKey || normalizeKey(brand.name) || brand.id;
+  return nameKey || marketKey || brand.id;
 }
 
 function findBrandByKey(key: string) {

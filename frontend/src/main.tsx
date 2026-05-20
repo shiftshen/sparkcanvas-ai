@@ -773,7 +773,7 @@ function normalizeBrandKey(value = "") {
 
 function currentBrandKey(brand?: Brand) {
   if (!brand) return "brand";
-  return normalizeBrandKey(brand.market.split(/\s+/)[0] ?? "") || normalizeBrandKey(brand.name) || brand.id;
+  return normalizeBrandKey(brand.name) || normalizeBrandKey(brand.market.split(/\s+/)[0] ?? "") || brand.id;
 }
 
 function brandReferenceKeys(brand: Brand) {

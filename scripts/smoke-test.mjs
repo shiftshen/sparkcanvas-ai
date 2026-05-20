@@ -189,6 +189,44 @@ try {
   assert(activeBrand.active === true, "brand activation failed");
   assert(activeBrand.forbiddenWords.includes("blurry product"), "brand detail patch failed");
 
+  const dapotBrand = await request("/brands", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "DAPOT",
+      logoText: "DAPOT",
+      primaryColor: "#E60012",
+      accentColor: "#FFB400",
+      tone: "Friendly Thai local restaurant service tone",
+      market: "Thailand buffet hot pot restaurant",
+      slogan: "Eat the World in One Hot Pot",
+      visualStyle: "red black gold hot pot restaurant marketing",
+      assetRoles: [
+        { role: "logo", title: "DAPOT Logo", description: "red black gold restaurant logo", color: "#E60012" },
+        { role: "ip", title: "Dapot Buddy", description: "3D cartoon virtual store manager", color: "#FFB400" },
+        { role: "product", title: "Hot pot buffet", description: "299 399 499 buffet sets", color: "#E60012" }
+      ]
+    })
+  });
+  await request("/assets", {
+    method: "POST",
+    body: JSON.stringify({ title: "DAPOT Logo Image", type: "logo", brandId: dapotBrand.id, color: "#E60012", meta: "$logo · dapot logo image", imageUrl: "/brand-assets/generated/xmanx-logo.png" })
+  });
+  await request("/assets", {
+    method: "POST",
+    body: JSON.stringify({ title: "DAPOT IP Image", type: "model", brandId: dapotBrand.id, color: "#FFB400", meta: "$ip · Dapot Buddy image", imageUrl: "/brand-assets/generated/xmanx-ip.png" })
+  });
+  const dapotRefs = await request("/ai/resolve-references", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "@imgen /生成海报 使用 $dapot $dapot.logo $dapot.ip，显示 $copy.slogan -> JPG",
+      brandId: dapotBrand.id,
+      brandInject: true
+    })
+  });
+  assert(dapotRefs.brandKey === "dapot", "brand key should prefer brand name over market first word");
+  assert(dapotRefs.imageReferences.some((reference) => reference.role === "logo") && dapotRefs.imageReferences.some((reference) => reference.role === "ip"), "$dapot.* references should resolve to real DAPOT image assets");
+  assert(dapotRefs.warnings.length === 0, `DAPOT CAL references should resolve without warnings: ${dapotRefs.warnings.join("; ")}`);
+
   const asset = await request("/assets", {
     method: "POST",
     body: JSON.stringify({
@@ -646,7 +684,7 @@ try {
   const reloadedInputRefs = reloadedSavedFrame?.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [];
   assert(reloadedInputRefs.some((ref) => ref.id === "ref_smoke_png_upload" && ref.imageUrl?.startsWith("/generated/brand-assets/")), "materialized uploaded PNG reference should survive workspace reload without base64");
   assert(migratedEmptyFrame?.workflowNodes.some((node) => node.id === plainImageNode.id && node.refs?.length), "workspace should keep generated image nodes on canvas");
-  assert(after.assets.length === initial.assets.length + 5, "only manually created brand materials should be added to assets");
+  assert(after.assets.length === initial.assets.length + 8, "only manually created brand materials should be added to assets");
   assert(after.frames[0].status === "success", "latest frame should be successful");
 
   const exported = await request("/workspace/export");
