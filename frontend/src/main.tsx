@@ -1440,7 +1440,7 @@ function App() {
     const targetBrand = options.brandId ? brands.find((brand) => brand.id === options.brandId) : activeBrand;
     if (!targetBrand) {
       setError("请先选择一个品牌，再上传品牌图片。");
-      return;
+      return undefined;
     }
     setError("");
     const title = options.title ?? (file.name.replace(/\.[^.]+$/, "") || "uploaded image");
@@ -1463,6 +1463,7 @@ function App() {
       setAssets((current) => options.assetId
         ? current.map((item) => item.id === asset.id ? asset : item)
         : [asset, ...current]);
+      return asset;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "上传品牌图片失败");
       throw caught;
@@ -1652,7 +1653,7 @@ function App() {
             onUpdateAsset={(id, patch) => void updateAsset(id, patch)}
             onDeleteAsset={(id) => void deleteAsset(id)}
             onSaveBrand={(brand) => void saveBrand(brand)}
-            onUseTemplate={(template) => void generate(prompt, template)}
+            onUseTemplate={(template) => void generate(prompt.trim() || template.intent, template, workflowControlsFromFrame(undefined, prompt.trim() || template.intent))}
             onClose={() => setPanel(null)}
           />
         </>
@@ -1677,6 +1678,7 @@ function App() {
         onGenerateScriptNode={(nodeId, nodePrompt, modelId, translate, contentLanguage) => generateNodeScript(nodeId, nodePrompt, modelId, translate, contentLanguage)}
         onGenerateVideoNode={(nodeId, nodePrompt, modelId, settings) => generateNodeVideo(nodeId, nodePrompt, modelId, settings)}
         onGenerateAudioNode={(nodeId, nodePrompt, modelId, settings) => generateNodeAudio(nodeId, nodePrompt, modelId, settings)}
+        onUpload={(file, type, options) => createAsset(file, type, options)}
         onRunWorkflow={() => void runCurrentWorkflow()}
       />
 
@@ -1952,10 +1954,16 @@ function BrandPanel({
   useEffect(() => setDraft(brand), [brand]);
   const brandAssets = assets.filter((asset) => asset.brandId === brand.id);
   const complete = brandCompleteness(draft, brandAssets);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(brand);
+  function saveDraftBeforeSelect(nextBrandId: string) {
+    if (nextBrandId === brand.id) return;
+    if (dirty) onSave(draft);
+    onSelect(nextBrandId);
+  }
   return (
     <div className="rh-brand">
       <div className="rh-brand-switcher">
-        <select value={brand.id} onChange={(event) => onSelect(event.target.value)}>
+        <select value={brand.id} onChange={(event) => saveDraftBeforeSelect(event.target.value)}>
           {brands.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
         </select>
         <button type="button" onClick={onCreate}><Plus />新建品牌</button>
@@ -2118,6 +2126,7 @@ function Canvas(props: {
   onGenerateScriptNode: (nodeId: string, nodePrompt: string, modelId: string, translate: boolean, contentLanguage?: ContentLanguage) => ScriptGenerateResponse | void | Promise<ScriptGenerateResponse | void>;
   onGenerateVideoNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean; contentLanguage: ContentLanguage }) => VideoGenerateResponse | void | Promise<VideoGenerateResponse | void>;
   onGenerateAudioNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean; contentLanguage: ContentLanguage }) => AudioGenerateResponse | void | Promise<AudioGenerateResponse | void>;
+  onUpload: (file: File, type: Asset["type"], options?: AssetUploadOptions) => Promise<Asset | undefined>;
   onRunWorkflow: () => void;
 }) {
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
@@ -2130,22 +2139,32 @@ function Canvas(props: {
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const dragRef = useRef<{ id: string; x: number; y: number; cx: number; cy: number } | null>(null);
   const edgeDragRef = useRef<{ id: string; offset: number; cy: number } | null>(null);
+  const nodesRef = useRef(nodes);
   const visibleNodes = useMemo(() => displayNodes(nodes, shouldUseDefaultWorkflow(nodes)), [nodes]);
   const activeSelectedNode = visibleNodes.find((node) => node.id === selectedNode || node.id === props.editingNodeId);
+  const imageAssets = props.assets.filter((asset) => asset.imageUrl && (!props.activeBrand || asset.brandId === props.activeBrand.id));
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
 
   const lastFrameIdRef = useRef<string | undefined>(props.frame?.id);
   useEffect(() => {
     const nextFrameId = props.frame?.id;
     if (nextFrameId !== lastFrameIdRef.current) {
       lastFrameIdRef.current = nextFrameId;
-      setNodes(nextFrameId ? normalizeWorkflowNodes(props.frame?.workflowNodes, shouldUseDefaultWorkflow(props.frame?.workflowNodes ?? [])) : []);
+      const nextNodes = nextFrameId ? normalizeWorkflowNodes(props.frame?.workflowNodes, shouldUseDefaultWorkflow(props.frame?.workflowNodes ?? [])) : [];
+      nodesRef.current = nextNodes;
+      setNodes(nextNodes);
       return;
     }
     if (props.editingNodeId) return;
-    setNodes(nextFrameId ? normalizeWorkflowNodes(props.frame?.workflowNodes, shouldUseDefaultWorkflow(props.frame?.workflowNodes ?? [])) : []);
+    const nextNodes = nextFrameId ? normalizeWorkflowNodes(props.frame?.workflowNodes, shouldUseDefaultWorkflow(props.frame?.workflowNodes ?? [])) : [];
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
   }, [props.frame?.id, props.frame?.workflowNodes, props.editingNodeId]);
 
-  function commit(nextNodes = nodes) {
+  function commit(nextNodes = nodesRef.current) {
     return props.onUpdateFrame({ workflowNodes: nextNodes });
   }
 
@@ -2165,7 +2184,8 @@ function Canvas(props: {
       w: type === "process" || type === "script" ? 360 : type === "compose" ? 300 : type === "output" || type === "video" ? 260 : 230,
       h: type === "process" || type === "script" ? 260 : type === "compose" ? 260 : 238
     };
-    const next = [...normalizeWorkflowNodes(nodes, shouldUseDefaultWorkflow(nodes)), node];
+    const next = [...normalizeWorkflowNodes(nodesRef.current, shouldUseDefaultWorkflow(nodesRef.current)), node];
+    nodesRef.current = next;
     setNodes(next);
     setSelectedNode(node.id);
     props.setEditingNodeId(node.id);
@@ -2183,13 +2203,15 @@ function Canvas(props: {
   function updateNode(id: string, patch: Partial<WorkflowNode>, save = false) {
     setNodes((current) => {
       const next = current.map((node) => node.id === id ? { ...node, ...patch } : node);
+      nodesRef.current = next;
       if (save) window.setTimeout(() => commit(next), 0);
       return next;
     });
   }
 
   function saveNode(nodeId: string, patch: Partial<WorkflowNode>) {
-    const next = nodes.map((node) => node.id === nodeId ? { ...node, ...patch } : node);
+    const next = nodesRef.current.map((node) => node.id === nodeId ? { ...node, ...patch } : node);
+    nodesRef.current = next;
     setNodes(next);
     commit(next);
   }
@@ -2212,8 +2234,9 @@ function Canvas(props: {
       w: type === "process" || type === "script" ? 360 : type === "compose" ? 300 : type === "output" || type === "video" ? 260 : 230,
       h: type === "process" || type === "script" ? 260 : type === "compose" ? 260 : 238
     };
-    const current = normalizeWorkflowNodes(nodes, shouldUseDefaultWorkflow(nodes));
+    const current = normalizeWorkflowNodes(nodesRef.current, shouldUseDefaultWorkflow(nodesRef.current));
     const next = [...current, node];
+    nodesRef.current = next;
     setNodes(next);
     setSelectedNode(node.id);
     props.setEditingNodeId(node.id);
@@ -2223,11 +2246,12 @@ function Canvas(props: {
 
   function deleteNode(id: string) {
     if (coreNodeIds.includes(id)) return;
-    const deleted = nodes.find((node) => node.id === id);
+    const deleted = nodesRef.current.find((node) => node.id === id);
     const nextParentId = deleted?.parentId;
-    const next = nodes
+    const next = nodesRef.current
       .filter((node) => node.id !== id)
       .map((node) => node.parentId === id ? { ...node, parentId: nextParentId } : node);
+    nodesRef.current = next;
     setNodes(next);
     if (selectedNode === id) setSelectedNode(null);
     if (props.editingNodeId === id) props.setEditingNodeId(null);
@@ -2236,7 +2260,7 @@ function Canvas(props: {
 
   function startNodeDrag(event: React.PointerEvent<HTMLElement>, id: string) {
     if ((event.target as HTMLElement).closest("button, input, textarea, select")) return;
-    const node = nodes.find((item) => item.id === id);
+    const node = nodesRef.current.find((item) => item.id === id);
     dragRef.current = { id, x: node?.x ?? 0, y: node?.y ?? 0, cx: event.clientX, cy: event.clientY };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -2270,16 +2294,38 @@ function Canvas(props: {
   }
 
   async function uploadImageAt(file: File, x: number, y: number) {
-    const imageUrl = await readFileAsDataUrl(file);
     const title = file.name.replace(/\.[^.]+$/, "") || "上传图片";
-    addCanvasNode("reference", x, y, [{
-      id: `upload_canvas_${Date.now().toString(36)}`,
-      role: "uploaded",
+    const asset = await props.onUpload(file, "upload", {
+      brandId: props.activeBrand?.id,
       title,
-      description: "canvas upload",
-      color: props.activeBrand?.accentColor ?? "#f97316",
-      imageUrl
-    }]);
+      meta: "$asset · canvas upload",
+      color: props.activeBrand?.accentColor ?? "#f97316"
+    });
+    if (asset) addCanvasNode("reference", x, y, [assetToRef(asset)]);
+  }
+
+  async function uploadImageAfterNode(file: File, anchorId: string) {
+    const anchor = visibleNodes.find((node) => node.id === anchorId);
+    const title = file.name.replace(/\.[^.]+$/, "") || "上传图片";
+    const asset = await props.onUpload(file, "upload", {
+      brandId: props.activeBrand?.id,
+      title,
+      meta: "$asset · linked canvas upload",
+      color: props.activeBrand?.accentColor ?? "#f97316"
+    });
+    if (!asset) return;
+    const node = addCanvasNode("reference", (anchor?.x ?? 120) + 300, anchor?.y ?? 180, [assetToRef(asset)]);
+    if (node) saveNode(node.id, { parentId: anchorId });
+  }
+
+  function addGalleryAssetAt(x: number, y: number, anchorId?: string) {
+    const asset = imageAssets[0];
+    if (!asset) {
+      addCanvasNode("reference", x, y);
+      return;
+    }
+    const node = addCanvasNode("reference", x, y, [assetToRef(asset)]);
+    if (node && anchorId) saveNode(node.id, { parentId: anchorId });
   }
 
   function openCanvasMenuAt(clientX: number, clientY: number) {
@@ -2298,7 +2344,7 @@ function Canvas(props: {
 
   function startEdgeDrag(event: React.PointerEvent<HTMLElement>, id: string) {
     event.stopPropagation();
-    const node = nodes.find((item) => item.id === id);
+    const node = nodesRef.current.find((item) => item.id === id);
     edgeDragRef.current = { id, offset: node?.edgeOffsetY ?? 0, cy: event.clientY };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -2316,7 +2362,7 @@ function Canvas(props: {
   }
 
   function organizeCanvas() {
-    const normalized = normalizeWorkflowNodes(nodes, shouldUseDefaultWorkflow(nodes));
+    const normalized = normalizeWorkflowNodes(nodesRef.current, shouldUseDefaultWorkflow(nodesRef.current));
     const next = normalized.map((node, index) => {
       const depth = node.id === "input-image" ? 0 : node.id === "brand" ? 1 : node.id === "prompt" ? 2 : node.id === "output" ? 3 : Math.max(1, normalized.findIndex((item) => item.id === node.parentId) + 1);
       const siblings = normalized.filter((item) => (item.parentId ?? "") === (node.parentId ?? "") && !coreNodeIds.includes(item.id));
@@ -2329,6 +2375,7 @@ function Canvas(props: {
         edgeOffsetY: 0
       };
     });
+    nodesRef.current = next;
     setNodes(next);
     commit(next);
   }
@@ -2447,8 +2494,19 @@ function Canvas(props: {
                 <button type="button" onClick={() => addNode(node.id, "audio")}><Music2 />音频/配乐</button>
                 <button type="button" onClick={() => addNode(node.id, "script")}><Sparkles />脚本 <small>Beta</small></button>
                 <strong>添加资源</strong>
-                <button type="button" onClick={() => addNode(node.id, "reference")}><Upload />上传</button>
-                <button type="button" onClick={() => addNode(node.id, "reference")}><Library />从图库选择</button>
+                <label>
+                  <Upload />上传
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void uploadImageAfterNode(file, node.id);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+                <button type="button" onClick={() => addGalleryAssetAt((node.x ?? 0) + 300, node.y ?? 180, node.id)} disabled={imageAssets.length === 0} title={imageAssets.length ? "使用当前品牌素材库第一张图片" : "素材库没有可用图片"}><Library />从图库选择</button>
               </div>
             </div>
           );
@@ -2493,7 +2551,7 @@ function Canvas(props: {
           <button type="button" onClick={() => addCanvasNode("script", canvasMenu.worldX, canvasMenu.worldY)}><Sparkles />添加脚本 <small>Beta</small></button>
           <strong>添加资源</strong>
           <label><Upload />上传图片<input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImageAt(file, canvasMenu.worldX, canvasMenu.worldY); event.currentTarget.value = ""; }} /></label>
-          <button type="button" onClick={() => addCanvasNode("reference", canvasMenu.worldX, canvasMenu.worldY)}><Library />从图库选择</button>
+          <button type="button" onClick={() => addGalleryAssetAt(canvasMenu.worldX, canvasMenu.worldY)} disabled={imageAssets.length === 0} title={imageAssets.length ? "使用当前品牌素材库第一张图片" : "素材库没有可用图片"}><Library />从图库选择</button>
           <button type="button" onClick={() => setCanvasMenu(null)}><X />关闭</button>
         </div>
       )}
@@ -3565,7 +3623,10 @@ function BottomComposer(props: {
     if (!canGenerate) return;
     const shouldOptimize = Boolean(props.prompt.trim()) && (!workflowMode || !/->/.test(props.prompt));
     const nextPrompt = shouldOptimize ? await optimizeCurrentPrompt() : effectivePrompt;
-    props.onGenerate({ outputTarget, orientation, preset: currentPreset.id }, nextPrompt || effectivePrompt);
+    const source = nextPrompt || effectivePrompt;
+    const inferredTarget = /->/.test(source) ? inferOutputTargetFromText(source) : outputTarget;
+    const inferredPreset = inferredTarget === outputTarget ? currentPreset : defaultPresetForOutput(inferredTarget);
+    props.onGenerate({ outputTarget: inferredTarget, orientation: inferredPreset.orientation, preset: inferredPreset.id }, source);
   }
   return (
     <div className={`rh-composer ${workflowMode ? "workflow" : ""}`}>

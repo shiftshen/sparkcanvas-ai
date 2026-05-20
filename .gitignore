@@ -6,6 +6,7 @@ frontend/public/generated/
 auth.json
 config/auth.json
 backend/data/*.json
+backend/data/
 frontend/tsconfig.tsbuildinfo
 npm-debug.log*
 .DS_Store

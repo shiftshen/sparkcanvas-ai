@@ -202,6 +202,15 @@ const generatedDir = process.env.SPARKCANVAS_GENERATED_DIR ?? path.join(frontend
 const brandUploadDir = path.join(generatedDir, "brand-assets");
 const defaultAiBaseUrl = "https://api.yijiarj.cn/v1";
 const defaultImageGenBaseUrl = defaultAiBaseUrl;
+const isProduction = process.env.NODE_ENV === "production";
+const demoAuthEnabled = !isProduction || process.env.SPARKCANVAS_DEMO_AUTH === "true";
+const authToken = process.env.SPARKCANVAS_AUTH_TOKEN || (demoAuthEnabled ? DEMO_TOKEN : "");
+const adminAccount = process.env.SPARKCANVAS_ADMIN_ACCOUNT;
+const adminPassword = process.env.SPARKCANVAS_ADMIN_PASSWORD;
+const allowedOrigins = (process.env.SPARKCANVAS_ALLOWED_ORIGINS || (isProduction ? "https://xmanx.com,https://www.xmanx.com" : ""))
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean);
 
 const templates = [
   { id: "tpl_amazon", title: "Amazon 主图", category: "电商", cost: 8, ratio: "1:1", intent: "white background product hero with logo-safe margin" },
@@ -297,6 +306,7 @@ const outputSchema = z.object({
 });
 
 let db: Db = undefined as unknown as Db;
+let persistDbQueue = Promise.resolve();
 const runningTimers = new Map<string, NodeJS.Timeout>();
 const autoCoreNodeIds = new Set(["input-image", "brand", "prompt", "output", "model"]);
 
@@ -912,6 +922,12 @@ async function loadDb() {
     db = JSON.parse(await readFile(dataFile, "utf8")) as Db;
     await migrateDb();
   } catch {
+    const backupFile = `${dataFile}.bak`;
+    if (existsSync(backupFile)) {
+      db = JSON.parse(await readFile(backupFile, "utf8")) as Db;
+      await persistDb();
+      return;
+    }
     db = createSeedDb();
     await persistDb();
   }
@@ -948,10 +964,6 @@ async function migrateDb() {
     changed = true;
   }
 
-  const beforeAssetCleanupCount = db.assets.length;
-  db.assets = db.assets.filter((asset) => !asset.title.startsWith("新商品素材") && asset.meta !== "manual · ready for generation");
-  if (db.assets.length !== beforeAssetCleanupCount) changed = true;
-
   const requiredXmanxAssets: Array<Pick<Asset, "title" | "type" | "brandId" | "color" | "meta" | "imageUrl">> = [
     { title: "XMANX Logo 透明底", type: "logo", brandId: "brand_xmanx", color: "#111827", meta: "XM · transparent", imageUrl: "/brand-assets/generated/xmanx-logo.png" },
     { title: "黑橙首发运动鞋", type: "product", brandId: "brand_xmanx", color: "#f97316", meta: "product · launch hero", imageUrl: "/brand-assets/generated/xmanx-product.png" },
@@ -983,14 +995,6 @@ async function migrateDb() {
     return normalized;
   });
 
-  const beforeFrameCount = db.frames.length;
-  db.frames = db.frames.filter((frame) => (
-    frame.prompt.trim().toLowerCase() !== "x man x"
-    && !frame.prompt.startsWith("Amazon 主图")
-    && !frame.prompt.startsWith("小红书种草")
-    && !frame.prompt.includes("夏季连衣裙")
-  ));
-  if (db.frames.length !== beforeFrameCount) changed = true;
   const frameIds = new Set(db.frames.map((frame) => frame.id));
   const beforeTaskCount = db.tasks.length;
   db.tasks = db.tasks.filter((task) => frameIds.has(task.frameId));
@@ -1007,9 +1011,28 @@ async function migrateDb() {
     }
   }
 
+  for (const asset of db.assets) {
+    const nextImageUrl = await materializeAssetImageUrl(asset.imageUrl, asset.title);
+    if (nextImageUrl !== asset.imageUrl) {
+      asset.imageUrl = nextImageUrl;
+      changed = true;
+    }
+  }
+
   for (const frame of db.frames) {
     const originalBrandId = frame.brandId;
-    const brand = findBrand(frame.brandId);
+    const materializedNodes = await materializeWorkflowNodeImages(frame.workflowNodes ?? []);
+    if (JSON.stringify(materializedNodes) !== JSON.stringify(frame.workflowNodes ?? [])) {
+      frame.workflowNodes = materializedNodes;
+      changed = true;
+    }
+    const materializedOutputs = await materializeOutputImages(frame.outputs ?? []);
+    if (JSON.stringify(materializedOutputs) !== JSON.stringify(frame.outputs ?? [])) {
+      frame.outputs = materializedOutputs;
+      changed = true;
+    }
+    const hasFrameBrand = Boolean(frame.brandId && db.brands.some((item) => item.id === frame.brandId));
+    const brand = hasFrameBrand ? findBrand(frame.brandId) : undefined;
     const model = models.find((item) => item.id === frame.modelId) ?? models[0];
     if (!frame.settings) {
       frame.settings = defaultSettings(frame.prompt);
@@ -1023,15 +1046,23 @@ async function migrateDb() {
       frame.settings.contentLanguage = "zh-en";
       changed = true;
     }
-    if (!originalBrandId || !db.brands.some((item) => item.id === originalBrandId) || frame.brandName !== brand.name) {
-      frame.brandId = brand.id;
+    if (hasFrameBrand && brand && frame.brandName !== brand.name) {
       frame.brandName = brand.name;
       frame.brandInjected = frame.settings.brandInject;
       frame.brandContext = frame.brandInjected ? buildBrandContext(brand) : "";
       frame.finalPrompt = buildFinalPrompt(frame.prompt, buildBrandContext(brand), frame.brandInjected, brand);
       changed = true;
     }
-    if (frame.brandInjected && !frame.brandContext.startsWith("$copy.brand_name")) {
+    if (!hasFrameBrand && (originalBrandId || frame.brandName !== "无品牌" || frame.brandInjected || frame.brandContext || frame.settings.brandInject)) {
+      frame.brandId = "";
+      frame.brandName = "无品牌";
+      frame.brandInjected = false;
+      frame.settings.brandInject = false;
+      frame.brandContext = "";
+      frame.finalPrompt = buildFinalPrompt(frame.prompt, "", false, undefined);
+      changed = true;
+    }
+    if (brand && frame.brandInjected && !frame.brandContext.startsWith("$copy.brand_name")) {
       frame.brandContext = buildBrandContext(brand);
       frame.finalPrompt = buildFinalPrompt(frame.prompt, frame.brandContext, frame.brandInjected, brand);
       changed = true;
@@ -1060,12 +1091,12 @@ async function migrateDb() {
       changed = true;
     }
     if (!frame.workflowNodes.some((node) => node.id === "brand")) {
-      frame.workflowNodes = mergeWorkflowNodes(buildWorkflowNodes(frame.prompt, brand, model, frame.settings, frame.brandContext || buildBrandContext(brand), frame.brandInjected), frame.workflowNodes);
+      frame.workflowNodes = mergeWorkflowNodes(buildWorkflowNodes(frame.prompt, brand, model, frame.settings, frame.brandContext || (brand ? buildBrandContext(brand) : ""), frame.brandInjected), frame.workflowNodes);
       changed = true;
     }
     const referenceNodeTitles = frame.workflowNodes.filter((node) => node.type === "reference").map((node) => node.title);
     if (referenceNodeTitles.length > new Set(referenceNodeTitles).size) {
-      frame.workflowNodes = buildWorkflowNodes(frame.prompt, brand, model, frame.settings, frame.brandContext || buildBrandContext(brand), frame.brandInjected);
+      frame.workflowNodes = buildWorkflowNodes(frame.prompt, brand, model, frame.settings, frame.brandContext || (brand ? buildBrandContext(brand) : ""), frame.brandInjected);
       changed = true;
     }
     const beforeAutoReferenceCleanup = frame.workflowNodes.length;
@@ -1090,11 +1121,11 @@ async function migrateDb() {
       const complete = typeof node.x === "number" && typeof node.y === "number" && typeof node.w === "number" && typeof node.h === "number";
       if (complete) return node;
       changed = true;
-      const fallback = buildWorkflowNodes(frame.prompt, brand, model, frame.settings, frame.brandContext || buildBrandContext(brand), frame.brandInjected).find((item) => item.id === node.id);
+      const fallback = buildWorkflowNodes(frame.prompt, brand, model, frame.settings, frame.brandContext || (brand ? buildBrandContext(brand) : ""), frame.brandInjected).find((item) => item.id === node.id);
       return { ...node, x: node.x ?? fallback?.x ?? 120 + index * 245, y: node.y ?? fallback?.y ?? 220, w: node.w ?? fallback?.w ?? 240, h: node.h ?? fallback?.h ?? 220 };
     });
     const inputNode = frame.workflowNodes.find((node) => node.id === "input-image");
-    if (inputNode) {
+    if (inputNode && brand && frame.brandInjected) {
       const brandRefs = buildReferenceItems(brand);
       const existingRefs = inputNode.refs ?? [];
       const nextRefs = [...existingRefs, ...brandRefs].filter((reference, index, list) => (
@@ -1151,8 +1182,15 @@ async function migrateDb() {
 }
 
 async function persistDb() {
-  await mkdir(path.dirname(dataFile), { recursive: true });
-  await writeFile(dataFile, JSON.stringify(db, null, 2));
+  persistDbQueue = persistDbQueue.then(async () => {
+    await mkdir(path.dirname(dataFile), { recursive: true });
+    const payload = JSON.stringify(db, null, 2);
+    const tmpFile = `${dataFile}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(tmpFile, payload);
+    if (existsSync(dataFile)) renameSync(dataFile, `${dataFile}.bak`);
+    renameSync(tmpFile, dataFile);
+  });
+  return persistDbQueue;
 }
 
 function pdfArtifactHasEmbeddedImage(fileUrl?: string) {
@@ -2026,6 +2064,25 @@ async function materializeAssetImageUrl(imageUrl: string | undefined, title: str
   return storeAssetImageBuffer(Buffer.from(match[2], "base64"), title);
 }
 
+async function materializeWorkflowNodeImages(nodes: WorkflowNode[]) {
+  return Promise.all(nodes.map(async (node) => ({
+    ...node,
+    refs: node.refs
+      ? await Promise.all(node.refs.map(async (reference) => ({
+        ...reference,
+        imageUrl: await materializeAssetImageUrl(reference.imageUrl, reference.title)
+      })))
+      : node.refs
+  })));
+}
+
+async function materializeOutputImages(outputs: CanvasFrame["outputs"]) {
+  return Promise.all(outputs.map(async (output) => ({
+    ...output,
+    imageUrl: await materializeAssetImageUrl(output.imageUrl, output.title)
+  })));
+}
+
 function fallbackImageDataUrl(label = "Image generation unavailable") {
   const safeLabel = label.replace(/[<>&]/g, "").slice(0, 80) || "Image generation unavailable";
   const svg = [
@@ -2803,7 +2860,16 @@ function installAsyncRouteCatcher(target: express.Express) {
 }
 
 installAsyncRouteCatcher(app);
-app.use(cors({ origin: true }));
+if (isProduction && !authToken) {
+  throw new Error("Production auth is not configured. Set SPARKCANVAS_AUTH_TOKEN or explicitly enable SPARKCANVAS_DEMO_AUTH=true.");
+}
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || !allowedOrigins.length || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error("Origin is not allowed"));
+  },
+  credentials: false
+}));
 app.use(express.json({ limit: "20mb" }));
 app.use("/generated", express.static(generatedDir));
 
@@ -2814,15 +2880,17 @@ app.get("/health", (_req, res) => {
 app.post("/auth/login", (req, res) => {
   const parsed = z.object({ account: z.string(), password: z.string() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid login payload" });
-  if (parsed.data.account !== "shift" || parsed.data.password !== "123456") {
+  const demoMatch = demoAuthEnabled && parsed.data.account === "shift" && parsed.data.password === "123456";
+  const adminMatch = Boolean(adminAccount && adminPassword && parsed.data.account === adminAccount && parsed.data.password === adminPassword);
+  if (!demoMatch && !adminMatch) {
     return res.status(401).json({ message: "Invalid demo account or password" });
   }
-  res.json({ token: DEMO_TOKEN, user: db.user });
+  res.json({ token: authToken, user: db.user });
 });
 
 app.use((req, res, next) => {
   const token = req.header("authorization")?.replace(/^Bearer\s+/i, "");
-  if (token !== DEMO_TOKEN) return res.status(401).json({ message: "Unauthorized" });
+  if (!authToken || token !== authToken) return res.status(401).json({ message: "Unauthorized" });
   next();
 });
 
@@ -3122,8 +3190,8 @@ app.patch("/canvas/frames/:id", async (req, res) => {
     settings: generationSettingsPatchSchema.optional()
   }).parse(req.body);
 
-  const manualWorkflowNodes = input.workflowNodes;
-  const manualOutputs = input.outputs;
+  const manualWorkflowNodes = input.workflowNodes ? await materializeWorkflowNodeImages(input.workflowNodes) : undefined;
+  const manualOutputs = input.outputs ? await materializeOutputImages(input.outputs) : undefined;
   Object.assign(frame, { ...input, workflowNodes: frame.workflowNodes, outputs: frame.outputs }, { updatedAt: now() });
 
   if (input.modelId) {
@@ -3189,7 +3257,14 @@ app.patch("/canvas/frames/:id", async (req, res) => {
     frame.workflowNodes = rebuiltNodes.map((node) => {
       const current = frame.workflowNodes.find((item) => item.id === node.id);
       if (!current) return node;
-      if (!frame.brandInjected && (node.id === "input-image" || node.id === "brand" || node.id === "prompt")) return node;
+      if (!frame.brandInjected && node.id === "input-image") {
+        const nextRefs = [
+          ...(node.refs ?? []),
+          ...((current.refs ?? []).filter((reference) => ["general", "reference", "uploaded"].includes(reference.role) || !reference.id.startsWith("asset_")))
+        ].filter((reference, index, list) => list.findIndex((item) => item.id === reference.id || (item.imageUrl && item.imageUrl === reference.imageUrl)) === index);
+        return { ...node, refs: nextRefs, body: nextRefs.length ? nextRefs.map((asset) => `${asset.role}: ${asset.title}`).join(" / ") : node.body };
+      }
+      if (!frame.brandInjected && (node.id === "brand" || node.id === "prompt")) return node;
       return { ...node, title: current.title, body: current.body, preview: current.preview ?? node.preview, x: current.x ?? node.x, y: current.y ?? node.y, w: current.w ?? node.w, h: current.h ?? node.h };
     });
   }
@@ -3684,7 +3759,7 @@ const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
   if (error instanceof z.ZodError) {
     return res.status(400).json({ message: "Invalid request payload", issues: error.issues });
   }
-  const message = error instanceof Error ? error.message : "Internal server error";
+  const message = isProduction ? "Internal server error" : error instanceof Error ? error.message : "Internal server error";
   res.status(500).json({ message });
 };
 

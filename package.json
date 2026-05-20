@@ -8,7 +8,7 @@
     "build": "npm run build --workspace backend && npm run build --workspace frontend",
     "start": "npm run start --workspace backend",
     "check": "npm run check --workspace frontend && npm run check --workspace backend",
-    "test:smoke": "node scripts/smoke-test.mjs",
+    "test:smoke": "node scripts/smoke-test.mjs && node scripts/production-smoke.mjs",
     "test": "npm run check && npm run build && npm run test:smoke"
   },
   "workspaces": [

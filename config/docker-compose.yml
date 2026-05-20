@@ -19,6 +19,10 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=4100
+      - SPARKCANVAS_AUTH_TOKEN=${SPARKCANVAS_AUTH_TOKEN:?set-a-production-auth-token}
+      - SPARKCANVAS_ADMIN_ACCOUNT=${SPARKCANVAS_ADMIN_ACCOUNT:-}
+      - SPARKCANVAS_ADMIN_PASSWORD=${SPARKCANVAS_ADMIN_PASSWORD:-}
+      - SPARKCANVAS_ALLOWED_ORIGINS=${SPARKCANVAS_ALLOWED_ORIGINS:-https://xmanx.com,https://www.xmanx.com}
       - SPARKCANVAS_DATA_FILE=/app/data/sparkcanvas.json
       - SPARKCANVAS_GENERATED_DIR=/app/data/generated
       - PUBLIC_URL=https://xmanx.com

@@ -8,6 +8,7 @@ const port = 4199;
 const baseUrl = `http://localhost:${port}`;
 const tempDir = await mkdtemp(path.join(tmpdir(), "sparkcanvas-smoke-"));
 const dataFile = path.join(tempDir, "sparkcanvas.json");
+const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 let token = "";
 
 const server = spawn("node", ["dist/server.js"], {
@@ -45,7 +46,7 @@ async function request(pathname, options = {}) {
 }
 
 async function uploadAssetImage(params) {
-  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=", "base64");
+  const png = Buffer.from(tinyPngBase64, "base64");
   const query = new URLSearchParams(params);
   const response = await fetch(`${baseUrl}/assets/upload?${query.toString()}`, {
     method: "POST",
@@ -553,7 +554,7 @@ try {
 
   const editedWorkflowNodes = completed.frame.workflowNodes.map((node) => (
     node.id === "input-image"
-      ? { ...node, title: "可编辑参考图", body: "可编辑参考图：Logo / IP / 模特 / 批量商品素材", preview: "#22c55e", x: 88, y: 188, w: 286, h: 248, edgeOffsetY: 37, refs: [...node.refs, { id: "ref_smoke_model", role: "model", title: "Smoke 模特参考", description: "用于测试多图参考编辑", color: "#22c55e", imageUrl: "data:image/svg+xml;base64,PHN2Zy8+" }] }
+      ? { ...node, title: "可编辑参考图", body: "可编辑参考图：Logo / IP / 模特 / 批量商品素材", preview: "#22c55e", x: 88, y: 188, w: 286, h: 248, edgeOffsetY: 37, refs: [...node.refs, { id: "ref_smoke_model", role: "model", title: "Smoke 模特参考", description: "用于测试多图参考编辑", color: "#22c55e", imageUrl: "data:image/svg+xml;base64,PHN2Zy8+" }, { id: "ref_smoke_png_upload", role: "reference", title: "Smoke PNG Upload", description: "用于测试节点上传图落盘", color: "#0ea5e9", imageUrl: `data:image/png;base64,${tinyPngBase64}` }] }
       : node.id === "brand"
         ? { ...node, body: `${completed.frame.brandContext}\n项目微调：本批图片强调绿色上线活动。` }
         : node
@@ -592,6 +593,7 @@ try {
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").body.includes("可编辑参考图"), "reference node edits should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").refs.some((reference) => reference.id === "ref_smoke_model"), "multi image reference edits should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").refs.some((reference) => reference.id === "ref_smoke_model" && reference.imageUrl?.startsWith("data:image")), "uploaded reference image data should persist");
+  assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").refs.some((reference) => reference.id === "ref_smoke_png_upload" && reference.imageUrl?.startsWith("/generated/brand-assets/")), "uploaded PNG node reference should be materialized to a file URL before saving");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").x === 88, "node drag positions should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").w === 286 && savedWorkflow.workflowNodes.find((node) => node.id === "input-image").h === 248, "node resize dimensions should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").edgeOffsetY === 37, "line drag offsets should persist");
@@ -635,11 +637,14 @@ try {
   assert(moved.brandId === brand.id, `frame should keep selected brand after updates: ${moved.brandId} !== ${brand.id}`);
   assert(moved.brandInjected === false && moved.brandContext === "", "brand injection toggle should hide full brand context");
   const movedInputRefs = moved.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [];
-  assert(movedInputRefs.length > 0 && movedInputRefs.every((ref) => ["logo", "model"].includes(ref.role)), "brand-off workflow should keep only explicit CAL references, not the whole hidden brand package");
+  assert(movedInputRefs.length > 0 && movedInputRefs.some((ref) => ["logo", "model"].includes(ref.role)) && movedInputRefs.some((ref) => ref.id === "ref_smoke_png_upload"), "brand-off workflow should keep explicit CAL references plus user-added canvas uploads, not the whole hidden brand package");
   assert(moved.finalPrompt.includes("AI launch kit for xmanx.com") && !moved.finalPrompt.includes("$copy.brand_name XMANX Smoke"), `resource references should still resolve without full brand context injection: ${moved.finalPrompt}`);
 
   const after = await request("/workspace");
   const migratedEmptyFrame = after.frames.find((frame) => frame.id === emptyFrame.id);
+  const reloadedSavedFrame = after.frames.find((frame) => frame.id === generated.frame.id);
+  const reloadedInputRefs = reloadedSavedFrame?.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [];
+  assert(reloadedInputRefs.some((ref) => ref.id === "ref_smoke_png_upload" && ref.imageUrl?.startsWith("/generated/brand-assets/")), "materialized uploaded PNG reference should survive workspace reload without base64");
   assert(migratedEmptyFrame?.workflowNodes.some((node) => node.id === plainImageNode.id && node.refs?.length), "workspace should keep generated image nodes on canvas");
   assert(after.assets.length === initial.assets.length + 5, "only manually created brand materials should be added to assets");
   assert(after.frames[0].status === "success", "latest frame should be successful");
@@ -649,7 +654,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));
