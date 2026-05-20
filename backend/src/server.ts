@@ -1488,20 +1488,68 @@ function executableImagePrompt(sourcePrompt: string, brand: Brand | undefined, t
   ].filter(Boolean).join("\n");
 }
 
-function executableVideoPrompt(sourcePrompt: string, brand: Brand | undefined, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }) {
+function videoDurationSeconds(settings?: { duration?: string } | Partial<GenerationSettings>) {
+  const raw = typeof settings?.duration === "number" ? settings.duration : Number.parseInt(String(settings?.duration ?? "5"), 10);
+  return Math.max(1, Math.min(60, Number.isFinite(raw) ? raw : 5));
+}
+
+function videoShotCount(durationSeconds: number) {
+  if (durationSeconds <= 6) return 3;
+  if (durationSeconds <= 12) return 4;
+  return 5;
+}
+
+function videoStoryboardBrief(sourcePrompt: string, brand: Brand | undefined, references: ReferenceItem[], settings?: { duration?: string; ratio?: string; contentLanguage?: ContentLanguage | string }) {
+  const durationSeconds = videoDurationSeconds(settings);
+  const shots = videoShotCount(durationSeconds);
+  const perShot = Math.max(1, Math.round(durationSeconds / shots));
+  const keyRefs = references.filter((reference) => reference.imageUrl).slice(0, 6);
+  const shotLabels = [
+    "开场钩子：用首帧建立品牌、Logo、IP/主角和场景关系",
+    "主体展示：展示产品、菜单、服务区或核心卖点，保持同一人物和同一 Logo",
+    "证明镜头：展示真实环境、价格/套餐或用户使用场景，避免换脸和换品牌",
+    "行动号召：回到品牌色、IP 手势和清晰 CTA",
+    "收尾定格：保留首帧同款人物、Logo、安全边距和主视觉构图"
+  ];
+  return [
+    `Storyboard plan: ${durationSeconds}s total, ${shots} shots, about ${perShot}s per shot, ratio ${settings?.ratio ?? "16:9"}.`,
+    `Continuity lock: same brand ${brandLabel(brand)}, same logo style, same IP/model face, same outfit, same product/menu references across every shot.`,
+    keyRefs.length ? `Reference lock: ${keyRefs.map((reference) => `${reference.role}=${reference.title}`).join("; ")}.` : "Reference lock: use the supplied first frame as the single source of truth.",
+    ...shotLabels.slice(0, shots).map((label, index) => `Shot ${index + 1} (${perShot}s): ${label}.`),
+    contentLanguageInstruction(settings, "video"),
+    `Source intent: ${stripCalForExecution(sourcePrompt, resolvePromptAssets(sourcePrompt, brand))}`
+  ].filter(Boolean).join("\n");
+}
+
+function executableVideoPrompt(sourcePrompt: string, brand: Brand | undefined, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }, references: ReferenceItem[] = []) {
   const resolved = resolvePromptAssets(sourcePrompt, brand);
   const cleanIntent = stripCalForExecution(sourcePrompt, resolved);
+  const allReferences = [...references, ...resolved.imageReferences]
+    .filter((reference, index, list) => reference.imageUrl && list.findIndex((item) => item.id === reference.id) === index);
   return [
     "Create a short commercial video from this CAL workflow.",
+    "If an input/first-frame image is supplied, treat it as the exact visual identity anchor for the first frame and continuity reference for every later shot.",
     `User intent: ${cleanIntent}`,
     brand ? `Brand: ${brand.name}; visual style ${brand.visualStyle}; tone ${brand.tone}; colors ${brand.primaryColor} and ${brand.accentColor}.` : "Brand: none unless explicitly referenced.",
-    resolved.imageReferences.length ? `Visual references are represented in the canvas: ${resolved.imageReferences.map((item) => `${item.role} ${item.title}`).join("; ")}.` : "",
+    allReferences.length ? `Submitted visual references: ${allReferences.map((item) => `${item.role} ${item.title}`).join("; ")}.` : "",
+    videoStoryboardBrief(sourcePrompt, brand, allReferences, settings),
     resolved.lockedTexts.length ? `Only use these exact on-screen texts if needed: ${resolved.lockedTexts.map((item) => `"${item}"`).join(", ")}.` : "Avoid on-screen text unless necessary.",
-    contentLanguageInstruction(settings, "video"),
     resolved.tags.length ? `Style tags: ${resolved.tags.join(", ")}.` : "",
     `Video mode: ${settings?.mode ?? "text-to-video"}; ratio ${settings?.ratio ?? "16:9"}; duration ${settings?.duration ?? "5s"}; audio ${settings?.sound === false ? "off" : "on"}.`,
     "Hard constraints: do not show CAL syntax, variables, tables, JSON, or UI screenshots. Generate the final advertisement motion."
   ].filter(Boolean).join("\n");
+}
+
+async function videoInputImageDataUrl(imageUrl?: string) {
+  if (!imageUrl) return "";
+  if (/^data:image\/(png|jpe?g|webp);base64,/i.test(imageUrl)) return imageUrl;
+  if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
+  const filePath = localPublicPathFromUrl(imageUrl);
+  if (!filePath) return "";
+  const ext = path.extname(filePath).toLowerCase();
+  const mime = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : ext === ".webp" ? "image/webp" : "image/png";
+  const bytes = await readFile(filePath);
+  return `data:${mime};base64,${bytes.toString("base64")}`;
 }
 
 function localPublicPathFromUrl(imageUrl?: string) {
@@ -1811,22 +1859,47 @@ async function refreshPendingVideoOutputs(limit = 2) {
   if (results.some(Boolean)) await persistDb();
 }
 
-async function runVideoGeneration(prompt: string, modelName?: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }) {
+type VideoRunResult = {
+  videoId: string;
+  videoUrl: string;
+  raw: unknown;
+  usedFirstFrame: boolean;
+  fallbackReason?: string;
+};
+
+async function submitVideoCreate(prompt: string, model: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }, firstFrameImage?: string, timeoutMs = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? "120000")) {
   const config = serviceConfig("video");
-  if (!config.apiKey) return undefined;
-  const model = modelName || config.model;
-  const createPayload = {
+  const payload: Record<string, unknown> = {
     model,
     prompt,
     aspect_ratio: settings?.ratio?.split("·")[0]?.trim() || "16:9",
-    duration: Number.parseInt(settings?.duration || "5", 10) || 5,
+    duration: videoDurationSeconds(settings),
     with_audio: settings?.sound !== false,
-    mode: settings?.mode,
+    mode: firstFrameImage ? "图生视频" : settings?.mode ?? "文生视频",
     translate: Boolean(settings?.translate)
   };
-  const created = await postJson(`${config.baseUrl}/videos`, config.apiKey, createPayload);
+  if (firstFrameImage) payload.image_url = firstFrameImage;
+  return postJson(`${config.baseUrl}/videos`, config.apiKey, payload, timeoutMs);
+}
+
+async function runVideoGeneration(prompt: string, modelName?: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }, options: { firstFrameUrl?: string } = {}): Promise<VideoRunResult | undefined> {
+  const config = serviceConfig("video");
+  if (!config.apiKey) return undefined;
+  const model = modelName || config.model;
+  const firstFrameImage = await videoInputImageDataUrl(options.firstFrameUrl);
+  let usedFirstFrame = Boolean(firstFrameImage);
+  let fallbackReason = "";
+  let created: unknown;
+  try {
+    created = await submitVideoCreate(prompt, model, settings, firstFrameImage);
+  } catch (error) {
+    if (!firstFrameImage) throw error;
+    usedFirstFrame = false;
+    fallbackReason = `视频 API 未接受首帧图生视频参数，已重试文生视频：${error instanceof Error ? error.message.slice(0, 180) : "unknown error"}`;
+    created = await submitVideoCreate(prompt, model, settings);
+  }
   const immediateUrl = videoUrlFromResponse(created);
-  if (immediateUrl) return { videoId: videoIdFromResponse(created), videoUrl: immediateUrl, raw: created };
+  if (immediateUrl) return { videoId: videoIdFromResponse(created), videoUrl: immediateUrl, raw: created, usedFirstFrame, fallbackReason };
   const videoId = videoIdFromResponse(created);
   if (!videoId) throw new Error(`视频模型未返回 video id: ${JSON.stringify(created).slice(0, 600)}`);
 
@@ -1835,32 +1908,37 @@ async function runVideoGeneration(prompt: string, modelName?: string, settings?:
     await new Promise((resolve) => setTimeout(resolve, attempt < 5 ? 2000 : 5000));
     last = await getJson(`${config.baseUrl}/videos/${videoId}`, config.apiKey);
     const url = videoUrlFromResponse(last);
-    if (url) return { videoId, videoUrl: url, raw: last };
+    if (url) return { videoId, videoUrl: url, raw: last, usedFirstFrame, fallbackReason };
     const status = videoStatusFromResponse(last);
     if (["failed", "error", "cancelled", "canceled"].includes(status)) {
       throw new Error(`视频生成失败: ${JSON.stringify(last).slice(0, 600)}`);
     }
   }
-  return { videoId, videoUrl: "", raw: last };
+  return { videoId, videoUrl: "", raw: last, usedFirstFrame, fallbackReason };
 }
 
-async function createVideoGenerationJob(prompt: string, modelName?: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }, timeoutMs = Number(process.env.WORKFLOW_VIDEO_CREATE_TIMEOUT_MS ?? "45000")) {
+async function createVideoGenerationJob(prompt: string, modelName?: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }, timeoutMs = Number(process.env.WORKFLOW_VIDEO_CREATE_TIMEOUT_MS ?? "45000"), options: { firstFrameUrl?: string } = {}): Promise<VideoRunResult | undefined> {
   const config = serviceConfig("video");
   if (!config.apiKey) return undefined;
   const model = modelName || config.model;
-  const created = await postJson(`${config.baseUrl}/videos`, config.apiKey, {
-    model,
-    prompt,
-    aspect_ratio: settings?.ratio?.split("·")[0]?.trim() || "16:9",
-    duration: Number.parseInt(settings?.duration || "5", 10) || 5,
-    with_audio: settings?.sound !== false,
-    mode: settings?.mode ?? "文生视频",
-    translate: Boolean(settings?.translate)
-  }, timeoutMs);
+  const firstFrameImage = await videoInputImageDataUrl(options.firstFrameUrl);
+  let usedFirstFrame = Boolean(firstFrameImage);
+  let fallbackReason = "";
+  let created: unknown;
+  try {
+    created = await submitVideoCreate(prompt, model, settings, firstFrameImage, timeoutMs);
+  } catch (error) {
+    if (!firstFrameImage) throw error;
+    usedFirstFrame = false;
+    fallbackReason = `视频 API 未接受首帧图生视频参数，已重试文生视频：${error instanceof Error ? error.message.slice(0, 180) : "unknown error"}`;
+    created = await submitVideoCreate(prompt, model, settings, undefined, timeoutMs);
+  }
   return {
     videoId: videoIdFromResponse(created),
     videoUrl: videoUrlFromResponse(created),
-    raw: created
+    raw: created,
+    usedFirstFrame,
+    fallbackReason
   };
 }
 
@@ -2453,14 +2531,30 @@ async function fillFrameOutputs(frame: CanvasFrame) {
 
     output.imageUrl = sharedVisualUrl ?? fallbackImage;
     if (output.kind === "video") {
+      const videoRefs = [
+        ...refs,
+        ...(sharedVisualUrl ? [{
+          id: `first_frame_${frame.id}_${index}`,
+          role: "first-frame",
+          title: "视频首帧",
+          description: "由图片 skill 使用品牌素材生成，作为视频一致性锚点。",
+          color: outputNode?.preview ?? neutralBrandColor(brand).accent,
+          imageUrl: sharedVisualUrl
+        }] : [])
+      ].filter((reference, referenceIndex, list) => list.findIndex((item) => item.id === reference.id) === referenceIndex);
+      const videoSettings = { mode: "图生视频", ratio: `${frame.settings.ratio} · 720P · ${frame.settings.duration || 5}s`, duration: `${frame.settings.duration || 5}s`, sound: true, translate: false, contentLanguage: frame.settings.contentLanguage };
       try {
         const video = await createVideoGenerationJob(
-          executableVideoPrompt(frame.prompt, brand, { ratio: frame.settings.ratio, duration: `${frame.settings.duration || 5}s`, sound: true, contentLanguage: frame.settings.contentLanguage }),
+          executableVideoPrompt(frame.prompt, brand, videoSettings, videoRefs),
           serviceConfig("video").model,
-          { mode: "文生视频", ratio: `${frame.settings.ratio} · 720P · ${frame.settings.duration || 5}s`, duration: `${frame.settings.duration || 5}s`, sound: true, translate: false, contentLanguage: frame.settings.contentLanguage }
+          videoSettings,
+          Number(process.env.WORKFLOW_VIDEO_CREATE_TIMEOUT_MS ?? "45000"),
+          { firstFrameUrl: sharedVisualUrl }
         );
         if (video?.videoId) output.videoId = video.videoId;
         if (video?.videoUrl) output.videoUrl = video.videoUrl;
+        if (video?.fallbackReason) output.copy = appendCopyNote(output.copy, video.fallbackReason);
+        if (video?.usedFirstFrame) output.copy = appendCopyNote(output.copy, `已提交图片 skill 首帧约束视频模型，首帧使用 ${videoRefs.filter((reference) => reference.role !== "first-frame").length} 张品牌参考图生成。`);
         output.copy = appendCopyNote(output.copy, video?.videoUrl
           ? `MP4 文件已生成: ${video.videoUrl}`
           : video?.videoId
@@ -2747,7 +2841,7 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
         id: scriptNodeId,
         type: "script",
         title: "视频脚本",
-        body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 根据视觉草图生成分镜表格、镜头运动、音效和字幕约束，目标输出 ${labelForOutputTarget(target)}。`,
+        body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 根据视觉草图生成分镜表格、镜头运动、音效和字幕约束，目标输出 ${labelForOutputTarget(target)}。\n${videoStoryboardBrief(prompt, brand, referenceItems, { duration: `${settings.duration || 5}s`, ratio: settings.ratio, contentLanguage: settings.contentLanguage })}`,
         parentId: parentForVisual,
         preview: "#7c3aed",
         refs: referenceItems,
@@ -2760,7 +2854,7 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
         id: videoNodeId,
         type: "video",
         title: `${labelForOutputTarget(target)} 生成`,
-        body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 文生视频或图生视频。引用视觉草图和视频脚本，生成 ${labelForOutputTarget(target)}。`,
+        body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 先用图片 skill 生成/锁定视频首帧，再把首帧提交给视频模型做图生视频；如果模型不接受首帧，必须在输出状态中明确降级。`,
         parentId: scriptNodeId,
         preview: "#111827",
         refs: referenceItems,
@@ -3595,20 +3689,71 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   const contextBrand = frameContextBrand(frame);
   const settings = input.settings ?? {};
   const sourcePrompt = node.type === "output" ? `${frame.prompt}\n${input.prompt.trim()}`.trim() : input.prompt.trim();
-  const prompt = executableVideoPrompt(sourcePrompt, contextBrand, settings);
+  const outputNodes = frame.workflowNodes.filter((item) => item.type === "output");
+  const outputIndex = outputNodes.findIndex((item) => item.id === node.id);
+  const targetOutput = outputIndex >= 0 ? frame.outputs[outputIndex] : frame.outputs.find((item) => item.kind === "video");
+  const visualDraftNode = frame.workflowNodes.find((item) => item.id === "visual-draft");
+  const inputRefs = frame.workflowNodes.find((item) => item.id === "input-image")?.refs ?? [];
+  const resolvedRefs = resolvePromptAssets(sourcePrompt, contextBrand).imageReferences;
+  const videoRefs = [
+    ...(node.refs ?? []),
+    ...inputRefs,
+    ...resolvedRefs
+  ].filter((reference, index, list) => reference.imageUrl && list.findIndex((item) => item.id === reference.id || item.imageUrl === reference.imageUrl) === index).slice(0, 8);
+  let firstFrameUrl = node.refs?.find((reference) => ["first-frame", "visual", "video-preview", "generated"].includes(reference.role) && reference.imageUrl)?.imageUrl
+    ?? targetOutput?.imageUrl
+    ?? visualDraftNode?.refs?.find((reference) => reference.imageUrl)?.imageUrl
+    ?? frame.outputs.find((output) => output.kind === "image" && output.imageUrl)?.imageUrl
+    ?? "";
+  let firstFrameNote = "";
+  if (!firstFrameUrl && videoRefs.length) {
+    try {
+      const generated = await runImageGenerationSkill(
+        executableImagePrompt(sourcePrompt, contextBrand, "video first frame / storyboard anchor", { ...frame.settings, ratio: settings.ratio?.split("·")[0]?.trim() || frame.settings.ratio, contentLanguage: settings.contentLanguage ?? frame.settings.contentLanguage }),
+        videoRefs,
+        `xmanx-${frame.id}-${node.id}-first-frame`,
+        models[0]?.model,
+        { ...frame.settings, ratio: settings.ratio?.split("·")[0]?.trim() || frame.settings.ratio, contentLanguage: settings.contentLanguage ?? frame.settings.contentLanguage },
+        Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "300000")
+      );
+      if (generated) {
+        firstFrameUrl = generated;
+        firstFrameNote = `已先用图片 skill 和 ${videoRefs.length} 张参考素材生成视频首帧。`;
+      }
+    } catch (error) {
+      firstFrameNote = `视频首帧生成失败，继续使用视频模型自身能力：${error instanceof Error ? error.message.slice(0, 140) : "image skill unavailable"}`;
+    }
+  }
+  const videoPromptRefs = [
+    ...videoRefs,
+    ...(firstFrameUrl ? [{
+      id: `first_frame_${node.id}_${Date.now().toString(36)}`,
+      role: "first-frame",
+      title: "视频首帧",
+      description: "视频生成使用的一致性锚点。",
+      color: node.preview ?? "#111827",
+      imageUrl: firstFrameUrl
+    }] : [])
+  ];
+  const prompt = executableVideoPrompt(sourcePrompt, contextBrand, settings, videoPromptRefs);
   let generationLines: string[] = [];
   let videoId = "";
   let videoUrl = "";
+  let usedFirstFrame = false;
+  let fallbackReason = "";
   try {
     const result = await runVideoGeneration(
       prompt,
       input.model || serviceConfig("video").model,
-      settings
+      settings,
+      { firstFrameUrl }
     );
+    usedFirstFrame = Boolean(result?.usedFirstFrame);
+    fallbackReason = result?.fallbackReason ?? "";
     if (result?.videoUrl) {
       videoId = result.videoId || "";
       videoUrl = result.videoUrl;
-      generationLines = [`视频ID: ${result.videoId || "completed"}`, `视频URL: ${result.videoUrl}`, "执行状态: 已由 yijiarj 视频模型真实生成。"];
+      generationLines = [`视频ID: ${result.videoId || "completed"}`, `视频URL: ${result.videoUrl}`, usedFirstFrame ? "执行状态: 已由 yijiarj 视频模型按首帧图生视频真实生成。" : "执行状态: 已由 yijiarj 视频模型真实生成。"];
     } else if (result?.videoId) {
       videoId = result.videoId;
       generationLines = [`视频ID: ${result.videoId}`, "执行状态: 视频任务已创建但仍在生成，可用 /v1/videos/{video_id} 查询。"];
@@ -3619,26 +3764,44 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   const videoPlan = [
     prompt,
     "",
+    "分镜规范:",
+    videoStoryboardBrief(sourcePrompt, contextBrand, videoPromptRefs, settings),
+    "",
     `视频类型: ${settings.mode ?? "文生视频"}`,
     `模型: ${input.model ?? serviceConfig("video").model}`,
     `规格: ${settings.ratio ?? "16:9 · 720P · 5s"}`,
     `语言: ${contentLanguageLabel(settings.contentLanguage ?? frame.settings.contentLanguage)}`,
     `声音: ${settings.sound === false ? "关闭" : "开启"}`,
     `翻译: ${settings.translate ? "开启" : "关闭"}`,
+    `首帧: ${firstFrameUrl ? usedFirstFrame ? "已提交给视频模型" : "已生成/已选择，但视频接口未确认使用" : "未使用首帧"}`,
+    `引用素材: ${videoRefs.length ? videoRefs.map((reference) => `${reference.role}:${reference.title}`).join(" / ") : "无"}`,
     `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
+    firstFrameNote,
+    fallbackReason,
     ...(generationLines.length ? generationLines : ["执行状态: 已保存视频生成配置，未配置视频 API Key。"])
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   if (node.type !== "output") node.type = "video";
   node.title = node.title || "Video";
   node.body = videoPlan;
+  if (firstFrameUrl) {
+    upsertNodeReference(node, {
+      id: `first_frame_${node.id}`,
+      role: "first-frame",
+      title: "视频首帧",
+      description: usedFirstFrame ? "已作为 image_url 提交给视频模型。" : "由图片 skill/画布输出生成，用于人工检查视频一致性。",
+      color: node.preview ?? "#111827",
+      imageUrl: firstFrameUrl
+    });
+  }
   if (node.type === "output") {
-    const outputNodes = frame.workflowNodes.filter((item) => item.type === "output");
-    const outputIndex = outputNodes.findIndex((item) => item.id === node.id);
-    const targetOutput = outputIndex >= 0 ? frame.outputs[outputIndex] : frame.outputs.find((item) => item.kind === "video");
     if (targetOutput) {
+      if (firstFrameUrl) targetOutput.imageUrl = firstFrameUrl;
       if (videoId) targetOutput.videoId = videoId;
       if (videoUrl) targetOutput.videoUrl = videoUrl;
+      if (firstFrameNote) targetOutput.copy = appendCopyNote(targetOutput.copy, firstFrameNote);
+      if (usedFirstFrame) targetOutput.copy = appendCopyNote(targetOutput.copy, "已提交视频首帧 image_url 以锁定人物、Logo 和品牌画面。");
+      if (fallbackReason) targetOutput.copy = appendCopyNote(targetOutput.copy, fallbackReason);
       targetOutput.copy = appendCopyNote(targetOutput.copy, generationLines.join(" ") || "执行状态: 已保存视频生成配置，未配置视频 API Key。");
       const ref = generatedReference(`generated_${node.id}_${Date.now().toString(36)}`, targetOutput, node.preview ?? "#0f172a", "video-preview");
       upsertNodeReference(node, ref);

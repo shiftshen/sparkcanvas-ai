@@ -563,6 +563,7 @@ try {
   assert(mp4OutputNode.node.id === "output-mp4" && mp4OutputNode.node.type === "output", "MP4 output node generation should keep the node as an output node");
   assert(mp4OutputNode.frame.outputs.some((output) => output.kind === "video" && /执行状态|视频任务|MP4/.test(output.copy)), "MP4 output node should update the video output status instead of calling image generation");
   assert(mp4OutputNode.videoPlan.includes("Video language: Chinese + Thai") && mp4OutputNode.videoPlan.includes("语言: Chinese + Thai"), "video generation prompt should carry content language");
+  assert(mp4OutputNode.videoPlan.includes("Storyboard plan") && mp4OutputNode.videoPlan.includes("首帧") && mp4OutputNode.videoPlan.includes("引用素材"), "MP4 output plan should expose first-frame and reference-image continuity controls");
 
   const beforeRerunWorkspace = await request("/workspace");
   const beforeRerunFrameCount = beforeRerunWorkspace.frames.length;
@@ -679,6 +680,7 @@ try {
     body: JSON.stringify({ prompt: "保存文生视频配置", model: "grok-imagine-1.0-video-super-720p", settings: { mode: "文生视频", ratio: "9:16 · 720P · 5s", duration: "5s", sound: true, translate: false } })
   });
   assert(videoNode.videoPlan.includes("视频类型: 文生视频") && videoNode.node.type === "video", "video node should save generation plan");
+  assert(videoNode.videoPlan.includes("Storyboard plan") && videoNode.videoPlan.includes("引用素材"), "video node should create a duration-aware storyboard plan with reference controls");
 
   const audioNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_audio/generate-audio`, {
     method: "POST",
