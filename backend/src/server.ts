@@ -1499,6 +1499,21 @@ function videoShotCount(durationSeconds: number) {
   return 5;
 }
 
+function videoKeyframeCount(durationSeconds: number) {
+  if (durationSeconds <= 8) return 1;
+  if (durationSeconds <= 20) return 3;
+  return Math.min(5, Number(process.env.VIDEO_MAX_KEYFRAMES ?? "5"));
+}
+
+function visualDraftTargetLabel(frame: CanvasFrame) {
+  const kinds = new Set(frame.outputs.map((output) => output.kind));
+  if (kinds.size === 1 && kinds.has("video")) return "video first-frame key visual, single cinematic frame, not a poster";
+  if (kinds.size === 1 && kinds.has("document")) return "PDF cover visual with clean margins and room for typeset text";
+  if (kinds.has("video") && kinds.has("document")) return "shared campaign visual for PDF cover and video first frame, clean composition with minimal text";
+  if (kinds.has("video")) return "campaign visual plus video first-frame anchor";
+  return "master campaign visual for poster/PDF cover";
+}
+
 function videoStoryboardBrief(sourcePrompt: string, brand: Brand | undefined, references: ReferenceItem[], settings?: { duration?: string; ratio?: string; contentLanguage?: ContentLanguage | string }) {
   const durationSeconds = videoDurationSeconds(settings);
   const shots = videoShotCount(durationSeconds);
@@ -1518,6 +1533,31 @@ function videoStoryboardBrief(sourcePrompt: string, brand: Brand | undefined, re
     ...shotLabels.slice(0, shots).map((label, index) => `Shot ${index + 1} (${perShot}s): ${label}.`),
     contentLanguageInstruction(settings, "video"),
     `Source intent: ${stripCalForExecution(sourcePrompt, resolvePromptAssets(sourcePrompt, brand))}`
+  ].filter(Boolean).join("\n");
+}
+
+function videoKeyframePrompt(sourcePrompt: string, brand: Brand | undefined, references: ReferenceItem[], settings: { duration?: string; ratio?: string; contentLanguage?: ContentLanguage | string }, shotIndex: number, shotCount: number) {
+  const durationSeconds = videoDurationSeconds(settings);
+  const perShot = Math.max(1, Math.round(durationSeconds / Math.max(1, shotCount)));
+  const shotText = [
+    "opening hook with brand identity, logo safe area, IP/model face and restaurant/product context",
+    "main action with product/menu/service area and the same IP/model identity",
+    "proof shot with food, environment, price/menu or user experience while keeping the same brand world",
+    "CTA shot with brand color, friendly gesture and clean closing composition",
+    "final lockup with logo/IP/product consistency and space for editing"
+  ][Math.min(shotIndex, 4)];
+  return [
+    `Create ONE video keyframe image for shot ${shotIndex + 1}/${shotCount}.`,
+    "Purpose: this image will be submitted to the video model as visual reference / first frame, not used as the final poster.",
+    "Do not create a collage, storyboard sheet, menu page, PDF page, infographic, UI screenshot, or text-heavy layout.",
+    "Make it a single coherent cinematic frame with clear subject, stable camera-ready composition, and realistic motion potential.",
+    `Shot timing: about ${perShot}s within a ${durationSeconds}s video. Shot role: ${shotText}.`,
+    brand ? `Brand lock: ${brand.name}, logo style, IP/model face/outfit, product/menu materials, colors ${brand.primaryColor}/${brand.accentColor}, visual style ${brand.visualStyle}.` : "Brand lock: only use explicitly supplied visual references.",
+    references.length ? `Use attached references for identity and consistency: ${references.slice(0, 6).map((reference) => `${reference.role}=${reference.title}`).join("; ")}.` : "",
+    `Intent: ${stripCalForExecution(sourcePrompt, resolvePromptAssets(sourcePrompt, brand))}`,
+    contentLanguageInstruction(settings, "image"),
+    `Aspect ratio: ${settings.ratio ?? "16:9"}.`,
+    "Hard constraints: no random new character, no changed logo, no changed uniform, no broken text, no CAL variables, no table, no long copy."
   ].filter(Boolean).join("\n");
 }
 
@@ -2474,7 +2514,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
     } else {
       try {
         const generated = await runImageGenerationSkill(
-          executableImagePrompt(frame.prompt, brand, "master campaign visual for poster/PDF cover/video first frame", frame.settings),
+          executableImagePrompt(frame.prompt, brand, visualDraftTargetLabel(frame), frame.settings),
           refs,
           `xmanx-${frame.id}-visual`,
           model.model,
@@ -2531,6 +2571,8 @@ async function fillFrameOutputs(frame: CanvasFrame) {
 
     output.imageUrl = sharedVisualUrl ?? fallbackImage;
     if (output.kind === "video") {
+      const durationSeconds = videoDurationSeconds({ duration: `${frame.settings.duration || 5}s` });
+      const keyframeCount = videoKeyframeCount(durationSeconds);
       const videoRefs = [
         ...refs,
         ...(sharedVisualUrl ? [{
@@ -2543,13 +2585,52 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         }] : [])
       ].filter((reference, referenceIndex, list) => list.findIndex((item) => item.id === reference.id) === referenceIndex);
       const videoSettings = { mode: "图生视频", ratio: `${frame.settings.ratio} · 720P · ${frame.settings.duration || 5}s`, duration: `${frame.settings.duration || 5}s`, sound: true, translate: false, contentLanguage: frame.settings.contentLanguage };
+      const keyframeUrls: string[] = [];
+      for (let shotIndex = 0; shotIndex < keyframeCount; shotIndex += 1) {
+        try {
+          const generatedKeyframe = await runImageGenerationSkill(
+            videoKeyframePrompt(frame.prompt, brand, videoRefs, { ratio: frame.settings.ratio, duration: `${durationSeconds}s`, contentLanguage: frame.settings.contentLanguage }, shotIndex, keyframeCount),
+            videoRefs,
+            `xmanx-${frame.id}-video-keyframe-${index + 1}-${shotIndex + 1}`,
+            model.model,
+            { ...frame.settings, count: 1 },
+            Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "300000")
+          );
+          if (generatedKeyframe) keyframeUrls.push(generatedKeyframe);
+        } catch (error) {
+          output.copy = appendCopyNote(output.copy, `视频关键帧 ${shotIndex + 1} 生成降级：${error instanceof Error ? error.message.slice(0, 100) : "image skill unavailable"}`);
+        }
+      }
+      const firstFrameUrl = keyframeUrls[0] ?? sharedVisualUrl;
+      output.imageUrl = firstFrameUrl ?? output.imageUrl;
+      const keyframeRefs = keyframeUrls.map((imageUrl, shotIndex) => ({
+        id: `video_keyframe_${frame.id}_${index}_${shotIndex}`,
+        role: shotIndex === 0 ? "first-frame" : "keyframe",
+        title: `视频关键帧 ${shotIndex + 1}/${keyframeCount}`,
+        description: `由图片 skill 根据真实品牌素材生成，用于 ${durationSeconds}s 视频第 ${shotIndex + 1} 段视觉一致性。`,
+        color: outputNode?.preview ?? neutralBrandColor(brand).accent,
+        imageUrl
+      }));
+      for (const keyframeRef of keyframeRefs) {
+        upsertNodeReference(outputNode, keyframeRef);
+        const videoNode = frame.workflowNodes.find((node) => node.type === "video" || node.id.includes("mp4"));
+        upsertNodeReference(videoNode, keyframeRef);
+      }
+      if (keyframeRefs.length) {
+        output.copy = appendCopyNote(output.copy, `已按 ${durationSeconds}s 视频生成 ${keyframeRefs.length} 张关键帧；首帧用于图生视频，其余关键帧用于分段/剪辑一致性。`);
+      }
+      if (durationSeconds > 20) {
+        output.copy = appendCopyNote(output.copy, "长视频建议按关键帧拆成多段图生视频，再进入视频合成节点剪辑。");
+      }
+      const videoPromptRefs = [...videoRefs, ...keyframeRefs]
+        .filter((reference, referenceIndex, list) => reference.imageUrl && list.findIndex((item) => item.id === reference.id || item.imageUrl === reference.imageUrl) === referenceIndex);
       try {
         const video = await createVideoGenerationJob(
-          executableVideoPrompt(frame.prompt, brand, videoSettings, videoRefs),
+          executableVideoPrompt(frame.prompt, brand, videoSettings, videoPromptRefs),
           serviceConfig("video").model,
           videoSettings,
           Number(process.env.WORKFLOW_VIDEO_CREATE_TIMEOUT_MS ?? "45000"),
-          { firstFrameUrl: sharedVisualUrl }
+          { firstFrameUrl }
         );
         if (video?.videoId) output.videoId = video.videoId;
         if (video?.videoUrl) output.videoUrl = video.videoUrl;
@@ -3706,26 +3787,42 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
     ?? frame.outputs.find((output) => output.kind === "image" && output.imageUrl)?.imageUrl
     ?? "";
   let firstFrameNote = "";
-  if (!firstFrameUrl && videoRefs.length) {
+  const durationSeconds = videoDurationSeconds(settings);
+  const keyframeCount = videoKeyframeCount(durationSeconds);
+  const generatedKeyframeRefs: ReferenceItem[] = [];
+  if (videoRefs.length) {
+    const startIndex = firstFrameUrl ? 1 : 0;
     try {
-      const generated = await runImageGenerationSkill(
-        executableImagePrompt(sourcePrompt, contextBrand, "video first frame / storyboard anchor", { ...frame.settings, ratio: settings.ratio?.split("·")[0]?.trim() || frame.settings.ratio, contentLanguage: settings.contentLanguage ?? frame.settings.contentLanguage }),
-        videoRefs,
-        `xmanx-${frame.id}-${node.id}-first-frame`,
-        models[0]?.model,
-        { ...frame.settings, ratio: settings.ratio?.split("·")[0]?.trim() || frame.settings.ratio, contentLanguage: settings.contentLanguage ?? frame.settings.contentLanguage },
-        Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "300000")
-      );
-      if (generated) {
-        firstFrameUrl = generated;
-        firstFrameNote = `已先用图片 skill 和 ${videoRefs.length} 张参考素材生成视频首帧。`;
+      for (let shotIndex = startIndex; shotIndex < keyframeCount; shotIndex += 1) {
+        const generated = await runImageGenerationSkill(
+          videoKeyframePrompt(sourcePrompt, contextBrand, videoRefs, { ratio: settings.ratio?.split("·")[0]?.trim() || frame.settings.ratio, duration: `${durationSeconds}s`, contentLanguage: settings.contentLanguage ?? frame.settings.contentLanguage }, shotIndex, keyframeCount),
+          videoRefs,
+          `xmanx-${frame.id}-${node.id}-keyframe-${shotIndex + 1}`,
+          models[0]?.model,
+          { ...frame.settings, ratio: settings.ratio?.split("·")[0]?.trim() || frame.settings.ratio, contentLanguage: settings.contentLanguage ?? frame.settings.contentLanguage },
+          Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "300000")
+        );
+        if (!generated) continue;
+        if (!firstFrameUrl) {
+          firstFrameUrl = generated;
+          firstFrameNote = `已先用图片 skill 和 ${videoRefs.length} 张参考素材生成视频首帧。`;
+        }
+        generatedKeyframeRefs.push({
+          id: `video_keyframe_${node.id}_${shotIndex}`,
+          role: shotIndex === 0 ? "first-frame" : "keyframe",
+          title: `视频关键帧 ${shotIndex + 1}/${keyframeCount}`,
+          description: `按 ${durationSeconds}s 视频节奏生成的分镜关键帧。`,
+          color: node.preview ?? "#111827",
+          imageUrl: generated
+        });
       }
     } catch (error) {
-      firstFrameNote = `视频首帧生成失败，继续使用视频模型自身能力：${error instanceof Error ? error.message.slice(0, 140) : "image skill unavailable"}`;
+      firstFrameNote = `视频关键帧生成失败，继续使用视频模型自身能力：${error instanceof Error ? error.message.slice(0, 140) : "image skill unavailable"}`;
     }
   }
   const videoPromptRefs = [
     ...videoRefs,
+    ...generatedKeyframeRefs,
     ...(firstFrameUrl ? [{
       id: `first_frame_${node.id}_${Date.now().toString(36)}`,
       role: "first-frame",
@@ -3774,6 +3871,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
     `声音: ${settings.sound === false ? "关闭" : "开启"}`,
     `翻译: ${settings.translate ? "开启" : "关闭"}`,
     `首帧: ${firstFrameUrl ? usedFirstFrame ? "已提交给视频模型" : "已生成/已选择，但视频接口未确认使用" : "未使用首帧"}`,
+    `关键帧: ${generatedKeyframeRefs.length ? `${generatedKeyframeRefs.length} 张，长视频可拆段后合成` : keyframeCount > 1 ? "当前仅使用已有首帧；建议继续生成补充关键帧" : "短视频单首帧"}`,
     `引用素材: ${videoRefs.length ? videoRefs.map((reference) => `${reference.role}:${reference.title}`).join(" / ") : "无"}`,
     `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
     firstFrameNote,
@@ -3794,6 +3892,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
       imageUrl: firstFrameUrl
     });
   }
+  for (const keyframeRef of generatedKeyframeRefs) upsertNodeReference(node, keyframeRef);
   if (node.type === "output") {
     if (targetOutput) {
       if (firstFrameUrl) targetOutput.imageUrl = firstFrameUrl;
