@@ -2722,7 +2722,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
           imageUrl: sharedVisualUrl
         }] : [])
       ].filter((reference, referenceIndex, list) => list.findIndex((item) => item.id === reference.id) === referenceIndex);
-      const videoSettings = { mode: "图生视频", ratio: `${frame.settings.ratio} · 720P · ${frame.settings.duration || 5}s`, duration: `${frame.settings.duration || 5}s`, sound: true, translate: false, contentLanguage: frame.settings.contentLanguage };
+      const videoSettings = { mode: "图生视频", ratio: `${frame.settings.ratio} · 720P`, duration: `${durationSeconds}s`, sound: true, translate: false, contentLanguage: frame.settings.contentLanguage };
       const keyframeUrls: string[] = [];
       for (let shotIndex = 0; shotIndex < keyframeCount; shotIndex += 1) {
         try {
