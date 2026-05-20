@@ -548,9 +548,9 @@ function isTextResourcePath(path: string) {
   return head === "copy" || head === "brand" || ["brand_name", "slogan", "title", "subtitle", "promotion", "cta", "price", "address", "phone", "notice", "domain", "market", "tone", "style", "scene", "forbidden", "story", "audience"].includes(head);
 }
 
-function parsePromptAssetRefs(prompt: string, currentBrand: Brand): ParsedAssetRef[] {
+function parsePromptAssetRefs(prompt: string, currentBrand?: Brand): ParsedAssetRef[] {
   prompt = normalizeLegacyPromptRefs(prompt);
-  const currentKey = brandKey(currentBrand);
+  const currentKey = currentBrand ? brandKey(currentBrand) : "";
   const knownBrandKeys = new Set(db.brands.flatMap((brand) => [brandKey(brand), normalizeKey(brand.name), brand.id]));
   const refs: ParsedAssetRef[] = [];
   const regex = /(\$)([\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*)/gu;
@@ -613,7 +613,7 @@ function assetMatchesPath(asset: Asset, pathKey: string) {
   return rest.length === 0 || rest.every((part) => text.includes(part.replace(/_/g, " ")));
 }
 
-function resolvePromptAssets(prompt: string, currentBrand: Brand): ResolvedPromptAssets {
+function resolvePromptAssets(prompt: string, currentBrand?: Brand): ResolvedPromptAssets {
   prompt = normalizeLegacyPromptRefs(prompt);
   const refs = parsePromptAssetRefs(prompt, currentBrand);
   const lockedTexts = extractLockedTexts(prompt);
@@ -630,7 +630,7 @@ function resolvePromptAssets(prompt: string, currentBrand: Brand): ResolvedPromp
   for (const ref of refs) {
     const brand = ref.explicitBrand ? findBrandByKey(ref.brandKey) : currentBrand;
     if (!brand) {
-      warnings.push(`未找到品牌 ${ref.brandKey}`);
+      warnings.push(ref.explicitBrand ? `未找到品牌 ${ref.brandKey}` : `当前项目未绑定品牌，无法解析 ${ref.raw}`);
       continue;
     }
     if (!ref.path) {
@@ -976,6 +976,17 @@ function findBrand(brandId?: string) {
   return (brandId ? db.brands.find((brand) => brand.id === brandId) : undefined) ?? activeBrand();
 }
 
+function frameBrand(frame: Pick<CanvasFrame, "brandId">) {
+  return frame.brandId ? db.brands.find((brand) => brand.id === frame.brandId) : undefined;
+}
+
+function neutralBrandColor(brand?: Brand) {
+  return {
+    accent: brand?.accentColor ?? "#f97316",
+    primary: brand?.primaryColor ?? "#111827"
+  };
+}
+
 function estimateCost(prompt: string, mode: CanvasFrame["mode"], templateCost?: number) {
   if (templateCost) return templateCost;
   if (prompt.includes("视频") || prompt.toLowerCase().includes("video")) return 36;
@@ -1182,12 +1193,25 @@ function requestHeaders(apiKey: string) {
   };
 }
 
-async function postJson(url: string, apiKey: string, body: unknown) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: requestHeaders(apiKey),
-    body: JSON.stringify(body)
-  });
+async function postJson(url: string, apiKey: string, body: unknown, timeoutMs = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? "120000")) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response: globalThis.Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: requestHeaders(apiKey),
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`request timed out after ${Math.round(timeoutMs / 1000)}s: ${url}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
   const text = await response.text();
   let data: unknown = text;
   try {
@@ -1202,8 +1226,20 @@ async function postJson(url: string, apiKey: string, body: unknown) {
   return data;
 }
 
-async function getJson(url: string, apiKey: string) {
-  const response = await fetch(url, { headers: requestHeaders(apiKey) });
+async function getJson(url: string, apiKey: string, timeoutMs = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? "120000")) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response: globalThis.Response;
+  try {
+    response = await fetch(url, { headers: requestHeaders(apiKey), signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`request timed out after ${Math.round(timeoutMs / 1000)}s: ${url}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
   const text = await response.text();
   let data: unknown = text;
   try {
@@ -1314,6 +1350,26 @@ async function runVideoGeneration(prompt: string, modelName?: string, settings?:
   return { videoId, videoUrl: "", raw: last };
 }
 
+async function createVideoProbe(prompt: string, modelName?: string) {
+  const config = serviceConfig("video");
+  if (!config.apiKey) return undefined;
+  const model = modelName || config.model;
+  const created = await postJson(`${config.baseUrl}/videos`, config.apiKey, {
+    model,
+    prompt,
+    aspect_ratio: "16:9",
+    duration: 5,
+    with_audio: true,
+    mode: "文生视频",
+    translate: false
+  }, 30000);
+  return {
+    videoId: videoIdFromResponse(created),
+    videoUrl: videoUrlFromResponse(created),
+    raw: created
+  };
+}
+
 function aiStatus() {
   const imageConfig = imageGenerationConfig();
   const textConfig = serviceConfig("text");
@@ -1389,6 +1445,72 @@ async function imageSkillDiagnostics() {
   };
 }
 
+function modelDiagnostics() {
+  const imageConfig = imageGenerationConfig();
+  const textConfig = serviceConfig("text");
+  const videoConfig = serviceConfig("video");
+  return models.map((item) => {
+    const isImage = item.type === "image";
+    const isVideo = item.type === "video";
+    const configured = isImage
+      ? Boolean(imageConfig.apiKey && imageConfig.baseUrl)
+      : isVideo
+        ? Boolean(videoConfig.apiKey && videoConfig.baseUrl)
+        : Boolean(textConfig.apiKey && textConfig.baseUrl);
+    return {
+      id: item.id,
+      name: item.name,
+      type: item.type,
+      provider: item.provider,
+      model: item.model ?? imageConfig.model,
+      configured,
+      route: isImage ? "scripts/generate_image.py" : isVideo ? `${videoConfig.baseUrl}/videos` : `${textConfig.baseUrl}/chat/completions`,
+      status: item.id === "imgen-skill" ? "recommended" : configured ? "candidate" : "missing_key",
+      note: item.id === "imgen-skill"
+        ? "默认推荐。@imgen 会走本地 skill，并把 $ 引用图片真实传入。"
+        : item.description
+    };
+  });
+}
+
+async function probeModel(modelId: string, prompt?: string) {
+  const model = models.find((item) => item.id === modelId);
+  if (!model) throw new Error(`Unknown model: ${modelId}`);
+  const started = Date.now();
+  if (model.type === "image") {
+    const outputName = `probe-${model.id}-${Date.now().toString(36)}`;
+    const imageUrl = await runImageGenerationSkill(
+      prompt || "A clean product-style test image of a single horse, no text, neutral background.",
+      [],
+      outputName,
+      model.model,
+      { ratio: "1:1", quality: "standard", strength: 70 },
+      45000
+    );
+    return {
+      id: model.id,
+      ok: Boolean(imageUrl),
+      type: model.type,
+      model: model.model ?? imageGenerationConfig().model,
+      imageUrl,
+      elapsedMs: Date.now() - started
+    };
+  }
+  const result = await createVideoProbe(
+    prompt || "A five second product-style validation video, simple camera push in, no text.",
+    model.model
+  );
+  return {
+    id: model.id,
+    ok: Boolean(result?.videoId || result?.videoUrl),
+    type: model.type,
+    model: model.model,
+    videoId: result?.videoId,
+    videoUrl: result?.videoUrl,
+    elapsedMs: Date.now() - started
+  };
+}
+
 function ratioForImageSkill(ratio?: string) {
   const value = ratio?.split("·")[0]?.trim();
   return value && /^\d+:\d+$/.test(value) ? value : "1:1";
@@ -1407,7 +1529,7 @@ function fallbackImageDataUrl(label = "Image generation unavailable") {
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 }
 
-async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string, settings?: Partial<GenerationSettings>) {
+async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string, settings?: Partial<GenerationSettings>, timeoutMs = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? "120000")) {
   const imageConfig = imageGenerationConfig(modelName);
   if (!imageConfig.apiKey || !imageConfig.baseUrl) return undefined;
 
@@ -1440,6 +1562,7 @@ async function runImageGenerationSkill(prompt: string, references: ReferenceItem
   }
 
   return new Promise<string>((resolve, reject) => {
+    let settled = false;
     const child = spawn("python3", args, {
       cwd: projectRoot,
       env: {
@@ -1452,10 +1575,24 @@ async function runImageGenerationSkill(prompt: string, references: ReferenceItem
     });
     let stdout = "";
     let stderr = "";
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGTERM");
+      reject(new Error(`image generation skill timed out after ${Math.round(timeoutMs / 1000)}s for model ${imageConfig.model}`));
+    }, timeoutMs);
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
     child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (code === 0) return resolve(`/generated/${filename}`);
       reject(new Error(stderr || stdout || `image generation skill exited with code ${code}`));
     });
@@ -1463,7 +1600,7 @@ async function runImageGenerationSkill(prompt: string, references: ReferenceItem
 }
 
 async function fillFrameOutputs(frame: CanvasFrame) {
-  const brand = findBrand(frame.brandId);
+  const brand = frameBrand(frame);
   const resolvedRefs = resolvePromptAssets(frame.prompt, brand).imageReferences;
   const refs = [
     ...resolvedRefs,
@@ -1480,12 +1617,13 @@ async function fillFrameOutputs(frame: CanvasFrame) {
       output.imageUrl = generated ?? fallbackImage;
       const outputNode = frame.workflowNodes.filter((node) => node.type === "output")[index];
       if (outputNode && output.imageUrl) {
+        const colors = neutralBrandColor(brand);
         const ref: ReferenceItem = {
           id: `generated_${outputNode.id}_${Date.now().toString(36)}_${index}`,
           role: "generated",
           title: output.title,
           description: output.copy,
-          color: outputNode.preview ?? brand.accentColor,
+          color: outputNode.preview ?? colors.accent,
           imageUrl: output.imageUrl
         };
         outputNode.refs = [ref, ...(outputNode.refs ?? []).filter((item) => item.imageUrl !== ref.imageUrl)].slice(0, 12);
@@ -1893,6 +2031,26 @@ app.get("/ai/diagnostics", async (_req, res) => {
   res.json(await imageSkillDiagnostics());
 });
 
+app.get("/ai/models/diagnostics", (_req, res) => {
+  res.json({ models: modelDiagnostics() });
+});
+
+app.post("/ai/models/probe", async (req, res) => {
+  const input = z.object({
+    modelId: z.string().min(1),
+    prompt: z.string().optional()
+  }).parse(req.body);
+  try {
+    res.json(await probeModel(input.modelId, input.prompt));
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      modelId: input.modelId,
+      message: error instanceof Error ? error.message : "model probe failed"
+    });
+  }
+});
+
 app.post("/ai/transform-text", async (req, res) => {
   const input = z.object({
     text: z.string().min(1),
@@ -2076,7 +2234,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
     }).optional()
   }).parse(req.body);
 
-  const brand = findBrand(frame.brandId);
+  const brand = frameBrand(frame);
+  const colors = neutralBrandColor(brand);
   const selectedModel = models.find((item) => item.id === input.modelId) ?? models.find((item) => item.id === frame.modelId) ?? models[0];
   if (input.settings) {
     frame.settings = { ...defaultSettings(frame.prompt, frame.settings), ...input.settings };
@@ -2089,8 +2248,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
   const shouldInjectBrand = Boolean(input.settings?.brandInject);
   const prompt = buildFinalPrompt(
     input.prompt?.trim() || node.body || frame.prompt,
-    frame.brandContext || buildBrandContext(brand),
-    shouldInjectBrand,
+    brand ? frame.brandContext || buildBrandContext(brand) : "",
+    Boolean(brand && shouldInjectBrand),
     brand
   );
   const outputName = `node-${frame.id}-${node.id}-${Date.now().toString(36)}`;
@@ -2121,7 +2280,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
     role: node.type === "reference" ? "reference" : "generated",
     title: node.title || "Generated image",
     description: node.body,
-    color: node.preview ?? brand.accentColor,
+    color: node.preview ?? colors.accent,
     imageUrl
   };
   if (node.type === "image" || node.type === "reference" || node.type === "output") {
@@ -2133,7 +2292,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
       id: `out_${node.id}`,
       title: node.title || "Output",
       kind: "image" as const,
-      gradient: `linear-gradient(135deg, ${brand.accentColor}, #f8fafc 58%, ${brand.primaryColor})`,
+      gradient: `linear-gradient(135deg, ${colors.accent}, #f8fafc 58%, ${colors.primary})`,
       copy: node.body || frame.prompt,
       imageUrl
     };

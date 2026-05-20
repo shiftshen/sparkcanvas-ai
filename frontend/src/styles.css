@@ -2898,6 +2898,12 @@ svg {
   white-space: nowrap;
 }
 
+.rh-generation-message.warning {
+  color: #fed7aa;
+  background: rgba(67, 20, 7, 0.82);
+  border-color: rgba(251, 146, 60, 0.34);
+}
+
 .rh-generation-focus {
   position: absolute;
   inset: 0;

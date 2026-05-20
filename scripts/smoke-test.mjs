@@ -107,6 +107,9 @@ try {
   assert(aiDiagnostics.runtime.scriptExists === true, "AI diagnostics should find the local image skill script");
   assert(aiDiagnostics.runtime.helpOk === true, "AI diagnostics should verify the local image skill CLI");
   assert(!("apiKey" in aiDiagnostics.imageGeneration), "AI diagnostics must not expose secrets");
+  const modelDiagnostics = await request("/ai/models/diagnostics");
+  assert(modelDiagnostics.models.some((item) => item.id === "imgen-skill" && item.status === "recommended"), "model diagnostics should mark @imgen as the recommended image route");
+  assert(modelDiagnostics.models.some((item) => item.id === "yijiarj-veo-3-1-fast" && item.type === "video"), "model diagnostics should include switchable video candidates");
 
   const invalidGenerate = await fetch(`${baseUrl}/generate`, {
     method: "POST",
@@ -399,7 +402,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "brand", "asset", "asset-edit", "ai-status", "ai-diagnostics", "resolve-references", "legacy-reference-alias", "model", "parameters", "workflow-nodes", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "brand", "asset", "asset-edit", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "legacy-reference-alias", "model", "parameters", "workflow-nodes", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));

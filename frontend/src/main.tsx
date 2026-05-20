@@ -867,7 +867,7 @@ function App() {
       type: "image",
       title: "Image",
       body: nodePrompt,
-      preview: activeBrand?.accentColor ?? "#f97316",
+      preview: projectBrand?.accentColor ?? "#f97316",
       refs: [],
       x: 120 + (siblingCount % 4) * 280,
       y: 140 + Math.floor(siblingCount / 4) * 310,
@@ -877,10 +877,10 @@ function App() {
   }
 
   async function generate(input = prompt, template?: Template, reuseCurrentWorkflow = true) {
-    if (!input.trim() || !activeBrand || !model) return;
+    if (!input.trim() || !model) return;
     setError("");
     const nodePrompt = template ? template.intent : input;
-    const targetFrame = activeFrame ?? await api.post<Frame>("/canvas/frames", { brandId: activeBrand.id });
+    const targetFrame = activeFrame ?? await api.post<Frame>("/canvas/frames", { brandId: projectBrand?.id ?? null });
     if (!activeFrame) {
       setFrames((current) => [targetFrame, ...current]);
       setSelectedFrameId(targetFrame.id);
@@ -1163,7 +1163,7 @@ function App() {
           frame={activeFrame}
           prompt={prompt}
           setPrompt={setPrompt}
-          activeBrand={projectBrand ?? activeBrand}
+          activeBrand={projectBrand}
           brands={brands}
           model={model}
           models={models}
@@ -1171,7 +1171,7 @@ function App() {
           aiStatus={aiStatus}
           aiDiagnostics={aiDiagnostics}
           onGenerate={() => void generate()}
-          onCreateProject={() => void createProject()}
+          onCreateProject={() => void createProject({ brandId: projectBrand?.id ?? null })}
           onUpdateFrame={(patch) => activeFrame && void updateFrame(activeFrame.id, patch)}
         />
       )}
@@ -2353,7 +2353,11 @@ function NodeEditor({
           <span>{imageUrl ? "当前图片" : "空图片节点"}</span>
           {generating && <div className="rh-generation-focus"><strong>生成中 {generationProgress}%...</strong><small>取消</small><i><b style={{ width: `${generationProgress}%` }} /></i></div>}
         </button>
-        {generationMessage && <small className="rh-generation-message">{generationMessage}</small>}
+        {generationMessage && (
+          <small className={`rh-generation-message ${/失败|降级|unavailable|HTTP|missing/i.test(generationMessage) ? "warning" : ""}`}>
+            {generationMessage}
+          </small>
+        )}
         <div className="rh-image-editor-footer">
           <select value={imageModelId} onChange={(event) => setImageModelId(event.target.value)}>
             {imageModels.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
