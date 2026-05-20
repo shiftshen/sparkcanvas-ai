@@ -82,6 +82,8 @@ type CanvasFrame = {
 };
 
 type OutputKind = "image" | "video" | "document";
+type WorkflowOutputTarget = "jpg" | "png" | "poster" | "pdf" | "mp4" | "kit";
+type WorkflowOrientation = "square" | "portrait" | "landscape";
 
 type WorkflowNode = {
   id: string;
@@ -585,6 +587,9 @@ function normalizeOutputTarget(value: string) {
     海报: "poster",
     图片: "image",
     主图: "image",
+    jpg: "jpg",
+    jpeg: "jpg",
+    png: "png",
     poster: "poster",
     image: "image",
     img: "image",
@@ -611,10 +616,52 @@ function labelForOutputTarget(target: string) {
   const labels: Record<string, string> = {
     poster: "海报",
     image: "图片",
+    jpg: "JPG",
+    png: "PNG",
     mp4: "MP4 视频",
     pdf: "PDF 文档"
   };
   return labels[target] ?? target.toUpperCase();
+}
+
+function outputTargetsForFinal(target: WorkflowOutputTarget) {
+  if (target === "kit") return ["poster", "pdf", "mp4"];
+  return [target];
+}
+
+function commandForFinalOutput(target: WorkflowOutputTarget) {
+  if (target === "mp4") return "/generate-video";
+  if (target === "pdf") return "/write-pdf-kit";
+  return "/generate-poster";
+}
+
+function tagForOrientation(orientation: WorkflowOrientation) {
+  if (orientation === "portrait") return "%vertical";
+  if (orientation === "landscape") return "%landscape";
+  return "%square";
+}
+
+function settingsForFinalOutput(target: WorkflowOutputTarget, orientation: WorkflowOrientation, settings?: Partial<GenerationSettings>) {
+  const ratio = target === "mp4" || target === "kit"
+    ? orientation === "portrait" ? "9:16" : "16:9"
+    : settings?.ratio ?? "1:1";
+  return {
+    ...settings,
+    ratio,
+    count: 1,
+    quality: settings?.quality ?? "hd",
+    strength: settings?.strength ?? 70,
+    duration: target === "mp4" || target === "kit" ? Math.max(settings?.duration ?? 5, 5) : 0
+  };
+}
+
+function finalOutputFromPrompt(prompt: string): WorkflowOutputTarget {
+  const outputs = extractOutputs(prompt);
+  if (outputs.length > 1) return "kit";
+  if (outputs.some((item) => outputKindForTarget(item) === "video")) return "mp4";
+  if (outputs.some((item) => outputKindForTarget(item) === "document")) return "pdf";
+  if (outputs.includes("png")) return "png";
+  return "jpg";
 }
 
 function extractParams(input: string) {
@@ -1189,6 +1236,39 @@ function calWorkflowLine(prompt: string, brand?: Brand, target = "image") {
   return `@imgen ${command} 使用 ${brandToken}.logo ${brandToken}.ip ${brandToken}.product，${normalized} %premium -> ${target}`;
 }
 
+function availableCalRefs(brand?: Brand) {
+  if (!brand) return "";
+  const roles = new Set(buildReferenceItems(brand, 12).map((item) => item.role));
+  const preferred = ["logo", "ip", "product", "model", "storefront"].filter((role) => roles.has(role));
+  if (preferred.length) return preferred.map((role) => `$${role}`).join(" ");
+  return `$${brandKey(brand)}`;
+}
+
+function optimizeWorkflowPrompt(input: string, brand: Brand | undefined, target: WorkflowOutputTarget, orientation: WorkflowOrientation) {
+  const normalized = normalizeLegacyPromptRefs(input).trim();
+  const withoutOutput = normalized.replace(/->\s*.+$/gmu, "").trim();
+  const hasCal = /[@$/%]/u.test(withoutOutput);
+  const command = commandForFinalOutput(target);
+  const refs = availableCalRefs(brand);
+  const outputTargets = outputTargetsForFinal(target);
+  const orientationTag = target === "mp4" || target === "kit" ? tagForOrientation(orientation) : "";
+  const brandHint = brand && !brandReferenceKeys(brand).some((key) => key && normalizeKey(withoutOutput).includes(key)) ? `为 ${brandKey(brand)}` : "";
+  const targetHint = target === "mp4"
+    ? "生成图生视频工作流，先生成可控首帧，再创建 MP4 视频任务"
+    : target === "pdf"
+      ? "生成 PDF 教材/文档工作流，先生成封面主视觉，再组织文档结构"
+      : target === "kit"
+        ? "生成完整投放套装工作流，包含主视觉、PDF 教材和 MP4 视频"
+        : "生成最终投放海报/图片";
+  const body = hasCal
+    ? withoutOutput
+    : ["@imgen", command, refs ? `使用 ${refs}` : "", brandHint, withoutOutput, targetHint, orientationTag].filter(Boolean).join(" ");
+  const withCommand = body.includes("/") ? body : `@imgen ${command} ${body}`;
+  const withAgent = withCommand.includes("@imgen") ? withCommand : `@imgen ${withCommand}`;
+  const withOrientation = !orientationTag || /%(vertical|landscape|square)|%竖屏|%横屏|%方图/i.test(withAgent) ? withAgent : `${withAgent} ${orientationTag}`;
+  return `${withOrientation.replace(/\s+/g, " ").trim()} -> ${outputTargets.join(", ")}`;
+}
+
 function executableImagePrompt(sourcePrompt: string, brand: Brand | undefined, targetLabel: string, settings?: Partial<GenerationSettings>) {
   const resolved = resolvePromptAssets(sourcePrompt, brand);
   const cleanIntent = stripCalForExecution(sourcePrompt, resolved);
@@ -1724,6 +1804,14 @@ function ratioForImageSkill(ratio?: string) {
   return value && /^\d+:\d+$/.test(value) ? value : "1:1";
 }
 
+function imageFormatFromText(text: string): "png" | "jpeg" {
+  return /\b(jpe?g|jpg)\b/i.test(text) ? "jpeg" : "png";
+}
+
+function imageExtensionForSkill(format: "png" | "jpeg" | "webp") {
+  return format === "jpeg" ? "jpg" : format;
+}
+
 function fallbackImageDataUrl(label = "Image generation unavailable") {
   const safeLabel = label.replace(/[<>&]/g, "").slice(0, 80) || "Image generation unavailable";
   const svg = [
@@ -1737,12 +1825,12 @@ function fallbackImageDataUrl(label = "Image generation unavailable") {
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 }
 
-async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string, settings?: Partial<GenerationSettings>, timeoutMs = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? "90000")) {
+async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string, settings?: Partial<GenerationSettings>, timeoutMs = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? "180000"), outputFormat: "png" | "jpeg" | "webp" = "png") {
   const imageConfig = imageGenerationConfig(modelName);
   if (!imageConfig.apiKey || !imageConfig.baseUrl) return undefined;
 
   await mkdir(generatedDir, { recursive: true });
-  const filename = `${outputName}.png`;
+  const filename = `${outputName}.${imageExtensionForSkill(outputFormat)}`;
   const outputPath = path.join(generatedDir, filename);
   const args = [
     path.join(projectRoot, "scripts", "generate_image.py"),
@@ -1751,7 +1839,7 @@ async function runImageGenerationSkill(prompt: string, references: ReferenceItem
     "--output",
     outputPath,
     "--format",
-    "png",
+    outputFormat,
     "--model",
     imageConfig.model,
     "--aspect-ratio",
@@ -1903,7 +1991,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         `xmanx-${frame.id}-visual`,
         model.model,
         frame.settings,
-        Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "90000")
+        Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "180000")
       );
       sharedVisualUrl = generated ?? fallbackImage;
       if (!generated) sharedVisualNote = "主视觉使用降级预览：未配置有效图片生成 Key。";
@@ -1937,7 +2025,8 @@ async function fillFrameOutputs(frame: CanvasFrame) {
           `xmanx-${frame.id}-${index + 1}`,
           model.model,
           frame.settings,
-          Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "90000")
+          Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "180000"),
+          imageFormatFromText(output.title)
         );
         output.imageUrl = generated ?? sharedVisualUrl ?? fallbackImage;
         if (!generated) output.copy = appendCopyNote(output.copy, "图片生成未返回结果，已使用主视觉/降级预览。");
@@ -2541,10 +2630,16 @@ app.post("/ai/transform-text", async (req, res) => {
     action: z.enum(["translate", "optimize"]),
     targetLanguage: z.string().default("English"),
     brandId: z.string().optional(),
-    model: z.string().optional()
+    model: z.string().optional(),
+    outputTarget: z.enum(["jpg", "png", "poster", "pdf", "mp4", "kit"]).default("jpg"),
+    orientation: z.enum(["square", "portrait", "landscape"]).default("landscape")
   }).parse(req.body);
   const brand = findBrand(input.brandId);
   const resolved = resolvePromptAssets(input.text, brand);
+  if (input.action === "optimize") {
+    const text = optimizeWorkflowPrompt(input.text, brand, input.outputTarget, input.orientation);
+    return res.json({ text, action: input.action, model: "cal-optimizer", resolved: resolvePromptAssets(text, brand) });
+  }
   const instruction = input.action === "translate"
     ? `把用户内容翻译成 ${input.targetLanguage}。保留 CAL 语法 token，例如 @设计师、/生成海报、$logo、$copy.slogan、%高级感、-> 海报，不要改写这些 token。`
     : "优化为可直接执行的 CAL 1.0 画布提示词。保留用户已写的 CAL token，补齐必要的 @智能体、/命令、$资源、%标签、参数和输出目标，保持简洁可控。";
@@ -2746,7 +2841,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
   let generated = false;
 
   try {
-    const generatedImageUrl = await runImageGenerationSkill(executablePrompt, refs, outputName, selectedModel.model, frame.settings);
+    const generatedImageUrl = await runImageGenerationSkill(executablePrompt, refs, outputName, selectedModel.model, frame.settings, undefined, imageFormatFromText(`${node.title} ${input.prompt ?? ""}`));
     if (generatedImageUrl) {
       imageUrl = generatedImageUrl;
       generated = true;
@@ -3046,6 +3141,8 @@ app.post("/generate", async (req, res) => {
     brandContext: z.string().optional(),
     workflowNodes: z.array(workflowNodeSchema).optional(),
     outputs: z.array(outputSchema).optional(),
+    outputTarget: z.enum(["jpg", "png", "poster", "pdf", "mp4", "kit"]).optional(),
+    orientation: z.enum(["square", "portrait", "landscape"]).optional(),
     settings: z.object({
       ratio: z.string().optional(),
       count: z.number().min(1).max(6).optional(),
@@ -3059,7 +3156,12 @@ app.post("/generate", async (req, res) => {
   }).parse(req.body);
 
   const template = templates.find((item) => item.id === input.templateId);
-  const prompt = template ? `${template.title}：${input.prompt || template.intent}` : input.prompt;
+  const inferredBrand = input.brandId === null ? undefined : input.brandId ? db.brands.find((item) => item.id === input.brandId) : inferBrandFromPrompt(input.prompt);
+  const effectiveOutputTarget = input.outputTarget ?? finalOutputFromPrompt(input.prompt);
+  const effectiveOrientation = input.orientation ?? "landscape";
+  const optimizedPrompt = optimizeWorkflowPrompt(input.prompt, inferredBrand, effectiveOutputTarget, effectiveOrientation);
+  const prompt = template ? `${template.title}：${optimizedPrompt || template.intent}` : optimizedPrompt;
+  const optimizedSettings = settingsForFinalOutput(effectiveOutputTarget, effectiveOrientation, input.settings);
   const taskId = nanoid(10);
   const frame = createFrame(
     prompt,
@@ -3070,7 +3172,7 @@ app.post("/generate", async (req, res) => {
     taskId,
     template?.cost,
     input.modelId,
-    input.settings,
+    optimizedSettings,
     input.brandId,
     input.brandInject,
     input.brandContext,

@@ -184,6 +184,22 @@ type GenerationTask = {
   progress: number;
 };
 
+type WorkflowOutputTarget = "jpg" | "png" | "pdf" | "mp4" | "kit";
+type WorkflowOrientation = "square" | "portrait" | "landscape";
+type WorkflowPresetId = "feed-45" | "feed-square" | "story-cover" | "display-landscape" | "display-square" | "display-vertical" | "youtube-thumbnail" | "frame-landscape" | "frame-vertical" | "pdf-cover" | "video-feed-45" | "video-landscape" | "video-vertical" | "video-frame-landscape" | "video-frame-vertical";
+type WorkflowControls = { outputTarget: WorkflowOutputTarget; orientation: WorkflowOrientation; preset: WorkflowPresetId };
+
+type WorkflowPreset = {
+  id: WorkflowPresetId;
+  label: string;
+  size: string;
+  ratio: string;
+  orientation: WorkflowOrientation;
+  duration?: number;
+  formats: WorkflowOutputTarget[];
+  note: string;
+};
+
 type Workspace = {
   user: User;
   brands: Brand[];
@@ -386,6 +402,27 @@ const requiredBrandSlots = [
   { role: "environment", token: "$environment", title: "环境", hint: "使用场景、背景空间或品牌氛围", assetType: "upload" }
 ] as const satisfies ReadonlyArray<{ role: BrandAssetRole["role"]; token: string; title: string; hint: string; assetType: Asset["type"] }>;
 const defaultSettings: GenerationSettings = { ratio: "1:1", count: 1, quality: "hd", strength: 72, duration: 0, brandInject: false };
+const workflowPresets: WorkflowPreset[] = [
+  { id: "feed-45", label: "Meta Feed 4:5", size: "1080x1350", ratio: "4:5", orientation: "portrait", formats: ["jpg", "png"], note: "Facebook/Instagram 信息流竖图" },
+  { id: "feed-square", label: "社媒方图", size: "1080x1080", ratio: "1:1", orientation: "square", formats: ["jpg", "png"], note: "Facebook/Instagram 方图" },
+  { id: "story-cover", label: "Story/Reels/TikTok", size: "1080x1920", ratio: "9:16", orientation: "portrait", formats: ["jpg", "png"], note: "竖屏封面、Story、Reels、TikTok 首帧" },
+  { id: "display-landscape", label: "Google Display 横图", size: "1200x628", ratio: "16:9", orientation: "landscape", formats: ["jpg", "png"], note: "Google Display / Performance Max 横版素材，按横图交付裁切" },
+  { id: "display-square", label: "Google Display 方图", size: "1200x1200", ratio: "1:1", orientation: "square", formats: ["jpg", "png"], note: "Google Display / Performance Max 方图素材" },
+  { id: "display-vertical", label: "Google Display 竖图", size: "900x1600", ratio: "9:16", orientation: "portrait", formats: ["jpg", "png"], note: "Google Display 竖版素材" },
+  { id: "youtube-thumbnail", label: "YouTube 缩略图", size: "1280x720", ratio: "16:9", orientation: "landscape", formats: ["jpg", "png"], note: "YouTube 视频封面/横屏首帧" },
+  { id: "frame-landscape", label: "视频首尾帧 横屏", size: "1920x1080", ratio: "16:9", orientation: "landscape", formats: ["jpg", "png"], note: "Facebook/YouTube 视频首帧或尾帧" },
+  { id: "frame-vertical", label: "视频首尾帧 竖屏", size: "1080x1920", ratio: "9:16", orientation: "portrait", formats: ["jpg", "png"], note: "Reels/Story/TikTok 视频首帧或尾帧" },
+  { id: "pdf-cover", label: "PDF 封面", size: "A4 2480x3508", ratio: "3:4", orientation: "portrait", formats: ["pdf"], note: "PDF 教材/手册封面视觉" },
+  { id: "video-feed-45", label: "Feed Video 4:5", size: "1080x1350", ratio: "4:5", orientation: "portrait", duration: 15, formats: ["mp4", "kit"], note: "Meta 信息流视频" },
+  { id: "video-landscape", label: "Video 横屏", size: "1920x1080", ratio: "16:9", orientation: "landscape", duration: 15, formats: ["mp4", "kit"], note: "Facebook/YouTube 横屏视频" },
+  { id: "video-vertical", label: "Reels/Story 竖屏", size: "1080x1920", ratio: "9:16", orientation: "portrait", duration: 15, formats: ["mp4", "kit"], note: "Reels/Stories/TikTok 竖屏视频" },
+  { id: "video-frame-landscape", label: "视频首尾帧 横屏", size: "1920x1080", ratio: "16:9", orientation: "landscape", duration: 5, formats: ["mp4", "kit"], note: "图生视频首帧/尾帧" },
+  { id: "video-frame-vertical", label: "视频首尾帧 竖屏", size: "1080x1920", ratio: "9:16", orientation: "portrait", duration: 5, formats: ["mp4", "kit"], note: "图生视频首帧/尾帧" }
+];
+
+function defaultPresetForOutput(output: WorkflowOutputTarget): WorkflowPreset {
+  return workflowPresets.find((preset) => preset.formats.includes(output)) ?? workflowPresets[0];
+}
 type GraphEdge = { from: WorkflowNode; to: WorkflowNode; id: string };
 
 const api = {
@@ -1095,7 +1132,7 @@ function App() {
     };
   }
 
-  async function generate(input = prompt, template?: Template) {
+  async function generate(input = prompt, template?: Template, controls: WorkflowControls = { outputTarget: "jpg", orientation: "portrait", preset: "feed-45" }) {
     if (!input.trim() || !model) return;
     setError("");
     const naturalBrand = inferBrandForPrompt(input, brands);
@@ -1114,6 +1151,8 @@ function App() {
         modelId: model.id,
         brandId: generationBrand?.id ?? null,
         brandInject: shouldInjectBrand,
+        outputTarget: controls.outputTarget,
+        orientation: controls.orientation,
         settings
       });
       setFrames((current) => [result.frame, ...current.filter((frame) => frame.id !== result.frame.id)]);
@@ -1398,7 +1437,7 @@ function App() {
           assets={assets}
           aiStatus={aiStatus}
           aiDiagnostics={aiDiagnostics}
-          onGenerate={() => void generate()}
+          onGenerate={(controls, promptOverride) => void generate(promptOverride ?? prompt, undefined, controls)}
           onCreateProject={() => void createProject({ brandId: projectBrand?.id ?? null })}
           onUpdateFrame={(patch) => activeFrame && void updateFrame(activeFrame.id, patch)}
         />
@@ -3041,15 +3080,66 @@ function BottomComposer(props: {
   assets: Asset[];
   aiStatus: AiStatus | null;
   aiDiagnostics: AiDiagnostics | null;
-  onGenerate: () => void;
+  onGenerate: (controls: WorkflowControls, promptOverride?: string) => void;
   onCreateProject: () => void;
   onUpdateFrame: (patch: Partial<Pick<Frame, "settings" | "modelId">> & { brandId?: string | null; brandInject?: boolean }) => void;
 }) {
   const settings = props.frame?.settings ?? defaultSettings;
-  const composerExample = "@imgen /生成海报 使用 $logo $ip $product，为 xmanx 生成 5.1 活动投放海报、PDF 教材和 MP4 短视频 -> poster, pdf, mp4";
+  const [outputTarget, setOutputTarget] = useState<WorkflowOutputTarget>("jpg");
+  const [orientation, setOrientation] = useState<WorkflowOrientation>("portrait");
+  const [presetId, setPresetId] = useState<WorkflowPresetId>("feed-45");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [optimizing, setOptimizing] = useState(false);
+  const composerExample = "为 xmanx 生成 5.1 活动投放画面";
   const workflowMode = /(^|\s)@[\p{L}0-9_-]+|(^|\s)\/[\p{L}0-9_-]+|->/u.test(props.prompt);
+  useEffect(() => {
+    if (!props.frame?.outputs?.length) return;
+    const kinds = props.frame.outputs.map((output) => output.kind);
+    const nextTarget: WorkflowOutputTarget = kinds.includes("video") && kinds.includes("document")
+      ? "kit"
+      : kinds.includes("video")
+        ? "mp4"
+        : kinds.includes("document")
+          ? "pdf"
+          : props.frame.outputs[0]?.title?.toLowerCase().includes("png")
+            ? "png"
+            : "jpg";
+    setOutputTarget(nextTarget);
+    if (props.frame.settings?.ratio === "9:16") setOrientation("portrait");
+    else setOrientation("landscape");
+    const matchingPreset = workflowPresets.find((preset) => preset.formats.includes(nextTarget) && preset.ratio === props.frame?.settings?.ratio) ?? defaultPresetForOutput(nextTarget);
+    setPresetId(matchingPreset.id);
+  }, [props.frame?.id]);
   function updateSetting<K extends keyof GenerationSettings>(key: K, value: GenerationSettings[K]) {
     props.onUpdateFrame({ settings: { ...settings, [key]: value } });
+  }
+  function settingsForResult(nextOutput: WorkflowOutputTarget, nextPreset: WorkflowPreset) {
+    return {
+      ...settings,
+      ratio: nextPreset.ratio,
+      count: 1,
+      duration: nextOutput === "mp4" || nextOutput === "kit" ? Math.max(settings.duration || nextPreset.duration || 5, 1) : 0
+    };
+  }
+  function updateOutputTarget(nextOutput: WorkflowOutputTarget) {
+    setOutputTarget(nextOutput);
+    const nextPreset = defaultPresetForOutput(nextOutput);
+    setPresetId(nextPreset.id);
+    setOrientation(nextPreset.orientation);
+    props.onUpdateFrame({ settings: settingsForResult(nextOutput, nextPreset) });
+  }
+  function updatePreset(nextPresetId: WorkflowPresetId) {
+    const nextPreset = workflowPresets.find((preset) => preset.id === nextPresetId) ?? defaultPresetForOutput(outputTarget);
+    setPresetId(nextPreset.id);
+    setOrientation(nextPreset.orientation);
+    props.onUpdateFrame({ settings: settingsForResult(outputTarget, nextPreset) });
+  }
+  const presetOptions = workflowPresets.filter((preset) => preset.formats.includes(outputTarget));
+  const currentPreset = workflowPresets.find((preset) => preset.id === presetId) ?? defaultPresetForOutput(outputTarget);
+  function applyPresetToCal(text: string) {
+    const clean = text.replace(/\s+用途:[^-\n]+(?=\s->|$)/, "").replace(/\s+尺寸:[^-\n]+(?=\s->|$)/, "");
+    const marker = `用途: ${currentPreset.label} 尺寸: ${currentPreset.size}`;
+    return clean.includes("->") ? clean.replace(/\s*->\s*/, ` ${marker} -> `) : `${clean} ${marker}`;
   }
   const mentionItems = buildMentionItems(props.activeBrand, props.assets);
   const referencePreview = buildPromptReferencePreview(props.prompt, mentionItems);
@@ -3065,6 +3155,31 @@ function BottomComposer(props: {
       settings: { ...settings, brandInject: hasBrand },
       brandInject: hasBrand
     });
+  }
+  async function optimizeCurrentPrompt() {
+    if (!props.prompt.trim()) return "";
+    setOptimizing(true);
+    try {
+      const result = await api.post<{ text: string }>("/ai/transform-text", {
+        text: props.prompt,
+        action: "optimize",
+        brandId: props.frame?.brandId || props.activeBrand?.id,
+        model: props.model?.model ?? props.model?.id,
+        outputTarget,
+        orientation
+      });
+      const optimized = applyPresetToCal(result.text);
+      props.setPrompt(optimized);
+      return optimized;
+    } finally {
+      setOptimizing(false);
+    }
+  }
+  async function generateWithOptimization() {
+    if (!props.prompt.trim()) return;
+    const shouldOptimize = !workflowMode || !/->/.test(props.prompt);
+    const nextPrompt = shouldOptimize ? await optimizeCurrentPrompt() : props.prompt;
+    props.onGenerate({ outputTarget, orientation, preset: currentPreset.id }, nextPrompt || props.prompt);
   }
   return (
     <div className={`rh-composer ${workflowMode ? "workflow" : ""}`}>
@@ -3093,7 +3208,7 @@ function BottomComposer(props: {
         </div>
       )}
       <div className="rh-composer-row">
-        {workflowMode && <span className="rh-workflow-pill"><Route />Workflow</span>}
+        {workflowMode && <span className="rh-workflow-pill"><Route />CAL</span>}
         <select value={props.model?.id ?? "imgen-skill"} onChange={(event) => props.onUpdateFrame({ modelId: event.target.value })}>
           {props.models.filter((item) => item.type === "image").map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
         </select>
@@ -3101,13 +3216,29 @@ function BottomComposer(props: {
           <option value="">无品牌</option>
           {props.brands.map((brand) => <option value={brand.id} key={brand.id}>{brand.name}</option>)}
         </select>
-        <select value={settings.ratio} onChange={(event) => updateSetting("ratio", event.target.value)}><option>1:1</option><option>3:4</option><option>4:5</option><option>9:16</option><option>16:9</option></select>
-        <select value={settings.count} onChange={(event) => updateSetting("count", Number(event.target.value))}><option value={1}>1x</option><option value={2}>2x</option><option value={4}>4x</option><option value={6}>6x</option></select>
-        <select value={settings.quality} onChange={(event) => updateSetting("quality", event.target.value as GenerationSettings["quality"])}><option value="standard">standard</option><option value="hd">hd</option><option value="ultra">ultra</option></select>
-        <label className="rh-composer-slider">强度<input type="range" min={0} max={100} value={settings.strength} onChange={(event) => updateSetting("strength", Number(event.target.value))} /></label>
-        <label className="rh-composer-number">时长<input type="number" min={0} max={60} value={settings.duration} onChange={(event) => updateSetting("duration", Number(event.target.value))} /></label>
-        <button type="button" className="rh-send" onClick={props.onGenerate} title={`生成当前画布，结果进入输出图节点：${referencePreview.images.length} 张参考图 / ${referencePreview.texts.length} 个文本字段`}><Send /></button>
+        <select value={outputTarget} onChange={(event) => updateOutputTarget(event.target.value as WorkflowOutputTarget)} title="输出文件格式">
+          <option value="jpg">JPG</option>
+          <option value="png">PNG</option>
+          <option value="pdf">PDF</option>
+          <option value="mp4">MP4</option>
+          <option value="kit">套装</option>
+        </select>
+        <select className="rh-preset-select" value={currentPreset.id} onChange={(event) => updatePreset(event.target.value as WorkflowPresetId)} title="用途和尺寸">
+          {presetOptions.map((preset) => <option value={preset.id} key={preset.id}>{preset.label} · {preset.size}</option>)}
+        </select>
+        <button type="button" className="rh-optimize" onClick={() => void optimizeCurrentPrompt()} disabled={optimizing || !props.prompt.trim()} title="把自然语言优化为 CAL 工作流"><Wand2 />{optimizing ? "优化中" : "优化"}</button>
+        <button type="button" className="rh-advanced-toggle" onClick={() => setAdvancedOpen((value) => !value)} title="高级参数"><SlidersHorizontal /></button>
+        <button type="button" className="rh-send" onClick={() => void generateWithOptimization()} title={`生成当前画布，结果进入输出节点：${referencePreview.images.length} 张参考图 / ${referencePreview.texts.length} 个文本字段`}><Send /></button>
       </div>
+      {advancedOpen && (
+        <div className="rh-composer-advanced">
+          <span>{currentPreset.note} · {currentPreset.size} · {currentPreset.ratio}</span>
+          <select value={settings.quality} onChange={(event) => updateSetting("quality", event.target.value as GenerationSettings["quality"])}><option value="standard">standard</option><option value="hd">hd</option><option value="ultra">ultra</option></select>
+          {(outputTarget === "jpg" || outputTarget === "png") && <select value={settings.count} onChange={(event) => updateSetting("count", Number(event.target.value))}><option value={1}>1x</option><option value={2}>2x</option><option value={4}>4x</option><option value={6}>6x</option></select>}
+          {(outputTarget === "jpg" || outputTarget === "png") && <label className="rh-composer-slider">参考强度<input type="range" min={0} max={100} value={settings.strength} onChange={(event) => updateSetting("strength", Number(event.target.value))} /></label>}
+          {(outputTarget === "mp4" || outputTarget === "kit") && <label className="rh-composer-number">时长<input type="number" min={1} max={60} value={settings.duration || 5} onChange={(event) => updateSetting("duration", Number(event.target.value))} /></label>}
+        </div>
+      )}
       <div className="rh-composer-status">
         <span>
           {props.frame?.status === "generating"
