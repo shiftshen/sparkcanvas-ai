@@ -597,6 +597,62 @@ function inferVideoDurationLabel(text: string, fallbackSeconds?: number) {
   return `${seconds ?? 5}s`;
 }
 
+function firstMatch(text: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const value = match?.slice(1).find(Boolean);
+    if (value) return value;
+  }
+  return "";
+}
+
+function compactWorkflowBody(text = "") {
+  return text
+    .replace(/^CAL:\s*/i, "")
+    .replace(/@imgen\s*/gi, "")
+    .replace(/\s+/g, " ")
+    .split("执行:").pop()
+    ?.split(" · ")[0]
+    ?.trim()
+    .slice(0, 96) || "";
+}
+
+function nodeExecutionSummary(node: WorkflowNode, output?: Frame["outputs"][number]) {
+  const text = `${node.title} ${node.body} ${output?.copy ?? ""}`;
+  if (node.type === "script") {
+    const duration = firstMatch(text, [/Storyboard plan:\s*(\d+s?)\s*total/i, /(\d{1,2})\s*秒/, /(\d{1,2})s\b/i]);
+    const shots = firstMatch(text, [/Storyboard plan:[^.]*?,\s*(\d+)\s*shots/i, /(\d+)\s*镜头/]);
+    const ratio = firstMatch(text, [/ratio\s*([0-9]+:[0-9]+)/i, /\b(9:16|16:9|1:1|4:5)\b/]);
+    return {
+      title: "分镜脚本",
+      detail: "点击编辑完整脚本、镜头、字幕和旁白。",
+      chips: [duration && `成片 ${duration}`, shots && `${shots} 镜头`, ratio].filter(Boolean)
+    };
+  }
+  if (node.type === "video") {
+    const segment = firstMatch(text, [/片段\s*(\d+\/\d+)/, /第\s*(\d+)\s*段/]);
+    const target = firstMatch(text, [/最终使用\s*(\d+s)/, /final segment target\s*(\d+s)/i]);
+    const model = firstMatch(text, [/模型固定(?:生成|单次输出)?\s*(\d+s)/, /model must generate a\s*(\d+s)/i]);
+    const status = output?.videoUrl ? "MP4 已生成" : /任务已创建|videoId|MP4 分段任务/.test(text) ? "等待 MP4 返回" : /失败|failed|error/i.test(text) ? "生成失败" : "未生成";
+    return {
+      title: segment ? `图生视频 ${segment}` : "图生视频片段",
+      detail: status,
+      chips: [target && `成片 ${target}`, model && `模型 ${model}`, "首帧锁定"].filter(Boolean)
+    };
+  }
+  if (node.type === "compose") {
+    const duration = firstMatch(text, [/最终成片\s*(\d+s)/, /成片\s*(\d+s)/]);
+    const parts = node.inputIds?.length ? `${node.inputIds.length} 段` : firstMatch(text, [/已拆为\s*(\d+)\s*个/]) ? `${firstMatch(text, [/已拆为\s*(\d+)\s*个/])} 段` : "";
+    const status = output?.videoUrl ? "已合成最终 MP4" : /任务已创建|等待|MP4 分段任务/.test(text) ? "等待片段返回后合成" : "等待视频片段";
+    return {
+      title: "剪辑合成",
+      detail: status,
+      chips: [parts && `${parts} -> MP4`, duration].filter(Boolean)
+    };
+  }
+  return { title: node.title, detail: compactWorkflowBody(node.body), chips: [] };
+}
+
 function workflowControlsFromFrame(frame: Frame | undefined, sourcePrompt: string): WorkflowControls {
   const outputTarget: WorkflowOutputTarget = frame?.outputs?.some((output) => output.kind === "document") && frame.outputs.some((output) => output.kind === "video")
     ? "kit"
@@ -3001,6 +3057,7 @@ function NodeCard(props: {
 }) {
   const isOutputNode = props.node.type === "output";
   const isVideoOutput = props.output?.kind === "video";
+  const executionSummary = nodeExecutionSummary(props.node, props.output);
   const previewPriority: Record<string, number> = props.node.type === "video"
     ? { "first-frame": 0, keyframe: 1, "storyboard-sheet": 2, "video-preview": 3, generated: 4, version: 5 }
     : { generated: 0, version: 1, visual: 2, "document-preview": 3, "video-preview": 4 };
@@ -3078,7 +3135,11 @@ function NodeCard(props: {
       ) : props.node.type === "script" ? (
         <button type="button" className="rh-script-tile" onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
           <List />
-          <span>{props.node.body || "添加剧情、角色参考、视频参考，生成分镜脚本"}</span>
+          <div className="rh-node-summary">
+            <strong>{executionSummary.title}</strong>
+            <p>{executionSummary.detail || "添加剧情、角色参考、视频参考，生成分镜脚本"}</p>
+            <em>{executionSummary.chips.length ? executionSummary.chips.join(" · ") : "点击打开完整分镜"}</em>
+          </div>
         </button>
       ) : props.node.type === "video" ? (
         <div
@@ -3096,8 +3157,11 @@ function NodeCard(props: {
           }}
         >
           <Play />
-          <span>{props.node.body || "添加视频提示词"}</span>
-          <small>16:9 · 720P · 模型固定10s</small>
+          <div className="rh-node-summary">
+            <strong>{executionSummary.title}</strong>
+            <p>{executionSummary.detail || "添加视频提示词"}</p>
+            <em>{executionSummary.chips.length ? executionSummary.chips.join(" · ") : "模型固定 10s"}</em>
+          </div>
           <div className="rh-image-node-actions" onClick={(event) => event.stopPropagation()}>
             <button type="button" title="编辑/生成" onClick={props.onEdit}><Wand2 /></button>
             <button type="button" title="预览" onClick={() => props.output?.videoUrl && props.onPreview({ title, subtitle: props.node.body, imageUrl, videoUrl: props.output?.videoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!props.output?.videoUrl}><Expand /></button>
@@ -3107,7 +3171,11 @@ function NodeCard(props: {
       ) : props.node.type === "compose" ? (
         <button type="button" className="rh-compose-tile" onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
           <Scissors />
-          <span>{props.node.body || "空空如也，请连接视频节点后操作"}</span>
+          <div className="rh-node-summary">
+            <strong>{executionSummary.title}</strong>
+            <p>{executionSummary.detail || "空空如也，请连接视频节点后操作"}</p>
+            <em>{executionSummary.chips.length ? executionSummary.chips.join(" · ") : "多段视频 -> MP4"}</em>
+          </div>
         </button>
       ) : props.node.type === "audio" ? (
         <button type="button" className="rh-audio-tile" onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>

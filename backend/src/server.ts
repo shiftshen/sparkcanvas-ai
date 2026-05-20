@@ -3,7 +3,7 @@ import express from "express";
 import type { ErrorRequestHandler, NextFunction, Request, Response } from "express";
 import PDFDocument from "pdfkit";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createWriteStream, existsSync, readFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1741,9 +1741,18 @@ async function materializeVideoUrl(videoUrl: string, outputName: string, index: 
   const response = await fetch(videoUrl);
   if (!response.ok) return "";
   const bytes = Buffer.from(await response.arrayBuffer());
-  if (!bytes.length) return "";
+  if (bytes.length < 512) return "";
   await writeFile(outputPath, bytes);
   return outputPath;
+}
+
+async function usableVideoFile(filePath: string) {
+  try {
+    const info = await stat(filePath);
+    return info.size > 512;
+  } catch {
+    return false;
+  }
 }
 
 async function composeLocalVideos(videoUrls: string[], segments: ReturnType<typeof videoSegmentPlan>, outputName: string) {
@@ -1766,20 +1775,20 @@ async function composeLocalVideos(videoUrls: string[], segments: ReturnType<type
       "-movflags", "+faststart",
       segmentPath
     ]);
-    if (!ok || !existsSync(segmentPath)) return "";
+    if (!ok || !existsSync(segmentPath) || !(await usableVideoFile(segmentPath))) return "";
     preparedPaths.push(segmentPath);
   }
   if (preparedPaths.length === 1) {
     const finalPath = path.join(generatedDir, `${outputName}.mp4`);
     renameSync(preparedPaths[0], finalPath);
-    return `/generated/${outputName}.mp4`;
+    return await usableVideoFile(finalPath) ? `/generated/${outputName}.mp4` : "";
   }
   const listPath = path.join(generatedDir, `${outputName}-concat.txt`);
   const outputPath = path.join(generatedDir, `${outputName}.mp4`);
   const listBody = preparedPaths.map((filePath) => `file '${String(filePath).replace(/'/g, "'\\''")}'`).join("\n");
   await writeFile(listPath, listBody);
   const ok = await runFfmpeg(["-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", outputPath]);
-  return ok && existsSync(outputPath) ? `/generated/${outputName}.mp4` : "";
+  return ok && existsSync(outputPath) && await usableVideoFile(outputPath) ? `/generated/${outputName}.mp4` : "";
 }
 
 async function concatLocalVideos(videoUrls: string[], outputName: string) {
@@ -2077,21 +2086,46 @@ function videoStatusFromResponse(data: unknown) {
 
 async function refreshPendingVideoOutputs(limit = 2) {
   const config = serviceConfig("video");
-  if (!config.apiKey) return;
+  let changed = false;
+  for (const frame of db.frames) {
+    for (const output of frame.outputs) {
+      const localPath = localGeneratedVideoPath(output.videoUrl);
+      if (output.kind === "video" && output.videoUrl && localPath && !(await usableVideoFile(localPath))) {
+        delete output.videoUrl;
+        output.copy = appendCopyNote(output.copy, "本地 MP4 文件无有效视频内容，已恢复为等待状态。");
+        changed = true;
+      }
+    }
+  }
+  if (!config.apiKey) {
+    if (changed) await persistDb();
+    return;
+  }
   const pending = db.frames.flatMap((frame) => frame.outputs
     .filter((output) => output.kind === "video" && output.videoId && !output.videoUrl)
     .map((output) => ({ frame, output }))).slice(0, limit);
-  const results = await Promise.all(pending.map(async ({ output }) => {
+  const results = await Promise.all(pending.map(async ({ frame, output }) => {
     try {
-      const data = await getJson(`${config.baseUrl}/videos/${output.videoId}`, config.apiKey, 3000);
-      const url = videoUrlFromResponse(data);
-      const status = videoStatusFromResponse(data);
-      if (url) {
-        output.videoUrl = url;
-        output.copy = appendCopyNote(output.copy, `MP4 文件已生成: ${url}`);
+      const videoIds = output.videoId!.split(",").map((item) => item.trim()).filter(Boolean);
+      const checks = await Promise.all(videoIds.map(async (videoId) => {
+        const data = await getJson(`${config.baseUrl}/videos/${videoId}`, config.apiKey, 3000);
+        return { videoId, url: videoUrlFromResponse(data), status: videoStatusFromResponse(data) };
+      }));
+      const urls = checks.map((item) => item.url).filter(Boolean);
+      const statuses = checks.map((item) => item.status).filter(Boolean);
+      if (urls.length === videoIds.length) {
+        const durationSeconds = videoDurationSeconds(frame.settings);
+        const segmentPlan = videoSegmentPlan(durationSeconds);
+        const composedUrl = videoNeedsCompose(durationSeconds)
+          ? await composeLocalVideos(urls, segmentPlan, `xmanx-${frame.id}-${output.id}-refresh-final`)
+          : urls[0];
+        if (composedUrl) {
+          output.videoUrl = composedUrl;
+          output.copy = appendCopyNote(output.copy, `MP4 文件已生成: ${composedUrl}`);
+        }
         return true;
-      } else if (status) {
-        output.copy = appendCopyNote(output.copy, `视频任务状态: ${status}`);
+      } else if (statuses.length) {
+        output.copy = appendCopyNote(output.copy, `视频任务状态: ${statuses.join(" / ")}`);
         return true;
       }
     } catch {
@@ -2099,7 +2133,7 @@ async function refreshPendingVideoOutputs(limit = 2) {
     }
     return false;
   }));
-  if (results.some(Boolean)) await persistDb();
+  if (changed || results.some(Boolean)) await persistDb();
 }
 
 type VideoRunResult = {
