@@ -338,6 +338,24 @@ try {
   assert(inferredRefs.length >= 3 && inferredRefs.every((ref) => ref.imageUrl), "inferred brand workflow should place concrete brand images on canvas");
   assert(inferredBrandCompleted.frame.workflowNodes.some((node) => node.id === "prompt" && node.body.includes("5.1")), "one-line generation should create a full workflow prompt node");
 
+  const multiOutputGenerated = await request("/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "@imgen /生成海报 使用 $logo $ip $product，为 xmanx 生成 5.1 活动教材和短视频 -> pdf 和 mp4",
+      mode: "magic",
+      modelId: "imgen-skill",
+      settings: { ratio: "16:9", count: 1, quality: "hd", strength: 70, duration: 8 },
+      x: 300,
+      y: 240
+    })
+  });
+  const multiOutputCompleted = await waitForTask(multiOutputGenerated.taskId);
+  assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "document" && output.title.includes("PDF")), "CAL -> pdf should create a document output");
+  assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "video" && output.title.includes("MP4")), "CAL -> mp4 should create a video output");
+  assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id.startsWith("doc-pdf") && node.type === "process"), "CAL -> pdf should create an editable document/text node");
+  assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id.startsWith("video-mp4") && node.type === "video"), "CAL -> mp4 should create a video generation node");
+  assert(multiOutputCompleted.frame.steps.some((step) => step.includes("PDF") && step.includes("MP4")), "workflow steps should mention requested PDF and MP4 outputs");
+
   const generated = await request("/generate", {
     method: "POST",
     body: JSON.stringify({

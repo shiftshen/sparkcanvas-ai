@@ -76,10 +76,12 @@ type CanvasFrame = {
   taskId?: string;
   steps: string[];
   workflowNodes: WorkflowNode[];
-  outputs: Array<{ id: string; title: string; kind: "image" | "video"; gradient: string; copy: string; imageUrl?: string }>;
+  outputs: Array<{ id: string; title: string; kind: OutputKind; gradient: string; copy: string; imageUrl?: string }>;
   createdAt: string;
   updatedAt: string;
 };
+
+type OutputKind = "image" | "video" | "document";
 
 type WorkflowNode = {
   id: string;
@@ -263,7 +265,7 @@ const workflowNodeSchema = z.object({
 const outputSchema = z.object({
   id: z.string(),
   title: z.string().min(1),
-  kind: z.enum(["image", "video"]),
+  kind: z.enum(["image", "video", "document"]),
   gradient: z.string(),
   copy: z.string(),
   imageUrl: z.string().optional()
@@ -555,7 +557,62 @@ function extractCommands(input: string) {
 }
 
 function extractOutputs(input: string) {
-  return Array.from(input.matchAll(/->\s*([^|]+)/g)).map((match) => match[1].trim()).filter(Boolean);
+  return Array.from(input.matchAll(/->\s*([^|]+)/g))
+    .flatMap((match) => splitOutputTargets(match[1]))
+    .filter(Boolean);
+}
+
+function splitOutputTargets(value: string) {
+  return value
+    .replace(/[，、]/g, ",")
+    .replace(/\b(and|plus)\b/gi, ",")
+    .replace(/\s+(和|及|与)\s+/g, ",")
+    .split(",")
+    .map((item) => normalizeOutputTarget(item))
+    .filter(Boolean);
+}
+
+function normalizeOutputTarget(value: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/^输出/, "")
+    .replace(/^export\s+/, "")
+    .replace(/\s+/g, "");
+  const aliases: Record<string, string> = {
+    海报: "poster",
+    图片: "image",
+    主图: "image",
+    poster: "poster",
+    image: "image",
+    img: "image",
+    视频: "mp4",
+    短视频: "mp4",
+    video: "mp4",
+    mp4: "mp4",
+    mo4: "mp4",
+    文档: "pdf",
+    教材: "pdf",
+    手册: "pdf",
+    pdf: "pdf"
+  };
+  return aliases[normalized] ?? normalized;
+}
+
+function outputKindForTarget(target: string): OutputKind {
+  if (["mp4", "video", "mov"].includes(target)) return "video";
+  if (["pdf", "doc", "docx", "deck", "ppt", "pptx"].includes(target)) return "document";
+  return "image";
+}
+
+function labelForOutputTarget(target: string) {
+  const labels: Record<string, string> = {
+    poster: "海报",
+    image: "图片",
+    mp4: "MP4 视频",
+    pdf: "PDF 文档"
+  };
+  return labels[target] ?? target.toUpperCase();
 }
 
 function extractParams(input: string) {
@@ -1747,6 +1804,12 @@ function createFrame(
   settings.brandInject = Boolean(brand && (requestedBrandInject ?? (explicitSettingsBrandInject ? settings.brandInject : promptRequestsWholeBrand(prompt, brand))));
   const brandContext = brand ? requestedBrandContext?.trim() || buildBrandContext(brand) : "";
   const finalPrompt = buildFinalPrompt(prompt, brandContext, settings.brandInject, brand);
+  const resolved = resolvePromptAssets(prompt, brand);
+  const outputTargets = resolved.outputs.length
+    ? resolved.outputs
+    : Array.from({ length: Math.max(1, Math.min(settings.count, 6)) }, (_unused, index) => (
+        prompt.includes("视频") && index === 0 ? "mp4" : index === 0 ? "image" : `image-${index + 1}`
+      ));
   const title = prompt.length > 24 ? `${prompt.slice(0, 24)}...` : prompt;
   const qualityMultiplier = settings.quality === "ultra" ? 1.6 : settings.quality === "hd" ? 1.2 : 1;
   const cost = Math.ceil(estimateCost(prompt, mode, templateCost) * model.costMultiplier * qualityMultiplier * Math.max(1, settings.count / 3));
@@ -1781,12 +1844,12 @@ function createFrame(
     taskId,
     steps: buildWorkflow(prompt, brand, settings.brandInject),
     workflowNodes: requestedWorkflowNodes ?? buildWorkflowNodes(prompt, brand, model, settings, brandContext, settings.brandInject),
-    outputs: requestedOutputs ?? Array.from({ length: Math.max(1, Math.min(settings.count, 6)) }, (_unused, index) => ({
+    outputs: requestedOutputs ?? outputTargets.map((target, index) => ({
       id: nanoid(6),
-      title: index === 0 ? "主视觉" : index === 1 ? "变体 A" : "变体 B",
-      kind: prompt.includes("视频") && index === 0 ? "video" : "image",
+      title: labelForOutputTarget(target),
+      kind: outputKindForTarget(target),
       gradient: gradients[index % gradients.length],
-      copy: brand ? `${brand.logoText} / ${brand.market.split(" ")[0] ?? "brand"}` : "无品牌 / prompt-only"
+      copy: brand ? `${brand.logoText} / ${brand.market.split(" ")[0] ?? "brand"} / ${target}` : `无品牌 / prompt-only / ${target}`
     })),
     createdAt: now(),
     updatedAt: now()
@@ -1826,21 +1889,31 @@ function createEmptyFrame(requestedBrandId?: string | null): CanvasFrame {
 }
 
 function buildWorkflow(prompt: string, brand?: Brand, brandInject = true) {
+  const resolved = resolvePromptAssets(prompt, brand);
+  const outputTargets = resolved.outputs.length ? resolved.outputs.map(labelForOutputTarget).join(" + ") : (prompt.includes("视频") ? "视频" : "图片");
   return [
     "Intent Router 解析自然语言目标",
+    resolved.commands.length ? `Command Router 执行 ${resolved.commands.map((item) => `/${item}`).join(", ")}` : "Command Router 使用自然语言自动选择工作流",
     brand && brandInject ? `Brand Agent 注入 ${brand.name} 的 Logo、IP、素材角色、色彩、语气与禁用项` : "Brand Agent 跳过品牌上下文注入，仅使用本次提示词和显式 $ 引用",
-    prompt.includes("视频") ? "编排图像关键帧与竖屏视频脚本" : "生成主视觉、背景与商品构图",
+    prompt.includes("视频") || resolved.outputs.some((item) => outputKindForTarget(item) === "video") ? "编排图像关键帧、分镜脚本与视频节点" : "生成主视觉、背景与商品构图",
+    `Output Router 准备 ${outputTargets} 交付节点`,
     "质量检查、资产入库并写回画布历史"
   ];
 }
 
 function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (typeof models)[number], settings: GenerationSettings, brandContext = brand ? buildBrandContext(brand) : "", brandInjected = settings.brandInject) {
-  const promptRefs = resolvePromptAssets(prompt, brand).imageReferences;
+  const resolved = resolvePromptAssets(prompt, brand);
+  const promptRefs = resolved.imageReferences;
+  const outputTargets = resolved.outputs.length
+    ? resolved.outputs
+    : Array.from({ length: Math.max(1, Math.min(settings.count, 6)) }, (_unused, index) => (
+        prompt.includes("视频") && index === 0 ? "mp4" : index === 0 ? "image" : `image-${index + 1}`
+      ));
   const colors = neutralBrandColor(brand);
   const referenceItems = [...promptRefs, ...(brand && brandInjected ? buildReferenceItems(brand) : [])]
     .filter((reference, index, list) => list.findIndex((item) => item.id === reference.id) === index)
     .slice(0, 12);
-  return [
+  const nodes: WorkflowNode[] = [
     {
       id: "input-image",
       type: "image" as const,
@@ -1874,19 +1947,115 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
       y: 110,
       w: 280,
       h: 250
-    },
-    {
-      id: "output",
-      type: "output" as const,
-      title: "输出图",
-      body: `${settings.count} 张${brandInjected ? "品牌一致的" : ""}可用结果 · ${model.name}`,
-      parentId: "prompt",
-      x: 820,
-      y: 190,
-      w: 250,
-      h: 330
     }
   ];
+  let parentForVisual = "prompt";
+  let nextX = 820;
+  if (outputTargets.some((target) => ["pdf", "mp4"].includes(target))) {
+    nodes.push({
+      id: "visual-draft",
+      type: "image",
+      title: "视觉草图",
+      body: `根据最终提示词生成可复用主视觉，供 PDF 封面、海报和 MP4 首帧引用。输出目标: ${outputTargets.map(labelForOutputTarget).join(" + ")}。`,
+      parentId: "prompt",
+      preview: colors.accent,
+      refs: referenceItems,
+      x: nextX,
+      y: 100,
+      w: 250,
+      h: 330
+    });
+    parentForVisual = "visual-draft";
+    nextX += 300;
+  }
+
+  for (const [index, target] of outputTargets.entries()) {
+    const kind = outputKindForTarget(target);
+    if (kind === "document") {
+      const docNodeId = `doc-${target}-${index}`;
+      nodes.push({
+        id: docNodeId,
+        type: "process",
+        title: `${labelForOutputTarget(target)} 内容编辑器`,
+        body: `根据 CAL 任务生成 ${labelForOutputTarget(target)}：封面、目录、品牌介绍、核心视觉、操作步骤、输出规范。可继续编辑为 Markdown 后导出 ${target.toUpperCase()}。`,
+        parentId: parentForVisual,
+        preview: "#2563eb",
+        x: nextX,
+        y: 80,
+        w: 360,
+        h: 260
+      });
+      nodes.push({
+        id: `output-${target}`,
+        type: "output",
+        title: `${labelForOutputTarget(target)} 输出`,
+        body: `最终交付 ${labelForOutputTarget(target)}。来源: ${docNodeId}。`,
+        parentId: docNodeId,
+        preview: "#1d4ed8",
+        x: nextX + 420,
+        y: 110,
+        w: 250,
+        h: 260
+      });
+      continue;
+    }
+    if (kind === "video") {
+      const scriptNodeId = `script-${target}-${index}`;
+      const videoNodeId = `video-${target}-${index}`;
+      nodes.push({
+        id: scriptNodeId,
+        type: "script",
+        title: "视频脚本",
+        body: `根据最终提示词和视觉草图生成分镜表格、镜头运动、音效和字幕约束，目标输出 ${labelForOutputTarget(target)}。`,
+        parentId: parentForVisual,
+        preview: "#7c3aed",
+        refs: referenceItems,
+        x: nextX,
+        y: 400,
+        w: 360,
+        h: 260
+      });
+      nodes.push({
+        id: videoNodeId,
+        type: "video",
+        title: `${labelForOutputTarget(target)} 生成`,
+        body: `文生视频或图生视频。引用视觉草图和视频脚本，生成 ${labelForOutputTarget(target)}。`,
+        parentId: scriptNodeId,
+        preview: "#111827",
+        refs: referenceItems,
+        x: nextX + 420,
+        y: 400,
+        w: 260,
+        h: 260
+      });
+      nodes.push({
+        id: `output-${target}`,
+        type: "output",
+        title: `${labelForOutputTarget(target)} 输出`,
+        body: `最终交付 ${labelForOutputTarget(target)}。来源: ${videoNodeId}。`,
+        parentId: videoNodeId,
+        preview: "#0f172a",
+        x: nextX + 730,
+        y: 400,
+        w: 250,
+        h: 260
+      });
+      continue;
+    }
+    nodes.push({
+      id: index === 0 && outputTargets.length === 1 ? "output" : `output-${target}-${index}`,
+      type: "output",
+      title: `${labelForOutputTarget(target)} 输出`,
+      body: `${settings.count} 张${brandInjected ? "品牌一致的" : ""}可用结果 · ${model.name} · ${labelForOutputTarget(target)}`,
+      parentId: parentForVisual,
+      preview: colors.accent,
+      x: nextX,
+      y: 190 + index * 36,
+      w: 250,
+      h: 330
+    });
+  }
+  return nodes;
 }
 
 async function completeTask(taskId: string) {

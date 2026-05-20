@@ -161,7 +161,7 @@ type Frame = {
   taskId?: string;
   steps: string[];
   workflowNodes: WorkflowNode[];
-  outputs: Array<{ id: string; title: string; kind: "image" | "video"; gradient: string; copy: string; imageUrl?: string }>;
+  outputs: Array<{ id: string; title: string; kind: "image" | "video" | "document"; gradient: string; copy: string; imageUrl?: string }>;
   createdAt: string;
   updatedAt?: string;
 };
@@ -261,7 +261,7 @@ const i18n = {
       subtitle: "SparkCanvas 把品牌 Logo、IP、产品、模特和文案变成可引用变量，在可见即所得画布中生成图片、文本、脚本、视频和音频。",
       cta: "进入工作台",
       secondary: "查看 CAL 教材",
-      prompt: "参考 $logo 和 $ip，生成品牌主视觉。标题使用 $copy.slogan，输出 -> 海报",
+      prompt: "@imgen /生成海报 使用 $logo $ip $product，生成 5.1 活动教材和短视频 -> pdf 和 mp4",
       stats: ["@imgen 图片 Skill", "$ 真实素材引用", "可控工作流画布"],
       features: [
         ["品牌资产变量化", "$logo / $ip / $product 会作为真实参考图传入模型。"],
@@ -274,12 +274,12 @@ const i18n = {
         ["$", "品牌资源变量，例如 $logo、$xmanx.ip、$copy.slogan。"],
         ["/", "执行命令，例如 /生成海报、/写视频脚本。"],
         ["%", "风格标签，例如 %高级感、%TikTok。"],
-        ["->", "输出目标，例如 -> 海报、-> 视频。"]
+        ["->", "输出目标，例如 -> 海报、-> PDF、-> MP4。"]
       ]
     },
     tutorial: [
       ["1. 建品牌", "在品牌管理里上传 Logo、产品、IP、模特等参考图，补齐口号、定位、禁用词。"],
-      ["2. 写 CAL", "像写代码一样输入：@imgen /生成海报 使用 $logo $product，显示 $copy.slogan -> 海报。"],
+      ["2. 写 CAL", "像写代码一样输入：@imgen /生成海报 使用 $logo $product，显示 $copy.slogan -> 海报；也可以 -> pdf 和 mp4。"],
       ["3. 真引用", "$logo、$ip、$product 会作为真实图片传入 skill；$copy.slogan 会展开成文案。"],
       ["4. 加节点", "双击空白处或点击线路 +，继续添加图片、文本、脚本、视频、合成或音频节点。"],
       ["5. 可控迭代", "点击节点后在底部固定面板调整模型、比例、提示词、历史版本和素材替换。"]
@@ -297,7 +297,7 @@ const i18n = {
       subtitle: "SparkCanvas turns logos, IP characters, products, models, and copy into reference variables on a WYSIWYG canvas for images, text, scripts, video, and audio.",
       cta: "Enter Studio",
       secondary: "Read CAL guide",
-      prompt: "Use $logo and $ip to create a brand key visual. Title uses $copy.slogan, output -> poster",
+      prompt: "@imgen /generate-poster use $logo $ip $product, create a 5.1 campaign guide and short video -> pdf and mp4",
       stats: ["@imgen image skill", "$ real asset refs", "controllable workflow canvas"],
       features: [
         ["Brand assets as variables", "$logo / $ip / $product are passed to models as real image references."],
@@ -310,12 +310,12 @@ const i18n = {
         ["$", "Brand resource variable, for example $logo, $xmanx.ip, $copy.slogan."],
         ["/", "Command, for example /generate-poster or /write-video-script."],
         ["%", "Style tag, for example %premium or %TikTok."],
-        ["->", "Output target, for example -> poster or -> video."]
+        ["->", "Output target, for example -> poster, -> PDF, or -> MP4."]
       ]
     },
     tutorial: [
       ["1. Build a brand", "Upload logo, product, IP, model references, then complete slogan, positioning, and forbidden terms."],
-      ["2. Write CAL", "Type like code: @imgen /generate-poster use $logo $product, show $copy.slogan -> poster."],
+      ["2. Write CAL", "Type like code: @imgen /generate-poster use $logo $product, show $copy.slogan -> poster; or -> pdf and mp4."],
       ["3. Real references", "$logo, $ip, and $product are sent to the skill as images; $copy.slogan expands as text."],
       ["4. Add nodes", "Double-click the canvas or use line + controls to add image, text, script, video, compose, and audio nodes."],
       ["5. Iterate with control", "Select a node and tune model, ratio, prompt, versions, and asset replacement in the bottom panel."]
@@ -333,7 +333,7 @@ const i18n = {
       subtitle: "SparkCanvas เปลี่ยนโลโก้ คาแรกเตอร์ สินค้า โมเดล และข้อความแบรนด์ให้เป็นตัวแปรบนแคนวาสแบบเห็นผลลัพธ์ทันที",
       cta: "เข้า Studio",
       secondary: "อ่านคู่มือ CAL",
-      prompt: "ใช้ $logo และ $ip เพื่อสร้างภาพหลักของแบรนด์ ใส่ $copy.slogan แล้วส่งออก -> poster",
+      prompt: "@imgen /generate-poster use $logo $ip $product, create a 5.1 campaign guide and short video -> pdf and mp4",
       stats: ["@imgen image skill", "$ อ้างอิงแอสเซ็ตจริง", "workflow canvas ที่ควบคุมได้"],
       features: [
         ["แอสเซ็ตแบรนด์เป็นตัวแปร", "$logo / $ip / $product ถูกส่งเป็นภาพอ้างอิงจริงให้โมเดล"],
@@ -346,12 +346,12 @@ const i18n = {
         ["$", "ตัวแปรทรัพยากรแบรนด์ เช่น $logo, $xmanx.ip, $copy.slogan"],
         ["/", "คำสั่ง เช่น /generate-poster หรือ /write-video-script"],
         ["%", "แท็กสไตล์ เช่น %premium หรือ %TikTok"],
-        ["->", "เป้าหมายเอาต์พุต เช่น -> poster หรือ -> video"]
+        ["->", "เป้าหมายเอาต์พุต เช่น -> poster, -> PDF หรือ -> MP4"]
       ]
     },
     tutorial: [
       ["1. สร้างแบรนด์", "อัปโหลดโลโก้ สินค้า IP โมเดล และเติม slogan, positioning, forbidden terms"],
-      ["2. เขียน CAL", "พิมพ์เหมือนโค้ด: @imgen /generate-poster use $logo $product, show $copy.slogan -> poster"],
+      ["2. เขียน CAL", "พิมพ์เหมือนโค้ด: @imgen /generate-poster use $logo $product, show $copy.slogan -> poster หรือ -> pdf and mp4"],
       ["3. อ้างอิงจริง", "$logo, $ip, $product ถูกส่งเป็นรูปจริงให้ skill; $copy.slogan ถูกขยายเป็นข้อความ"],
       ["4. เพิ่มโหนด", "ดับเบิลคลิกบนแคนวาสหรือกด + บนเส้นเพื่อเพิ่ม image/text/script/video/compose/audio"],
       ["5. คุมการทำซ้ำ", "เลือกโหนดแล้วปรับ model, ratio, prompt, versions และ asset replacement ที่แผงล่าง"]
