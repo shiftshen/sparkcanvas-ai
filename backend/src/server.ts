@@ -1129,6 +1129,13 @@ async function migrateDb() {
       frame.workflowNodes = frame.workflowNodes.filter((node) => node.id !== "output");
       changed = true;
     }
+    const isVideoOnlyWorkflow = frame.outputs.length > 0 && frame.outputs.every((output) => output.kind === "video");
+    if (isVideoOnlyWorkflow && frame.workflowNodes.some((node) => node.id === "visual-draft")) {
+      frame.workflowNodes = frame.workflowNodes
+        .filter((node) => node.id !== "visual-draft")
+        .map((node) => node.parentId === "visual-draft" ? { ...node, parentId: "prompt" } : node);
+      changed = true;
+    }
     const outputNode = frame.workflowNodes.find((node) => node.id === "output");
     if (outputNode?.parentId === "model") {
       outputNode.parentId = "prompt";
@@ -3124,7 +3131,8 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
   ];
   let parentForVisual = "prompt";
   let nextX = 820;
-  if (outputTargets.some((target) => ["pdf", "mp4"].includes(target))) {
+  const needsSharedVisualDraft = outputTargets.some((target) => outputKindForTarget(target) === "document");
+  if (needsSharedVisualDraft) {
     nodes.push({
       id: "visual-draft",
       type: "image",

@@ -682,7 +682,12 @@ function defaultWorkflowNodes(): WorkflowNode[] {
 }
 
 function normalizeWorkflowNodes(nodes: WorkflowNode[] = [], withDefaults = true): WorkflowNode[] {
-  const rawSourceNodes = nodes.filter((node) => node.id !== "model");
+  const rawNodes = nodes.filter((node) => node.id !== "model");
+  const outputNodes = rawNodes.filter((node) => node.type === "output");
+  const isVideoOnlyWorkflow = outputNodes.length > 0 && outputNodes.every((node) => node.id.includes("mp4") || /mp4|视频|video/i.test(node.title));
+  const rawSourceNodes = rawNodes
+    .filter((node) => !(isVideoOnlyWorkflow && node.id === "visual-draft"))
+    .map((node) => node.parentId === "visual-draft" ? { ...node, parentId: "prompt" } : node);
   const hasCustomOutput = rawSourceNodes.some((node) => node.type === "output" && node.id !== "output");
   const sourceNodes = rawSourceNodes.filter((node) => !(node.id === "output" && hasCustomOutput));
   const defaults = withDefaults ? defaultWorkflowNodes().filter((node) => !(node.id === "output" && hasCustomOutput)) : [];
@@ -2994,15 +2999,26 @@ function NodeCard(props: {
   onPreview: (target: PreviewTarget) => void;
   onEdit: () => void;
 }) {
+  const isOutputNode = props.node.type === "output";
+  const isVideoOutput = props.output?.kind === "video";
   const previewPriority: Record<string, number> = props.node.type === "video"
     ? { "first-frame": 0, keyframe: 1, "storyboard-sheet": 2, "video-preview": 3, generated: 4, version: 5 }
     : { generated: 0, version: 1, visual: 2, "document-preview": 3, "video-preview": 4 };
-  const preferredVideoRoles = new Set(["first-frame", "keyframe", "storyboard-sheet", "video-preview", "generated", "version"]);
+  const outputPreviewRoles = new Set(["generated", "version", "visual", "document-preview"]);
   const firstRef = [...props.refs]
-    .filter((ref) => ref.imageUrl && (props.node.type !== "video" || preferredVideoRoles.has(ref.role)))
+    .filter((ref) => {
+      if (!ref.imageUrl) return false;
+      if (isVideoOutput) return false;
+      if (isOutputNode) return outputPreviewRoles.has(ref.role);
+      if (props.node.type === "video") return false;
+      return true;
+    })
     .sort((a, b) => (previewPriority[a.role] ?? 20) - (previewPriority[b.role] ?? 20))[0];
-  const imageUrl = firstRef?.imageUrl ?? props.output?.imageUrl;
-  const title = firstRef?.title ?? props.output?.title ?? props.node.title;
+  const imageUrl = isVideoOutput
+    ? (props.output?.videoUrl ? props.output.imageUrl : undefined)
+    : props.output?.imageUrl ?? firstRef?.imageUrl;
+  const title = props.output?.title ?? firstRef?.title ?? props.node.title;
+  const canPreview = isVideoOutput ? Boolean(props.output?.videoUrl) : Boolean(imageUrl);
   const downloadUrl = props.output?.kind === "document"
     ? props.output.fileUrl
     : props.output?.kind === "video"
@@ -3033,11 +3049,11 @@ function NodeCard(props: {
           style={imageUrl ? { backgroundImage: `url(${imageUrl})` } : { background: `linear-gradient(135deg, ${props.node.preview ?? "#f97316"}, #10131a)` }}
         >
           {!imageUrl && <Image />}
-          <span>{props.node.type === "output" ? "Preview output" : props.refs.length ? `${props.refs.length} refs` : "Add image"}</span>
+          <span>{props.node.type === "output" ? (isVideoOutput ? props.output?.videoUrl ? "MP4 ready" : "MP4 pending" : imageUrl ? "Preview output" : "Empty output") : props.refs.length ? `${props.refs.length} refs` : "Add image"}</span>
           {typeof props.generationProgress === "number" && <div className="rh-node-generating"><b>生成中 {props.generationProgress}%</b><i><em style={{ width: `${props.generationProgress}%` }} /></i></div>}
           <div className="rh-image-node-actions" onClick={(event) => event.stopPropagation()}>
             <button type="button" title="编辑/生成" onClick={props.onEdit}><Wand2 /></button>
-            <button type="button" title="预览" onClick={() => imageUrl && props.onPreview({ title, subtitle: props.node.body, imageUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!imageUrl}><Expand /></button>
+            <button type="button" title="预览" onClick={() => canPreview && props.onPreview({ title, subtitle: props.output?.copy ?? props.node.body, imageUrl, videoUrl: props.output?.videoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!canPreview}><Expand /></button>
             <button type="button" title={props.output?.kind === "document" ? "下载PDF" : props.output?.kind === "video" ? "下载MP4" : "下载图片"} onClick={() => downloadFile(downloadUrl, downloadTitle, downloadExt)} disabled={!downloadUrl}><Download /></button>
           </div>
         </div>
@@ -3068,26 +3084,23 @@ function NodeCard(props: {
         <div
           role="button"
           tabIndex={0}
-          className={`rh-video-tile ${imageUrl ? "has-preview" : ""}`}
+          className="rh-video-tile"
           onClick={(event) => {
             event.stopPropagation();
-            if (imageUrl || props.output?.videoUrl) props.onPreview({ title, subtitle: props.node.body, imageUrl, videoUrl: props.output?.videoUrl, color: props.node.preview, nodeId: props.node.id });
-            else props.onEdit();
+            props.onEdit();
           }}
           onKeyDown={(event) => {
             if (event.key !== "Enter" && event.key !== " ") return;
             event.preventDefault();
-            if (imageUrl || props.output?.videoUrl) props.onPreview({ title, subtitle: props.node.body, imageUrl, videoUrl: props.output?.videoUrl, color: props.node.preview, nodeId: props.node.id });
-            else props.onEdit();
+            props.onEdit();
           }}
-          style={imageUrl ? { backgroundImage: `url(${imageUrl})` } : undefined}
         >
-          {!imageUrl && <Play />}
+          <Play />
           <span>{props.node.body || "添加视频提示词"}</span>
           <small>16:9 · 720P · 模型固定10s</small>
           <div className="rh-image-node-actions" onClick={(event) => event.stopPropagation()}>
             <button type="button" title="编辑/生成" onClick={props.onEdit}><Wand2 /></button>
-            <button type="button" title="预览" onClick={() => (imageUrl || props.output?.videoUrl) && props.onPreview({ title, subtitle: props.node.body, imageUrl, videoUrl: props.output?.videoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!imageUrl && !props.output?.videoUrl}><Expand /></button>
+            <button type="button" title="预览" onClick={() => props.output?.videoUrl && props.onPreview({ title, subtitle: props.node.body, imageUrl, videoUrl: props.output?.videoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!props.output?.videoUrl}><Expand /></button>
             <button type="button" title="下载MP4" onClick={() => downloadFile(props.output?.videoUrl, downloadTitle, "mp4")} disabled={!props.output?.videoUrl}><Download /></button>
           </div>
         </div>
@@ -3840,8 +3853,8 @@ function NodeEditor({
           <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />
         )}
         <div className="rh-video-preview">
-          {output?.imageUrl ? <img src={output.imageUrl} alt={draft.title} /> : <Play />}
-          <span>{generating ? "正在创建视频任务，请等待返回视频ID" : output?.videoUrl ? "最终 MP4 已生成，可下载" : output?.videoId ? `视频片段任务已创建，等待合成/裁切: ${output.videoId}` : draft.body ? "视频配置已保存，需点击生成视频或运行工作流" : "空视频节点"}</span>
+          {output?.videoUrl && output.imageUrl ? <img src={output.imageUrl} alt={draft.title} /> : <Play />}
+          <span>{generating ? "正在创建视频任务，请等待返回视频ID" : output?.videoUrl ? "最终 MP4 已生成，可预览/下载" : output?.videoId ? `视频任务已创建但尚未返回 MP4：${output.videoId}` : draft.body ? "视频配置已保存，未生成前仅显示占位符" : "空视频节点"}</span>
         </div>
         <div className="rh-video-editor-footer">
           <select value={videoModel} onChange={(event) => setVideoModel(event.target.value)}>
