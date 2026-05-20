@@ -3903,6 +3903,33 @@ svg {
   overflow: hidden !important;
 }
 
+.rh-composer.workflow .rh-composer-row {
+  grid-template-columns: 112px 146px 104px 76px 64px 80px 104px 74px 38px;
+}
+
+.rh-workflow-pill {
+  height: 36px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow: hidden;
+  padding: 0 10px;
+  border-radius: 9px;
+  color: #dbeafe;
+  background: rgba(37, 99, 235, 0.18);
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.rh-workflow-pill svg {
+  width: 14px;
+  height: 14px;
+}
+
 .rh-composer-row select,
 .rh-brand-select,
 .rh-composer-slider,
@@ -4518,9 +4545,79 @@ svg {
   top: 14px !important;
 }
 
+.rh-context-editor {
+  width: min(980px, calc(100vw - 140px)) !important;
+  height: min(430px, 54vh) !important;
+  min-height: 300px !important;
+  max-height: 54vh !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 118px !important;
+  grid-template-rows: auto 38px minmax(0, 1fr) !important;
+  gap: 10px !important;
+  overflow: hidden !important;
+}
+
+.rh-context-editor .rh-node-editor-head {
+  grid-column: 1 / -1 !important;
+  grid-row: 1 !important;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.rh-context-editor .rh-node-editor-head > div {
+  min-width: 0;
+}
+
+.rh-context-editor .rh-node-editor-head strong {
+  font-size: 14px;
+}
+
+.rh-context-editor .rh-node-editor-head small {
+  max-width: 760px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rh-context-editor > input {
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+  height: 38px !important;
+}
+
+.rh-context-editor > textarea {
+  grid-column: 1 !important;
+  grid-row: 3 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  padding: 14px !important;
+  border: 1px solid rgba(148, 163, 184, 0.18) !important;
+  border-radius: 10px !important;
+  background: rgba(8, 11, 18, 0.72) !important;
+  font-size: 13px;
+  line-height: 1.65;
+  resize: none;
+}
+
+.rh-context-editor .rh-editor-actions {
+  grid-column: 2 !important;
+  grid-row: 2 / span 2 !important;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: end;
+  gap: 8px;
+}
+
+.rh-context-editor .rh-editor-actions button {
+  width: 100%;
+}
+
 @media (max-width: 900px) {
   .rh-text-editor,
-  .rh-script-editor {
+  .rh-script-editor,
+  .rh-context-editor {
     left: 64px !important;
     width: calc(100vw - 78px) !important;
     height: min(520px, 70vh) !important;

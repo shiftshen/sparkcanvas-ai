@@ -3032,6 +3032,7 @@ function BottomComposer(props: {
 }) {
   const settings = props.frame?.settings ?? defaultSettings;
   const composerExample = "@imgen /生成海报 使用 $logo $ip $product，为 xmanx 生成 5.1 活动投放海报、PDF 教材和 MP4 短视频 -> poster, pdf, mp4";
+  const workflowMode = /(^|\s)@[\p{L}0-9_-]+|(^|\s)\/[\p{L}0-9_-]+|->/u.test(props.prompt);
   function updateSetting<K extends keyof GenerationSettings>(key: K, value: GenerationSettings[K]) {
     props.onUpdateFrame({ settings: { ...settings, [key]: value } });
   }
@@ -3051,7 +3052,7 @@ function BottomComposer(props: {
     });
   }
   return (
-    <div className="rh-composer">
+    <div className={`rh-composer ${workflowMode ? "workflow" : ""}`}>
       <button type="button" className="rh-add" onClick={props.onCreateProject} title="新建项目画布"><Plus /><span>New</span></button>
       <textarea value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} placeholder={composerExample} aria-label="生成当前画布提示词" />
       {referencePreview.total > 0 && (
@@ -3077,6 +3078,7 @@ function BottomComposer(props: {
         </div>
       )}
       <div className="rh-composer-row">
+        {workflowMode && <span className="rh-workflow-pill"><Route />Workflow</span>}
         <select value={props.model?.id ?? "imgen-skill"} onChange={(event) => props.onUpdateFrame({ modelId: event.target.value })}>
           {props.models.filter((item) => item.type === "image").map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
         </select>
