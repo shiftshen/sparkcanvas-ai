@@ -285,6 +285,18 @@ function contentLanguageLabel(language: ContentLanguage | undefined, locale: Loc
   const item = contentLanguageOptions.find((option) => option.id === language) ?? contentLanguageOptions.find((option) => option.id === "zh-en")!;
   return compact ? item.short[locale] : item.labels[locale];
 }
+
+function composerPlaceholderForBrand(brand: Brand | undefined, locale: Locale) {
+  if (!brand) {
+    if (locale === "en") return "@imgen /generate-poster use $brand.logo $brand.ip -> JPG";
+    if (locale === "th") return "@imgen /generate-poster use $logo $ip -> JPG";
+    return "@imgen /生成海报 使用 $logo $ip -> JPG";
+  }
+  const key = normalizeBrandKey(brand.name) || currentBrandKey(brand);
+  if (locale === "en") return `@imgen /generate-poster use $${key}.logo $${key}.ip $${key}.product, create a TikTok campaign for ${brand.name} -> JPG`;
+  if (locale === "th") return `@imgen /generate-poster use $${key}.logo $${key}.ip $${key}.product, สร้าง TikTok campaign สำหรับ ${brand.name} -> JPG`;
+  return `@imgen /生成海报 使用 $${key}.logo $${key}.ip $${key}.product，为 ${brand.name} 生成 TikTok 投放海报 -> JPG`;
+}
 const defaultLocale = ((window.localStorage.getItem("sparkcanvas.locale") as Locale | null)
   || (navigator.language.toLowerCase().startsWith("th") ? "th" : navigator.language.toLowerCase().startsWith("en") ? "en" : "zh")) as Locale;
 const i18n = {
@@ -563,7 +575,7 @@ function workflowControlsFromFrame(frame: Frame | undefined, sourcePrompt: strin
 function generationStatusText(frame?: Frame) {
   if (!frame || frame.status !== "generating") return "";
   return frame.progress >= 90
-    ? `生成中 ${frame.progress}% · @imgen 正在出图，通常需要 1-3 分钟`
+    ? `生成中 ${frame.progress}% · @imgen 正在多图参考出图，通常需要 1-5 分钟`
     : `生成中 ${frame.progress}% · 正在解析 CAL 和品牌引用`;
 }
 
@@ -3511,7 +3523,7 @@ function BottomComposer(props: {
   const [presetId, setPresetId] = useState<WorkflowPresetId>("feed-45");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
-  const composerExample = t.placeholder;
+  const composerExample = composerPlaceholderForBrand(props.activeBrand, props.locale) || t.placeholder;
   const workflowMode = /(^|\s)@[\p{L}0-9_-]+|(^|\s)\/[\p{L}0-9_-]+|->/u.test(props.prompt);
   useEffect(() => {
     if (!props.frame?.outputs?.length) return;
@@ -3634,7 +3646,7 @@ function BottomComposer(props: {
   return (
     <div className={`rh-composer ${workflowMode ? "workflow" : ""}`}>
       <button type="button" className="rh-add" onClick={props.onCreateProject} title={t.newCanvas}><Plus /><span>New</span></button>
-      <textarea value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} placeholder={composerExample} aria-label={t.placeholder} />
+      <textarea value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} placeholder={composerExample} aria-label={composerExample} />
       {referencePreview.total > 0 && (
         <div className="rh-composer-refs">
           <strong>{referencePreview.images.length} 图 / {referencePreview.texts.length} 文本</strong>

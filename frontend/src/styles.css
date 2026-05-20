@@ -4552,9 +4552,18 @@ svg {
   }
 
   .rh-composer .rh-send {
+    order: -10;
     flex: 0 0 88px !important;
     width: 88px !important;
     min-width: 88px !important;
+  }
+
+  .rh-workflow-pill {
+    order: -9;
+  }
+
+  .rh-optimize {
+    order: -8;
   }
 
   .rh-composer-advanced {

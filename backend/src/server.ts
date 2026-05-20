@@ -2123,7 +2123,8 @@ async function runImageGenerationSkill(prompt: string, references: ReferenceItem
     "--session-id",
     `sparkcanvas-${outputName}`
   ];
-  const usableReferences = references.filter((reference) => reference.imageUrl).slice(0, 4);
+  const maxReferences = Math.max(1, Math.min(6, Number(process.env.IMAGE_GEN_MAX_REFERENCES ?? "3")));
+  const usableReferences = references.filter((reference) => reference.imageUrl).slice(0, maxReferences);
   for (const [index, reference] of usableReferences.entries()) {
     const filePath = await materializeReferenceImage(reference, outputName, index);
     if (filePath) args.push("--input-image", filePath);
@@ -2368,6 +2369,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
     ...(frame.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [])
   ].filter((reference, index, list) => list.findIndex((item) => item.id === reference.id) === index);
   const fallbackImage = fallbackImageDataUrl("Skill unavailable");
+  const referenceFallbackImage = refs.find((reference) => ["product", "ip", "model", "storefront", "environment", "logo"].includes(reference.role))?.imageUrl;
   const model = models.find((item) => item.id === frame.modelId) ?? models[0];
   const visualDraftNode = frame.workflowNodes.find((node) => node.id === "visual-draft");
   let sharedVisualUrl = visualDraftNode?.refs?.find((item) => item.imageUrl && ["visual", "generated", "document-preview", "video-preview"].includes(item.role))?.imageUrl;
@@ -2386,7 +2388,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
           `xmanx-${frame.id}-visual`,
           model.model,
           frame.settings,
-          Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "180000")
+          Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "300000")
         );
         sharedVisualUrl = generated ?? fallbackImage;
         if (!generated) sharedVisualNote = "主视觉使用降级预览：未配置有效图片生成 Key。";
@@ -2421,13 +2423,13 @@ async function fillFrameOutputs(frame: CanvasFrame) {
           `xmanx-${frame.id}-${index + 1}`,
           model.model,
           frame.settings,
-          Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "180000"),
+          Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "300000"),
           imageFormatFromText(output.title)
         );
-        output.imageUrl = generated ?? sharedVisualUrl ?? fallbackImage;
+        output.imageUrl = generated ?? sharedVisualUrl ?? referenceFallbackImage ?? fallbackImage;
         if (!generated) output.copy = appendCopyNote(output.copy, "图片生成未返回结果，已使用主视觉/降级预览。");
       } catch (error) {
-        output.imageUrl = sharedVisualUrl ?? fallbackImage;
+        output.imageUrl = sharedVisualUrl ?? referenceFallbackImage ?? fallbackImage;
         output.copy = appendCopyNote(output.copy, `图片生成降级：${error instanceof Error ? error.message.slice(0, 120) : "image skill unavailable"}`);
       }
       const ref = generatedReference(`generated_${outputNode?.id ?? output.id}_${Date.now().toString(36)}_${index}`, output, outputNode?.preview ?? neutralBrandColor(brand).accent);
