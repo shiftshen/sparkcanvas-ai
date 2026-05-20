@@ -2259,13 +2259,18 @@ function NodeCard(props: {
       ) : props.node.type === "model" ? (
         <div className="rh-node-body compact"><Settings2 /><strong>{props.node.body || "@imgen · image skill"}</strong></div>
       ) : props.node.type === "process" ? (
-        <button type="button" className={`rh-text-tile ${parseStoryboardTable(props.node.body, props.refs).rows.length ? "storyboard" : ""}`} onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
-          {parseStoryboardTable(props.node.body, props.refs).rows.length ? (
-            <StoryboardBoard body={props.node.body} refs={props.refs} compact />
+        <button type="button" className={`rh-text-tile ${props.node.body ? "filled" : ""}`} onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
+          {props.node.body ? (
+            <div className="rh-text-preview-lines">
+              {props.node.body.split("\n").filter(Boolean).slice(0, 8).map((line, index) => (
+                <span key={`${props.node.id}_line_${index}`}>{line.replace(/^#{1,3}\s*/, "").replace(/\*\*/g, "").replace(/^[-*>]\s*/, "")}</span>
+              ))}
+            </div>
           ) : (
             <>
-              <Layers3 />
-              <span>{props.node.body || "根据图片生成提示词"}</span>
+              <List />
+              <span>写内容、反推提示词、生成故事或品牌文案</span>
+              <small>点击打开完整编辑器</small>
             </>
           )}
         </button>
@@ -2393,7 +2398,6 @@ function NodeEditor({
   const [imageStrength, setImageStrength] = useState(frameSettings.strength);
   const [textModel, setTextModel] = useState("gpt-5.4");
   const [translateText, setTranslateText] = useState(false);
-  const [textMode, setTextMode] = useState("story");
   const [scriptModel, setScriptModel] = useState("gpt-5.4");
   const [translateScript, setTranslateScript] = useState(false);
   const [videoMode, setVideoMode] = useState("文生视频");
@@ -2446,6 +2450,26 @@ function NodeEditor({
 
   function insertMentionToken(body: string, token: string) {
     return insertReferenceToken(body, token);
+  }
+
+  function formatTextDraft(marker: "h1" | "h2" | "h3" | "bold" | "italic" | "bullet" | "number" | "quote" | "divider") {
+    const currentDraft = draft;
+    if (!currentDraft) return;
+    const body = currentDraft.body || "";
+    const nextBody = (() => {
+      if (marker === "divider") return `${body}${body.endsWith("\n") || !body ? "" : "\n"}---\n`;
+      if (marker === "h1") return `${body}${body.endsWith("\n") || !body ? "" : "\n"}# 标题\n`;
+      if (marker === "h2") return `${body}${body.endsWith("\n") || !body ? "" : "\n"}## 小标题\n`;
+      if (marker === "h3") return `${body}${body.endsWith("\n") || !body ? "" : "\n"}### 段落标题\n`;
+      if (marker === "bullet") return `${body}${body.endsWith("\n") || !body ? "" : "\n"}- 要点\n`;
+      if (marker === "number") return `${body}${body.endsWith("\n") || !body ? "" : "\n"}1. 步骤\n`;
+      if (marker === "quote") return `${body}${body.endsWith("\n") || !body ? "" : "\n"}> 引用或旁白\n`;
+      if (marker === "bold") return `${body}${body.endsWith(" ") || !body ? "" : " "}**重点**`;
+      return `${body}${body.endsWith(" ") || !body ? "" : " "}*强调*`;
+    })();
+    const nextDraft = { ...currentDraft, body: nextBody };
+    setDraft(nextDraft);
+    onSave({ body: nextBody });
   }
 
   async function handleGenerate() {
@@ -2676,40 +2700,56 @@ function NodeEditor({
   }
 
   if (draft.type === "process") {
-    const storyboardRefs = draft.refs?.length ? draft.refs : assets.filter((asset) => asset.imageUrl).slice(0, 4).map(assetToRef);
-    const storyboard = parseStoryboardTable(draft.body, storyboardRefs);
     async function handleTextGenerate() {
       const currentDraft = draft;
       if (!currentDraft) return;
       setGenerating(true);
+      setGenerationProgress(2);
       onSave({ title: currentDraft.title, body: currentDraft.body });
+      const timer = window.setInterval(() => setGenerationProgress((current) => Math.min(92, current + (current < 38 ? 8 : 4))), 700);
       try {
-        const result = await Promise.resolve(onGenerateText(currentDraft.body || currentDraft.title, textModel, translateText, textMode));
+        const result = await Promise.resolve(onGenerateText(currentDraft.body || currentDraft.title, textModel, translateText));
         if (result?.node) {
           setDraft(result.node);
           onSave({ title: result.node.title, body: result.node.body, refs: result.node.refs });
         }
       } finally {
+        window.clearInterval(timer);
+        setGenerationProgress(0);
         setGenerating(false);
       }
     }
 
     return (
       <aside className="rh-node-editor rh-text-editor" onPointerDown={(event) => event.stopPropagation()}>
-        <input className="rh-text-node-title" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} onBlur={() => onSave({ title: draft.title })} />
-        <div className="rh-text-mode">
-          <button type="button" className={textMode === "story" ? "active" : ""} onClick={() => setTextMode("story")}>文本故事</button>
-          <button type="button" className={textMode === "table" ? "active" : ""} onClick={() => setTextMode("table")}>故事版</button>
+        <div className="rh-text-editor-toolbar">
+          <button type="button" title="一级标题" onClick={() => formatTextDraft("h1")}>H1</button>
+          <button type="button" title="二级标题" onClick={() => formatTextDraft("h2")}>H2</button>
+          <button type="button" title="三级标题" onClick={() => formatTextDraft("h3")}>H3</button>
+          <button type="button" title="引用" onClick={() => formatTextDraft("quote")}><List /></button>
+          <button type="button" title="加粗" onClick={() => formatTextDraft("bold")}><b>B</b></button>
+          <button type="button" title="斜体" onClick={() => formatTextDraft("italic")}><i>I</i></button>
+          <button type="button" title="项目符号" onClick={() => formatTextDraft("bullet")}><List /></button>
+          <button type="button" title="编号列表" onClick={() => formatTextDraft("number")}>1.</button>
+          <button type="button" title="分割线" onClick={() => formatTextDraft("divider")}>-</button>
+          <button type="button" title="复制文本" onClick={() => void navigator.clipboard?.writeText(draft.body)}><Download /></button>
+          <button type="button" title="关闭" onClick={onClose}><X /></button>
         </div>
-        <div className={`rh-text-workspace ${storyboard.rows.length ? "has-storyboard" : ""}`}>
-          {storyboard.rows.length ? <StoryboardBoard body={draft.body} refs={storyboardRefs} /> : null}
+        <input className="rh-text-node-title" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} onBlur={() => onSave({ title: draft.title })} />
+        <div className="rh-text-workspace">
           <textarea
-            className={storyboard.rows.length ? "rh-text-raw" : "rh-text-prompt"}
+            className="rh-text-prompt"
             value={draft.body}
             onChange={(event) => setDraft({ ...draft, body: event.target.value })}
             onBlur={() => onSave({ body: draft.body })}
-            placeholder={textMode === "table" ? "描述要拆解的分镜、字段或故事版结构" : "输入故事、脚本方向或提示词"}
+            placeholder="写下你想讲的故事、文案、角色设定、图片反推提示词或文本生成要求。格式由指令决定，不需要先选择。"
           />
+          {generating && (
+            <div className="rh-text-generation-focus">
+              <strong>生成中 {generationProgress}%...</strong>
+              <i><b style={{ width: `${generationProgress}%` }} /></i>
+            </div>
+          )}
         </div>
         {activeDraftQuery && (
           <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />
@@ -2726,7 +2766,6 @@ function NodeEditor({
           <small>♦ 6</small>
           <button type="button" className="submit" title="生成文本" aria-label="生成文本" onClick={() => void handleTextGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
         </div>
-        <button type="button" className="rh-text-close" onClick={onClose}><X /></button>
       </aside>
     );
   }
@@ -2830,6 +2869,8 @@ function NodeEditor({
   }
 
   if (draft.type === "script") {
+    const storyboardRefs = draft.refs?.length ? draft.refs : assets.filter((asset) => asset.imageUrl).slice(0, 4).map(assetToRef);
+    const scriptStoryboard = parseStoryboardTable(draft.body, storyboardRefs);
     async function handleScriptGenerate() {
       const currentDraft = draft;
       if (!currentDraft) return;
@@ -2848,6 +2889,7 @@ function NodeEditor({
 
     return (
       <aside className="rh-node-editor rh-script-editor" onPointerDown={(event) => event.stopPropagation()}>
+        {scriptStoryboard.rows.length > 0 && <StoryboardBoard body={draft.body} refs={storyboardRefs} compact />}
         <textarea
           className="rh-script-prompt"
           value={draft.body}

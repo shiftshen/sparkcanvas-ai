@@ -418,15 +418,15 @@ try {
 
   const textNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_text/generate-text`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "生成三镜头分镜表格", model: "gpt-5.4", translate: false, mode: "table" })
+    body: JSON.stringify({ prompt: "写一段兔兔赛跑的故事剧情", model: "gpt-5.4", translate: false })
   });
-  assert(textNode.text.includes("| 镜号 |") && textNode.node.type === "process", "text node should generate storyboard table");
+  assert(textNode.node.type === "process" && !textNode.text.includes("| 镜号 |"), "text node should generate editable text, not storyboard table");
 
   const scriptNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_script/generate-script`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "生成黑橙运动鞋短片脚本", model: "gpt-5.4", translate: true })
+    body: JSON.stringify({ prompt: "生成三镜头分镜表格", model: "gpt-5.4", translate: false })
   });
-  assert(scriptNode.script.includes("镜头 1") && scriptNode.node.type === "script", "script node should generate editable storyboard script");
+  assert(scriptNode.script.includes("| 镜号 |") && scriptNode.node.type === "script", "script node should generate storyboard table");
 
   const videoNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_video/generate-video`, {
     method: "POST",

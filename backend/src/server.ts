@@ -2400,26 +2400,17 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
   const translated = input.translate
     ? `English prompt: ${resolved.prompt}. Keep CAL resource intent${brand ? ` and ${brand.name} visual language` : ""}.`
     : resolved.prompt;
-  const storyboardRefs = contextBrand ? buildReferenceItems(contextBrand, 4) : [];
-  const fallbackText = input.mode === "table"
-    ? [
-        "| 镜号 | 参考图 | 时长 | 画面描述 | 角色 | 角色描述 | 景别 | 角色动作 | 情绪 | 光影氛围 | 音效 | 分镜提示词 | 视频运动提示词 |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-        `| 1 | ${storyboardRefs[0]?.title ?? "参考素材"} | 3s | ${translated} 的开场 | ${contextBrand?.ipName ?? "主角/产品"} | ${contextBrand?.ipDescription ?? "按提示词定义主体"} | 特写 | 建立产品与角色关系 | 克制专业 | ${brandVisualStyle(contextBrand)} | 轻节奏铺底 | 清晰商品层级 | 摄影机缓慢推进 |`,
-        `| 2 | ${storyboardRefs[1]?.title ?? "产品参考"} | 4s | 展示核心卖点与动作 | 固定模特 | 城市场景电商模特 | 中景 | 拿起或展示商品 | 自信 | 黑橙高对比 | 节奏增强 | 商品质感突出 | 横移跟随主体动作 |`,
-        `| 3 | ${storyboardRefs[2]?.title ?? "收尾参考"} | 3s | 收束到行动号召 | ${contextBrand?.logoText ?? "CTA"} | ${contextBrand ? "品牌标识" : "画面收尾"} | 全景 | 定格收尾 | 干净有力 | 明暗清晰 | 收尾音 | 主视觉统一 | 轻微拉远后定格 |`
-      ].join("\n")
-    : [
-        translated,
-        "",
-        `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
-        "输出要求: 结构清晰，可直接作为下游图片、脚本或视频节点提示词。"
-      ].join("\n");
+  const fallbackText = [
+    translated,
+    "",
+    `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
+    "输出要求: 作为文本节点内容直接进入画布编辑器；可包含标题、段落、列表、提示词或文案，但不要输出分镜表格。分镜表格和故事版请使用脚本节点。"
+  ].join("\n");
   let generatedText = fallbackText;
   try {
     const remote = await runTextGeneration(
       [
-        `任务: ${input.mode === "table" ? "生成标准 Markdown 分镜故事版表格，表头必须包含 镜号、参考图、时长、画面描述、音效、分镜提示词、视频运动提示词。" : "生成可直接进入画布下游节点的文本故事或提示词。"}`,
+        "任务: 根据用户指令自动生成可直接进入画布文本编辑器的内容。可以是故事、文案、角色设定、图片反推提示词、品牌说明或普通 Markdown 文本。不要生成分镜表格；如果用户要求分镜/故事版/视频脚本，提示其应使用脚本节点或输出非表格摘要。",
         `用户输入: ${translated}`,
         `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
         `品牌: ${brandLabel(contextBrand)}`,
@@ -2435,10 +2426,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
 
   node.body = generatedText;
   node.title = node.title || "Text";
-  if (input.mode === "table") {
-    node.title = node.title === "Text" ? "故事版" : node.title;
-    node.refs = storyboardRefs;
-  }
+  node.type = "process";
   frame.updatedAt = now();
   await persistDb();
   res.json({ frame, node, text: generatedText, model: input.model ?? serviceConfig("text").model });
@@ -2460,37 +2448,49 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
   const contextBrand = frameContextBrand(frame);
   const source = input.prompt.trim();
   const resolved = resolvePromptAssets(source, brand);
-  const fallbackScript = [
-    `分镜脚本: ${node.title || "Script"}`,
-    "",
-    `剧情目标: ${resolved.prompt}`,
-    `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
-    "",
-    "镜头 1",
-    "- 时长: 3s",
-    "- 画面: 建立品牌场景，明确商品、角色和主视觉方向。",
-    "- 运动: 缓慢推进，保持构图稳定。",
-    "- 音效: 干净环境声，弱节奏铺底。",
-    "",
-    "镜头 2",
-    "- 时长: 4s",
-    "- 画面: 结合角色参考和视频参考，突出核心动作与产品质感。",
-    "- 运动: 中速横移或环绕，避免复杂眩晕镜头。",
-    "- 音效: 节奏增强，保留商业短视频质感。",
-    "",
-    "镜头 3",
-    "- 时长: 3s",
-    "- 画面: 收束到品牌 Logo、域名或行动号召。",
-    "- 运动: 轻微拉远，给后续视频节点稳定输入。",
-    "- 音效: 清晰收尾音。",
-    "",
-    input.translate ? "提示: 已按英文视频模型可读结构整理。" : "提示: 可直接连接视频节点继续生成。"
-  ].join("\n");
+  const wantsTable = /表格|故事版|分镜表|storyboard|table/i.test(source);
+  const storyboardRefs = contextBrand ? buildReferenceItems(contextBrand, 4) : [];
+  const fallbackScript = wantsTable
+    ? [
+        "| 镜号 | 参考图 | 时长 | 画面描述 | 角色 | 景别 | 角色动作 | 情绪 | 光影氛围 | 音效 | 分镜提示词 | 视频运动提示词 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        `| 1 | ${storyboardRefs[0]?.title ?? "参考素材"} | 3s | ${resolved.prompt} 的开场 | ${contextBrand?.ipName ?? "主角/产品"} | 特写 | 建立场景和主体关系 | 克制专业 | ${brandVisualStyle(contextBrand)} | 轻节奏铺底 | 清晰主体层级 | 摄影机缓慢推进 |`,
+        `| 2 | ${storyboardRefs[1]?.title ?? "产品/角色参考"} | 4s | 展示关键冲突、动作或卖点 | ${contextBrand?.ipName ?? "主角"} | 中景 | 推进核心动作 | 紧凑 | 背景有层次 | 节奏增强 | 动作和构图明确 | 横移跟随主体动作 |`,
+        `| 3 | ${storyboardRefs[2]?.title ?? "收尾参考"} | 3s | 收束到结论、品牌或下一节点输入 | ${contextBrand?.logoText ?? "CTA"} | 全景 | 定格收尾 | 干净有力 | 明暗清晰 | 收尾音 | 输出可接视频节点 | 轻微拉远后定格 |`
+      ].join("\n")
+    : [
+        `分镜脚本: ${node.title || "Script"}`,
+        "",
+        `剧情目标: ${resolved.prompt}`,
+        `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
+        "",
+        "镜头 1",
+        "- 时长: 3s",
+        "- 画面: 建立品牌场景，明确商品、角色和主视觉方向。",
+        "- 运动: 缓慢推进，保持构图稳定。",
+        "- 音效: 干净环境声，弱节奏铺底。",
+        "",
+        "镜头 2",
+        "- 时长: 4s",
+        "- 画面: 结合角色参考和视频参考，突出核心动作与产品质感。",
+        "- 运动: 中速横移或环绕，避免复杂眩晕镜头。",
+        "- 音效: 节奏增强，保留商业短视频质感。",
+        "",
+        "镜头 3",
+        "- 时长: 3s",
+        "- 画面: 收束到品牌 Logo、域名或行动号召。",
+        "- 运动: 轻微拉远，给后续视频节点稳定输入。",
+        "- 音效: 清晰收尾音。",
+        "",
+        input.translate ? "提示: 已按英文视频模型可读结构整理。" : "提示: 可直接连接视频节点继续生成。"
+      ].join("\n");
   let script = fallbackScript;
   try {
     const remote = await runTextGeneration(
       [
-        "任务: 生成可执行的视频分镜脚本，分镜清晰，包含镜头、时长、画面、运动、音效、品牌收束。",
+        wantsTable
+          ? "任务: 生成标准 Markdown 分镜故事版表格，表头必须包含 镜号、参考图、时长、画面描述、音效、分镜提示词、视频运动提示词。"
+          : "任务: 生成可执行的视频分镜脚本，分镜清晰，包含镜头、时长、画面、运动、音效、品牌收束。",
         `剧情目标: ${resolved.prompt}`,
         `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
         `品牌: ${brandLabel(contextBrand)}`,
@@ -2507,6 +2507,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
   node.type = "script";
   node.title = node.title || "Script";
   node.body = script;
+  if (wantsTable) node.refs = storyboardRefs;
   frame.updatedAt = now();
   await persistDb();
   res.json({ frame, node, script, model: input.model ?? serviceConfig("text").model });
