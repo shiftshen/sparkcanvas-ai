@@ -255,6 +255,38 @@ try {
   });
   assert(emptyFrameLegacyCoreCleanup.workflowNodes.length === 0, "legacy auto core nodes should be cleaned from empty canvases");
 
+  const tempAsset = await request("/assets", {
+    method: "POST",
+    body: JSON.stringify({
+      title: "Temporary Cleanup Asset",
+      type: "upload",
+      brandId: brand.id,
+      color: "#64748b",
+      meta: "delete cleanup fixture",
+      imageUrl: "data:image/svg+xml;base64,PHN2Zy8+"
+    })
+  });
+  await request(`/canvas/frames/${emptyFrame.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      workflowNodes: [{
+        id: "node_asset_cleanup",
+        type: "reference",
+        title: "Cleanup Ref",
+        body: "",
+        refs: [
+          { id: `asset_${tempAsset.id}_${Date.now().toString(36)}`, role: "upload", title: tempAsset.title, description: tempAsset.meta, color: tempAsset.color, imageUrl: tempAsset.imageUrl }
+        ],
+        x: 0,
+        y: 0
+      }]
+    })
+  });
+  await request(`/assets/${tempAsset.id}`, { method: "DELETE" });
+  const cleanupWorkspace = await request("/workspace");
+  const cleanupFrame = cleanupWorkspace.frames.find((frame) => frame.id === emptyFrame.id);
+  assert(cleanupFrame.workflowNodes.every((node) => !(node.refs ?? []).some((ref) => ref.id.startsWith(`asset_${tempAsset.id}`) || ref.imageUrl === tempAsset.imageUrl)), "asset deletion should clean derived canvas refs");
+
   const plainImageNode = {
     id: "node_plain_horse",
     type: "image",
@@ -344,6 +376,23 @@ try {
   assert(inferredBrandCompleted.frame.brandId === brand.id && inferredBrandCompleted.frame.brandInjected === true, "natural language one-line generation should infer and inject XMANX");
   assert(inferredRefs.length >= 3 && inferredRefs.every((ref) => ref.imageUrl), "inferred brand workflow should place concrete brand images on canvas");
   assert(inferredBrandCompleted.frame.workflowNodes.some((node) => node.id === "prompt" && node.body.includes("5.1")), "one-line generation should create a full workflow prompt node");
+
+  const pngOutputGenerated = await request("/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "为 xmanx 生成 5.1 活动竖屏 PNG",
+      mode: "magic",
+      modelId: "imgen-skill",
+      outputTarget: "png",
+      orientation: "portrait",
+      settings: { ratio: "9:16", count: 1, quality: "hd", strength: 70, duration: 0 },
+      x: 280,
+      y: 220
+    })
+  });
+  const pngOutputCompleted = await waitForTask(pngOutputGenerated.taskId);
+  assert(pngOutputCompleted.frame.outputs.some((output) => output.kind === "image" && output.title.includes("PNG")), "PNG output target should create a PNG-labeled image output");
+  assert(pngOutputCompleted.frame.settings.ratio === "9:16", "PNG preset ratio should persist to workflow settings");
 
   const multiOutputGenerated = await request("/generate", {
     method: "POST",
@@ -494,7 +543,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "brand", "asset", "asset-edit", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "legacy-reference-alias", "model", "parameters", "workflow-nodes", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "brand", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "legacy-reference-alias", "model", "parameters", "workflow-nodes", "output-presets", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));

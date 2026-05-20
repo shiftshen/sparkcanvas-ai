@@ -2578,10 +2578,18 @@ app.delete("/assets/:id", async (req, res) => {
   const index = db.assets.findIndex((item) => item.id === req.params.id);
   if (index === -1) return res.status(404).json({ message: "Asset not found" });
   const [asset] = db.assets.splice(index, 1);
+  const assetRefPrefix = `asset_${asset.id}`;
   for (const frame of db.frames) {
     frame.workflowNodes = frame.workflowNodes.map((node) => {
       if (!node.refs?.length) return node;
-      return { ...node, refs: node.refs.filter((reference) => reference.id !== `asset_${asset.id}`) };
+      return {
+        ...node,
+        refs: node.refs.filter((reference) => (
+          reference.id !== assetRefPrefix
+          && !reference.id.startsWith(`${assetRefPrefix}_`)
+          && (!asset.imageUrl || reference.imageUrl !== asset.imageUrl)
+        ))
+      };
     });
   }
   await persistDb();

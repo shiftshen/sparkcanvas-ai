@@ -1468,6 +1468,54 @@ svg {
   z-index: 20;
 }
 
+.rh-canvas-empty {
+  position: absolute;
+  left: 120px;
+  top: 190px;
+  width: 380px;
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  border-radius: 14px;
+  color: #e5e7eb;
+  background: rgba(16, 19, 29, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.36);
+}
+
+.rh-canvas-empty > svg {
+  width: 24px;
+  height: 24px;
+  color: #a7f3d0;
+}
+
+.rh-canvas-empty strong {
+  font-size: 18px;
+}
+
+.rh-canvas-empty small {
+  color: #94a3b8;
+  line-height: 1.55;
+}
+
+.rh-canvas-empty div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rh-canvas-empty button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border-radius: 9px;
+  color: #0f172a;
+  background: #f8fafc;
+  font-weight: 900;
+}
+
 .rh-edge-control > button {
   width: 32px;
   height: 32px;

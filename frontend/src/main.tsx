@@ -266,8 +266,8 @@ const defaultLocale = ((window.localStorage.getItem("sparkcanvas.locale") as Loc
   || (navigator.language.toLowerCase().startsWith("th") ? "th" : navigator.language.toLowerCase().startsWith("en") ? "en" : "zh")) as Locale;
 const i18n = {
   zh: {
-    nav: { projects: "添加节点", templates: "工具箱", assets: "我的素材", history: "历史记录", tutorial: "教程", brand: "品牌" },
-    drawer: { projects: "添加节点", templates: "工具箱", assets: "我的素材", history: "历史记录", tutorial: "教程", brand: "品牌管理" },
+    nav: { projects: "项目", templates: "模板", assets: "我的素材", history: "历史记录", tutorial: "教程", brand: "品牌" },
+    drawer: { projects: "项目 / 画布", templates: "模板库", assets: "我的素材", history: "历史记录", tutorial: "教程", brand: "品牌管理" },
     topStatus: "在底部 CAL 输入框编写提示词，$ 图片资源会作为真实参考图传入 skill",
     generate: "生成",
     check: "检查",
@@ -302,8 +302,8 @@ const i18n = {
     ]
   },
   en: {
-    nav: { projects: "Add", templates: "Tools", assets: "Assets", history: "History", tutorial: "Guide", brand: "Brand" },
-    drawer: { projects: "Add Nodes", templates: "Toolbox", assets: "Assets", history: "History", tutorial: "Guide", brand: "Brand Kit" },
+    nav: { projects: "Projects", templates: "Templates", assets: "Assets", history: "History", tutorial: "Guide", brand: "Brand" },
+    drawer: { projects: "Projects", templates: "Templates", assets: "Assets", history: "History", tutorial: "Guide", brand: "Brand Kit" },
     topStatus: "Write CAL prompts in the bottom composer. $ image resources are sent to the skill as real references.",
     generate: "Generate",
     check: "Check",
@@ -338,8 +338,8 @@ const i18n = {
     ]
   },
   th: {
-    nav: { projects: "เพิ่ม", templates: "เครื่องมือ", assets: "แอสเซ็ต", history: "ประวัติ", tutorial: "คู่มือ", brand: "แบรนด์" },
-    drawer: { projects: "เพิ่มโหนด", templates: "เครื่องมือ", assets: "แอสเซ็ต", history: "ประวัติ", tutorial: "คู่มือ", brand: "จัดการแบรนด์" },
+    nav: { projects: "โปรเจกต์", templates: "เทมเพลต", assets: "แอสเซ็ต", history: "ประวัติ", tutorial: "คู่มือ", brand: "แบรนด์" },
+    drawer: { projects: "โปรเจกต์", templates: "เทมเพลต", assets: "แอสเซ็ต", history: "ประวัติ", tutorial: "คู่มือ", brand: "จัดการแบรนด์" },
     topStatus: "เขียนพรอมป์ CAL ด้านล่าง โดยรูปภาพ $ จะถูกส่งให้ skill เป็นภาพอ้างอิงจริง",
     generate: "สร้าง",
     check: "ตรวจสอบ",
@@ -699,7 +699,7 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = []): MentionItem[] {
     group: "agent" as const,
     kind: "agent" as const,
     role,
-    title: token.replace("@", ""),
+    title: token === "@imgen" ? "图片生成 Agent" : token.replace("@", ""),
     description,
     color: brand.primaryColor
   }));
@@ -942,7 +942,7 @@ function filterMentionItems(items: MentionItem[], prompt: string) {
   const active = activeReferenceQuery(prompt);
   if (!active) return [];
   const pool = items.filter((item) => {
-    if (active.symbol === "@") return item.kind === "agent" || item.kind === "resource";
+    if (active.symbol === "@") return item.kind === "agent";
     if (active.symbol === "#") return item.kind === "copy";
     if (active.symbol === "/") return item.kind === "command";
     if (active.symbol === "$") return item.kind === "resource" || item.kind === "copy";
@@ -955,6 +955,22 @@ function filterMentionItems(items: MentionItem[], prompt: string) {
     const haystack = `${item.token} ${item.title} ${item.description} ${item.role}`.toLowerCase();
     return haystack.includes(active.query);
   });
+}
+
+function mentionIconText(item: MentionItem, symbol: string) {
+  if (item.imageUrl) return "";
+  if (item.kind === "agent") return "AI";
+  if (item.kind === "command") return "CMD";
+  if (item.kind === "tag") return "TAG";
+  if (item.kind === "copy") return symbol === "#" ? "TXT" : "TXT";
+  return "IMG";
+}
+
+function displayMentionToken(item: MentionItem, symbol: string) {
+  if (symbol === "#" && item.kind === "copy") {
+    return item.token.replace(/^\$copy\./, "#").replace(/^\$brand\./, "#");
+  }
+  return item.token;
 }
 
 function StoryboardBoard({ body, refs, compact = false }: { body: string; refs: ReferenceItem[]; compact?: boolean }) {
@@ -1167,15 +1183,14 @@ function App() {
   }
 
   async function createProject(options?: { title?: string; brandId?: string | null }) {
-    if (!activeBrand) return;
     const frame = await api.post<Frame>("/canvas/frames", {
       title: options?.title,
-      brandId: options?.brandId === undefined ? activeBrand.id : options.brandId
+      brandId: options?.brandId === undefined ? activeBrand?.id ?? null : options.brandId
     });
     setFrames((current) => [frame, ...current]);
     setSelectedFrameId(frame.id);
     setEditingNodeId(null);
-    setPanel("projects");
+    setPanel(null);
     return frame;
   }
 
@@ -1346,7 +1361,6 @@ function App() {
         <div className="rh-top-prompt rh-top-status">
           <Sparkles />
           <span>{t.topStatus}</span>
-          <button type="button" onClick={() => void generate()} disabled={!prompt.trim()}><Send />{t.generate}</button>
         </div>
         <div className="rh-top-meta">
           <span>{model?.name ?? "@imgen · image skill"}</span>
@@ -1547,7 +1561,7 @@ function SideDrawer(props: {
       {props.panel === "assets" && <AssetPanel assets={props.assets} selection={props.assetSelection} onSelect={props.onSelectAsset} onAddAssets={props.onAddAssets} onUpload={props.onUpload} onUpdate={props.onUpdateAsset} onDelete={props.onDeleteAsset} />}
       {props.panel === "brand" && props.activeBrand && <BrandPanel brands={props.brands} brand={props.activeBrand} assets={props.assets} onCreate={props.onCreateBrand} onSelect={props.onSelectBrand} onSave={props.onSaveBrand} onUpload={props.onUpload} />}
       {props.panel === "templates" && <TemplatePanel templates={props.templates} onUse={props.onUseTemplate} />}
-      {props.panel === "history" && <HistoryPanel frames={props.frames} />}
+      {props.panel === "history" && <HistoryPanel frames={props.frames} selectedFrameId={props.selectedFrameId} onSelect={props.onSelectFrame} />}
       {props.panel === "tutorial" && <TutorialPanel locale={props.locale} />}
     </aside>
   );
@@ -1796,11 +1810,11 @@ function TemplatePanel({ templates, onUse }: { templates: Template[]; onUse: (te
   );
 }
 
-function HistoryPanel({ frames }: { frames: Frame[] }) {
+function HistoryPanel({ frames, selectedFrameId, onSelect }: { frames: Frame[]; selectedFrameId?: string; onSelect: (id: string) => void }) {
   return (
     <div className="rh-panel-list">
       {frames.map((frame) => (
-        <button type="button" key={frame.id}>
+        <button className={frame.id === selectedFrameId ? "active" : ""} type="button" key={frame.id} onClick={() => onSelect(frame.id)}>
           <History />
           <div>
             <strong>{frame.title}</strong>
@@ -1951,8 +1965,14 @@ function Canvas(props: {
 
   function deleteNode(id: string) {
     if (coreNodeIds.includes(id)) return;
-    const next = nodes.filter((node) => node.id !== id);
+    const deleted = nodes.find((node) => node.id === id);
+    const nextParentId = deleted?.parentId;
+    const next = nodes
+      .filter((node) => node.id !== id)
+      .map((node) => node.parentId === id ? { ...node, parentId: nextParentId } : node);
     setNodes(next);
+    if (selectedNode === id) setSelectedNode(null);
+    if (props.editingNodeId === id) props.setEditingNodeId(null);
     commit(next);
   }
 
@@ -2116,6 +2136,18 @@ function Canvas(props: {
             <small>{props.frame.status === "generating" ? `Generating ${props.frame.progress}%` : `${props.frame.settings?.brandInject ? "品牌启用" : "品牌关闭"} · Ready`}</small>
           </div>
         )}
+        {props.frame && visibleNodes.length === 0 && (
+          <div className="rh-canvas-empty">
+            <Sparkles />
+            <strong>空画布</strong>
+            <small>从底部输入一句话生成工作流，或先放入图片、文本、视频节点。无品牌项目不会自动注入 XMANX。</small>
+            <div>
+              <button type="button" onClick={() => addCanvasNode("reference", 140, 210)}><ImagePlus />图片</button>
+              <button type="button" onClick={() => addCanvasNode("process", 140, 210)}><List />文本</button>
+              <button type="button" onClick={() => addCanvasNode("video", 140, 210)}><Play />视频</button>
+            </div>
+          </div>
+        )}
         <svg className="rh-lines" viewBox="0 0 2200 900">
           {edges.map((edge) => {
             const x1 = (edge.from.x ?? 0) + (edge.from.w ?? 230);
@@ -2142,7 +2174,7 @@ function Canvas(props: {
             />
           );
         })}
-        {visibleNodes.map((node) => {
+        {visibleNodes.filter((node) => selectedNode === node.id || openEdge === `${node.id}-add`).map((node) => {
           const id = `${node.id}-add`;
           return (
             <div className={`rh-edge-control ${openEdge === id ? "open" : ""}`} style={{ left: (node.x ?? 0) + (node.w ?? 230) + 22, top: (node.y ?? 0) + 103 }} key={id}>
@@ -2394,7 +2426,7 @@ function MentionPopover({ items, compact = false, onPick }: { items: MentionItem
                 onClick={() => onPick(item)}
                 title={item.kind === "resource" ? `${item.token} · 生成时作为真实参考图传入 skill` : `${item.token} · ${item.description}`}
               >
-                {item.imageUrl ? <span style={{ backgroundImage: `url(${item.imageUrl})` }} /> : <i style={{ background: item.color }}>{item.token.slice(0, 2)}</i>}
+                {item.imageUrl ? <span style={{ backgroundImage: `url(${item.imageUrl})` }} /> : <i style={{ background: item.color }}>{mentionIconText(item, item.kind === "copy" ? "#" : item.token[0] ?? "$")}</i>}
                 <b>{item.token}</b>
                 <small>{item.title}</small>
               </button>
@@ -3195,12 +3227,12 @@ function BottomComposer(props: {
       )}
       {activeQuery && (
         <div className="rh-mention-popover">
-          <strong>{activeQuery.symbol === "@" ? "@ 智能体 / 兼容图片引用" : activeQuery.symbol === "#" ? "# 文本引用兼容" : activeQuery.symbol === "/" ? "/ 命令" : activeQuery.symbol === "$" ? "$ 资源/文案" : "% 标签"}</strong>
+          <strong>{activeQuery.symbol === "@" ? "@ 智能体" : activeQuery.symbol === "#" ? "# 文本引用兼容" : activeQuery.symbol === "/" ? "/ 命令" : activeQuery.symbol === "$" ? "$ 资源/文案" : "% 标签"}</strong>
           <em>{activeQuery.symbol === "$" || activeQuery.symbol === "#" || activeQuery.symbol === "@" ? "图片资源会作为真实参考图传入 skill，文本资源会展开；旧 @/# 会自动转 CAL" : "按 CAL 语言规则生成结构化执行参数"}</em>
           {filteredMentionItems.map((item) => (
             <button type="button" key={`${item.group}_${item.id}_${item.token}`} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(item)}>
-              <span style={item.imageUrl ? { backgroundImage: `url(${item.imageUrl})` } : { background: item.color }}>{!item.imageUrl ? item.token.slice(0, 2) : ""}</span>
-              <b>{item.token}</b>
+              <span style={item.imageUrl ? { backgroundImage: `url(${item.imageUrl})` } : { background: item.color }}>{mentionIconText(item, activeQuery.symbol)}</span>
+              <b>{displayMentionToken(item, activeQuery.symbol)}</b>
               <small>{item.title}</small>
             </button>
           ))}
