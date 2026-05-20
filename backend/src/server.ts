@@ -1812,6 +1812,55 @@ async function concatLocalVideos(videoUrls: string[], outputName: string) {
   return ok ? `/generated/${outputName}.mp4` : "";
 }
 
+function videoCanvasSize(settings?: { ratio?: string }) {
+  const ratio = settings?.ratio?.split("·")[0]?.trim() || "16:9";
+  if (ratio === "9:16") return { width: 720, height: 1280 };
+  if (ratio === "1:1") return { width: 1024, height: 1024 };
+  if (ratio === "4:5") return { width: 1080, height: 1350 };
+  return { width: 1280, height: 720 };
+}
+
+function videoModelNeedsFirstFrameFallback(model: string) {
+  const forced = process.env.VIDEO_STRICT_FIRST_FRAME_FALLBACK;
+  if (forced === "1") return true;
+  if (forced === "0") return false;
+  return /grok-imagine|video-super|yijiarj/i.test(model);
+}
+
+async function createFirstFrameLockedVideo(firstFrameUrl: string, outputName: string, settings?: { ratio?: string; duration?: string }) {
+  const sourcePath = localPublicPathFromUrl(firstFrameUrl);
+  if (!sourcePath || !resolveFfmpegPath()) return "";
+  const durationSeconds = videoDurationSeconds(settings);
+  const frames = Math.max(1, durationSeconds * 30);
+  const { width, height } = videoCanvasSize(settings);
+  await mkdir(generatedDir, { recursive: true });
+  const outputPath = path.join(generatedDir, `${outputName}.mp4`);
+  const filter = [
+    `scale=${width}:${height}:force_original_aspect_ratio=increase`,
+    `crop=${width}:${height}`,
+    `zoompan=z='min(1.04,1+0.04*on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=30`,
+    "format=yuv420p"
+  ].join(",");
+  const ok = await runFfmpeg([
+    "-loop", "1",
+    "-i", sourcePath,
+    "-f", "lavfi",
+    "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+    "-filter_complex", `[0:v]${filter}[v]`,
+    "-map", "[v]",
+    "-map", "1:a",
+    "-t", String(durationSeconds),
+    "-shortest",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-pix_fmt", "yuv420p",
+    "-c:a", "aac",
+    "-movflags", "+faststart",
+    outputPath
+  ], 180000);
+  return ok && existsSync(outputPath) && await usableVideoFile(outputPath) ? `/generated/${outputName}.mp4` : "";
+}
+
 function localPublicPathFromUrl(imageUrl?: string) {
   if (!imageUrl?.startsWith("/")) return undefined;
   const relative = imageUrl.replace(/^\/+/, "");
@@ -2216,6 +2265,18 @@ async function runVideoGeneration(prompt: string, modelName?: string, settings?:
   const config = serviceConfig("video");
   if (!config.apiKey) return undefined;
   const model = modelName || config.model;
+  if (options.firstFrameUrl && videoModelNeedsFirstFrameFallback(model)) {
+    const videoUrl = await createFirstFrameLockedVideo(options.firstFrameUrl, `first-frame-locked-${nanoid(8)}`, settings);
+    if (videoUrl) {
+      return {
+        videoId: `local_first_frame_${nanoid(8)}`,
+        videoUrl,
+        raw: { fallback: "first-frame-locked-motion", model },
+        usedFirstFrame: true,
+        fallbackReason: `当前视频模型 ${model} 未通过首帧一致性验收，已改用首帧锁定动效视频，确保角色、Logo 和画面不漂移。`
+      };
+    }
+  }
   const firstFrameImage = await videoInputImageDataUrl(options.firstFrameUrl);
   let usedFirstFrame = Boolean(firstFrameImage);
   let fallbackReason = "";
@@ -2251,6 +2312,18 @@ async function createVideoGenerationJob(prompt: string, modelName?: string, sett
   const config = serviceConfig("video");
   if (!config.apiKey) return undefined;
   const model = modelName || config.model;
+  if (options.firstFrameUrl && videoModelNeedsFirstFrameFallback(model)) {
+    const videoUrl = await createFirstFrameLockedVideo(options.firstFrameUrl, `first-frame-locked-${nanoid(8)}`, settings);
+    if (videoUrl) {
+      return {
+        videoId: `local_first_frame_${nanoid(8)}`,
+        videoUrl,
+        raw: { fallback: "first-frame-locked-motion", model },
+        usedFirstFrame: true,
+        fallbackReason: `当前视频模型 ${model} 未通过首帧一致性验收，已改用首帧锁定动效视频，确保角色、Logo 和画面不漂移。`
+      };
+    }
+  }
   const firstFrameImage = await videoInputImageDataUrl(options.firstFrameUrl);
   let usedFirstFrame = Boolean(firstFrameImage);
   let fallbackReason = "";
