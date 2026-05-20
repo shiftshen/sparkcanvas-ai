@@ -228,6 +228,7 @@ type User = {
 
 type FramePatch = Partial<Pick<Frame, "title" | "prompt" | "modelId" | "settings" | "brandContext" | "workflowNodes" | "outputs">> & { brandId?: string | null; brandInject?: boolean };
 type PanelKey = "projects" | "assets" | "brand" | "templates" | "history" | "tutorial" | null;
+type Locale = "zh" | "en" | "th";
 type Viewport = { x: number; y: number; scale: number };
 type PreviewTarget = { title: string; subtitle?: string; imageUrl?: string; color?: string; nodeId?: string };
 type NodeGenerateResponse = { frame: Frame; node: WorkflowNode; imageUrl: string; generated?: boolean; message?: string };
@@ -239,6 +240,142 @@ type TransformTextResponse = { text: string; action: "translate" | "optimize"; m
 
 const coreNodeIds = ["input-image", "brand", "prompt", "output"];
 const nodeOrder = ["input-image", "brand", "prompt", "output"];
+const localeOptions: Array<{ id: Locale; label: string }> = [
+  { id: "zh", label: "中文" },
+  { id: "en", label: "EN" },
+  { id: "th", label: "ไทย" }
+];
+const defaultLocale = ((window.localStorage.getItem("sparkcanvas.locale") as Locale | null)
+  || (navigator.language.toLowerCase().startsWith("th") ? "th" : navigator.language.toLowerCase().startsWith("en") ? "en" : "zh")) as Locale;
+const i18n = {
+  zh: {
+    nav: { projects: "添加节点", templates: "工具箱", assets: "我的素材", history: "历史记录", tutorial: "教程", brand: "品牌" },
+    drawer: { projects: "添加节点", templates: "工具箱", assets: "我的素材", history: "历史记录", tutorial: "教程", brand: "品牌管理" },
+    topStatus: "在底部 CAL 输入框编写提示词，$ 图片资源会作为真实参考图传入 skill",
+    generate: "生成",
+    check: "检查",
+    login: {
+      badge: "CAL 1.0 · Prompt Asset Reference System",
+      title: "像写代码一样用 AI 设计品牌内容",
+      subtitle: "SparkCanvas 把品牌 Logo、IP、产品、模特和文案变成可引用变量，在可见即所得画布中生成图片、文本、脚本、视频和音频。",
+      cta: "进入工作台",
+      secondary: "查看 CAL 教材",
+      prompt: "参考 $logo 和 $ip，生成品牌主视觉。标题使用 $copy.slogan，输出 -> 海报",
+      stats: ["@imgen 图片 Skill", "$ 真实素材引用", "可控工作流画布"],
+      features: [
+        ["品牌资产变量化", "$logo / $ip / $product 会作为真实参考图传入模型。"],
+        ["可见即所得画布", "每个节点都能编辑、继续向后生成、替换历史版本。"],
+        ["国际化工作流", "中文、英文、泰文界面和教材，适合跨境团队协作。"]
+      ],
+      syntaxTitle: "CAL 符号语言",
+      syntax: [
+        ["@", "智能体或兼容旧图片引用，例如 @imgen。"],
+        ["$", "品牌资源变量，例如 $logo、$xmanx.ip、$copy.slogan。"],
+        ["/", "执行命令，例如 /生成海报、/写视频脚本。"],
+        ["%", "风格标签，例如 %高级感、%TikTok。"],
+        ["->", "输出目标，例如 -> 海报、-> 视频。"]
+      ]
+    },
+    tutorial: [
+      ["1. 建品牌", "在品牌管理里上传 Logo、产品、IP、模特等参考图，补齐口号、定位、禁用词。"],
+      ["2. 写 CAL", "像写代码一样输入：@imgen /生成海报 使用 $logo $product，显示 $copy.slogan -> 海报。"],
+      ["3. 真引用", "$logo、$ip、$product 会作为真实图片传入 skill；$copy.slogan 会展开成文案。"],
+      ["4. 加节点", "双击空白处或点击线路 +，继续添加图片、文本、脚本、视频、合成或音频节点。"],
+      ["5. 可控迭代", "点击节点后在底部固定面板调整模型、比例、提示词、历史版本和素材替换。"]
+    ]
+  },
+  en: {
+    nav: { projects: "Add", templates: "Tools", assets: "Assets", history: "History", tutorial: "Guide", brand: "Brand" },
+    drawer: { projects: "Add Nodes", templates: "Toolbox", assets: "Assets", history: "History", tutorial: "Guide", brand: "Brand Kit" },
+    topStatus: "Write CAL prompts in the bottom composer. $ image resources are sent to the skill as real references.",
+    generate: "Generate",
+    check: "Check",
+    login: {
+      badge: "CAL 1.0 · Prompt Asset Reference System",
+      title: "Design with AI like writing code",
+      subtitle: "SparkCanvas turns logos, IP characters, products, models, and copy into reference variables on a WYSIWYG canvas for images, text, scripts, video, and audio.",
+      cta: "Enter Studio",
+      secondary: "Read CAL guide",
+      prompt: "Use $logo and $ip to create a brand key visual. Title uses $copy.slogan, output -> poster",
+      stats: ["@imgen image skill", "$ real asset refs", "controllable workflow canvas"],
+      features: [
+        ["Brand assets as variables", "$logo / $ip / $product are passed to models as real image references."],
+        ["WYSIWYG canvas", "Every node can be edited, extended, regenerated, and replaced with version history."],
+        ["International workflow", "Chinese, English, and Thai UI/guide for cross-border teams."]
+      ],
+      syntaxTitle: "CAL Symbol Language",
+      syntax: [
+        ["@", "Agent or legacy visual reference, for example @imgen."],
+        ["$", "Brand resource variable, for example $logo, $xmanx.ip, $copy.slogan."],
+        ["/", "Command, for example /generate-poster or /write-video-script."],
+        ["%", "Style tag, for example %premium or %TikTok."],
+        ["->", "Output target, for example -> poster or -> video."]
+      ]
+    },
+    tutorial: [
+      ["1. Build a brand", "Upload logo, product, IP, model references, then complete slogan, positioning, and forbidden terms."],
+      ["2. Write CAL", "Type like code: @imgen /generate-poster use $logo $product, show $copy.slogan -> poster."],
+      ["3. Real references", "$logo, $ip, and $product are sent to the skill as images; $copy.slogan expands as text."],
+      ["4. Add nodes", "Double-click the canvas or use line + controls to add image, text, script, video, compose, and audio nodes."],
+      ["5. Iterate with control", "Select a node and tune model, ratio, prompt, versions, and asset replacement in the bottom panel."]
+    ]
+  },
+  th: {
+    nav: { projects: "เพิ่ม", templates: "เครื่องมือ", assets: "แอสเซ็ต", history: "ประวัติ", tutorial: "คู่มือ", brand: "แบรนด์" },
+    drawer: { projects: "เพิ่มโหนด", templates: "เครื่องมือ", assets: "แอสเซ็ต", history: "ประวัติ", tutorial: "คู่มือ", brand: "จัดการแบรนด์" },
+    topStatus: "เขียนพรอมป์ CAL ด้านล่าง โดยรูปภาพ $ จะถูกส่งให้ skill เป็นภาพอ้างอิงจริง",
+    generate: "สร้าง",
+    check: "ตรวจสอบ",
+    login: {
+      badge: "CAL 1.0 · ระบบอ้างอิงทรัพยากรในพรอมป์",
+      title: "ออกแบบด้วย AI ให้เหมือนเขียนโค้ด",
+      subtitle: "SparkCanvas เปลี่ยนโลโก้ คาแรกเตอร์ สินค้า โมเดล และข้อความแบรนด์ให้เป็นตัวแปรบนแคนวาสแบบเห็นผลลัพธ์ทันที",
+      cta: "เข้า Studio",
+      secondary: "อ่านคู่มือ CAL",
+      prompt: "ใช้ $logo และ $ip เพื่อสร้างภาพหลักของแบรนด์ ใส่ $copy.slogan แล้วส่งออก -> poster",
+      stats: ["@imgen image skill", "$ อ้างอิงแอสเซ็ตจริง", "workflow canvas ที่ควบคุมได้"],
+      features: [
+        ["แอสเซ็ตแบรนด์เป็นตัวแปร", "$logo / $ip / $product ถูกส่งเป็นภาพอ้างอิงจริงให้โมเดล"],
+        ["แคนวาส WYSIWYG", "ทุกโหนดแก้ไข ต่อสาย สร้างใหม่ และแทนที่เวอร์ชันได้"],
+        ["รองรับทีมต่างประเทศ", "มี UI และคู่มือภาษาจีน อังกฤษ และไทย"]
+      ],
+      syntaxTitle: "ภาษา CAL",
+      syntax: [
+        ["@", "Agent หรือ visual reference แบบเดิม เช่น @imgen"],
+        ["$", "ตัวแปรทรัพยากรแบรนด์ เช่น $logo, $xmanx.ip, $copy.slogan"],
+        ["/", "คำสั่ง เช่น /generate-poster หรือ /write-video-script"],
+        ["%", "แท็กสไตล์ เช่น %premium หรือ %TikTok"],
+        ["->", "เป้าหมายเอาต์พุต เช่น -> poster หรือ -> video"]
+      ]
+    },
+    tutorial: [
+      ["1. สร้างแบรนด์", "อัปโหลดโลโก้ สินค้า IP โมเดล และเติม slogan, positioning, forbidden terms"],
+      ["2. เขียน CAL", "พิมพ์เหมือนโค้ด: @imgen /generate-poster use $logo $product, show $copy.slogan -> poster"],
+      ["3. อ้างอิงจริง", "$logo, $ip, $product ถูกส่งเป็นรูปจริงให้ skill; $copy.slogan ถูกขยายเป็นข้อความ"],
+      ["4. เพิ่มโหนด", "ดับเบิลคลิกบนแคนวาสหรือกด + บนเส้นเพื่อเพิ่ม image/text/script/video/compose/audio"],
+      ["5. คุมการทำซ้ำ", "เลือกโหนดแล้วปรับ model, ratio, prompt, versions และ asset replacement ที่แผงล่าง"]
+    ]
+  }
+} satisfies Record<Locale, {
+  nav: Record<Exclude<PanelKey, null>, string>;
+  drawer: Record<Exclude<PanelKey, null>, string>;
+  topStatus: string;
+  generate: string;
+  check: string;
+  login: {
+    badge: string;
+    title: string;
+    subtitle: string;
+    cta: string;
+    secondary: string;
+    prompt: string;
+    stats: string[];
+    features: Array<[string, string]>;
+    syntaxTitle: string;
+    syntax: Array<[string, string]>;
+  };
+  tutorial: Array<[string, string]>;
+}>;
 const requiredBrandSlots = [
   { role: "logo", token: "$logo", title: "Logo", hint: "透明底标志、标准组合或主视觉标识", assetType: "logo" },
   { role: "ip", token: "$ip", title: "IP", hint: "品牌角色、吉祥物或虚拟主理人", assetType: "model" },
@@ -786,6 +923,8 @@ function App() {
   const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics | null>(null);
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [panel, setPanel] = useState<PanelKey>(null);
+  const [locale, setLocaleState] = useState<Locale>(defaultLocale in i18n ? defaultLocale : "zh");
+  const [siteMode, setSiteMode] = useState(() => new URLSearchParams(window.location.search).get("site") === "1");
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -800,6 +939,23 @@ function App() {
   const projectBrand = frameBrand ?? (activeFrame?.brandId === "" ? undefined : activeBrand);
   const model = models.find((item) => item.id === activeFrame?.modelId) ?? models[0];
   const activeBrandAssets = projectBrand ? assets.filter((asset) => asset.brandId === projectBrand.id) : [];
+  const t = i18n[locale];
+
+  function setLocale(nextLocale: Locale) {
+    setLocaleState(nextLocale);
+    window.localStorage.setItem("sparkcanvas.locale", nextLocale);
+  }
+
+  function openSiteMode() {
+    setSiteMode(true);
+    window.history.replaceState(null, "", "/?site=1");
+  }
+
+  function enterWorkspace() {
+    setSiteMode(false);
+    window.history.replaceState(null, "", "/");
+    if (!user) void login().catch((caught) => setError(caught instanceof Error ? caught.message : "登录失败"));
+  }
 
   async function loadWorkspace() {
     const workspace = await api.get<Workspace>("/workspace");
@@ -1078,16 +1234,18 @@ function App() {
   }
 
   if (loading) return <div className="rh-loading"><Loader2 className="spin" /> SparkCanvas</div>;
-  if (!user) return <LoginScreen error={error} onLogin={() => void login().catch((caught) => setError(caught instanceof Error ? caught.message : "登录失败"))} />;
+  if (siteMode || !user) return <LoginScreen locale={locale} setLocale={setLocale} error={error} onLogin={enterWorkspace} />;
 
   return (
     <div className="rh-app">
       <header className="rh-topbar">
-        <div className="rh-logo"><span>SC</span><div><strong>SparkCanvas</strong><small>{activeBrand?.name ?? "XMANX"}</small></div></div>
+        <button type="button" className="rh-logo" onClick={openSiteMode} title="SparkCanvas website">
+          <span>SC</span><div><strong>SparkCanvas</strong><small>{activeBrand?.name ?? "XMANX"}</small></div>
+        </button>
         <div className="rh-top-prompt rh-top-status">
           <Sparkles />
-          <span>在底部 CAL 输入框编写提示词，$ 图片资源会作为真实参考图传入 skill</span>
-          <button type="button" onClick={() => void generate()} disabled={!prompt.trim()}><Send />生成</button>
+          <span>{t.topStatus}</span>
+          <button type="button" onClick={() => void generate()} disabled={!prompt.trim()}><Send />{t.generate}</button>
         </div>
         <div className="rh-top-meta">
           <span>{model?.name ?? "@imgen · image skill"}</span>
@@ -1095,19 +1253,22 @@ function App() {
             {aiStatus?.imageGeneration.configured ? `Skill · ${aiStatus.imageGeneration.model}` : "Skill key missing"}
           </em>
           <button type="button" onClick={() => void checkAiDiagnostics()} title={aiDiagnostics?.runtime.message ?? "检查本地图片生成 Skill"}>
-            <RefreshCw />检查
+            <RefreshCw />{t.check}
           </button>
+          <select className="rh-lang-select" value={locale} onChange={(event) => setLocale(event.target.value as Locale)} aria-label="Language">
+            {localeOptions.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}
+          </select>
           <strong>{user.credits}</strong>
         </div>
       </header>
 
       <aside className="rh-rail">
-        <RailButton active={panel === "projects"} icon={<Plus />} label="添加节点" onClick={() => setPanel(panel === "projects" ? null : "projects")} />
-        <RailButton active={panel === "templates"} icon={<Layers3 />} label="工具箱" onClick={() => setPanel(panel === "templates" ? null : "templates")} />
-        <RailButton active={panel === "assets"} icon={<Image />} label="我的素材" onClick={() => setPanel(panel === "assets" ? null : "assets")} />
-        <RailButton active={panel === "history"} icon={<History />} label="历史记录" onClick={() => setPanel(panel === "history" ? null : "history")} />
-        <RailButton active={panel === "tutorial"} icon={<HelpCircle />} label="教程" onClick={() => setPanel(panel === "tutorial" ? null : "tutorial")} />
-        <RailButton active={panel === "brand"} icon={<Palette />} label="品牌" onClick={() => setPanel(panel === "brand" ? null : "brand")} />
+        <RailButton active={panel === "projects"} icon={<Plus />} label={t.nav.projects} onClick={() => setPanel(panel === "projects" ? null : "projects")} />
+        <RailButton active={panel === "templates"} icon={<Layers3 />} label={t.nav.templates} onClick={() => setPanel(panel === "templates" ? null : "templates")} />
+        <RailButton active={panel === "assets"} icon={<Image />} label={t.nav.assets} onClick={() => setPanel(panel === "assets" ? null : "assets")} />
+        <RailButton active={panel === "history"} icon={<History />} label={t.nav.history} onClick={() => setPanel(panel === "history" ? null : "history")} />
+        <RailButton active={panel === "tutorial"} icon={<HelpCircle />} label={t.nav.tutorial} onClick={() => setPanel(panel === "tutorial" ? null : "tutorial")} />
+        <RailButton active={panel === "brand"} icon={<Palette />} label={t.nav.brand} onClick={() => setPanel(panel === "brand" ? null : "brand")} />
       </aside>
 
       {panel && (
@@ -1115,6 +1276,7 @@ function App() {
           <button className="rh-dismiss" type="button" onClick={() => setPanel(null)} aria-label="Close drawer" />
           <SideDrawer
             panel={panel}
+            locale={locale}
             frames={frames}
             selectedFrameId={activeFrame?.id}
             assets={activeBrandAssets}
@@ -1186,15 +1348,60 @@ function App() {
   );
 }
 
-function LoginScreen({ error, onLogin }: { error: string; onLogin: () => void }) {
+function LoginScreen({ locale, setLocale, error, onLogin }: { locale: Locale; setLocale: (locale: Locale) => void; error: string; onLogin: () => void }) {
+  const copy = i18n[locale].login;
   return (
     <main className="rh-login">
-      <section>
-        <div className="rh-login-mark">SC</div>
-        <h1>XMANX 品牌生成画布</h1>
-        <p>单画布工作流、多图参考、品牌自动注入、本地 gpt-5.4 image generation skill。</p>
-        <button type="button" onClick={onLogin}><Lock />进入工作台</button>
-        {error && <small>{error}</small>}
+      <nav className="rh-site-nav">
+        <div className="rh-site-brand">
+          <img src="/site-assets/sparkcanvas-logo-skill.png" alt="SparkCanvas logo" />
+          <strong>SparkCanvas</strong>
+        </div>
+        <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)} aria-label="Language">
+          {localeOptions.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}
+        </select>
+      </nav>
+      <section className="rh-site-hero">
+        <div className="rh-site-copy">
+          <span className="rh-site-badge">{copy.badge}</span>
+          <h1>{copy.title}</h1>
+          <p>{copy.subtitle}</p>
+          <div className="rh-site-prompt"><code>{copy.prompt}</code></div>
+          <div className="rh-site-actions">
+            <button type="button" onClick={onLogin}><Lock />{copy.cta}</button>
+            <a href="#cal-guide">{copy.secondary}</a>
+          </div>
+          {error && <small>{error}</small>}
+        </div>
+        <div className="rh-site-visual">
+          <img src="/site-assets/sparkcanvas-hero-skill.png" alt="SparkCanvas AI canvas workflow" />
+        </div>
+      </section>
+      <section className="rh-site-stats">
+        {copy.stats.map((item) => <strong key={item}>{item}</strong>)}
+      </section>
+      <section className="rh-site-features">
+        {copy.features.map(([title, body]) => (
+          <article key={title}>
+            <Sparkles />
+            <strong>{title}</strong>
+            <p>{body}</p>
+          </article>
+        ))}
+      </section>
+      <section id="cal-guide" className="rh-site-guide">
+        <div>
+          <span className="rh-site-badge">{copy.syntaxTitle}</span>
+          <h2>{copy.syntaxTitle}</h2>
+        </div>
+        <div className="rh-site-syntax">
+          {copy.syntax.map(([token, body]) => (
+            <article key={token}>
+              <code>{token}</code>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
       </section>
     </main>
   );
@@ -1206,6 +1413,7 @@ function RailButton({ icon, label, active = false, onClick }: { icon: React.Reac
 
 function SideDrawer(props: {
   panel: Exclude<PanelKey, null>;
+  locale: Locale;
   frames: Frame[];
   selectedFrameId?: string;
   assets: Asset[];
@@ -1227,14 +1435,7 @@ function SideDrawer(props: {
   onUseTemplate: (template: Template) => void;
   onClose: () => void;
 }) {
-  const drawerTitle: Record<Exclude<PanelKey, null>, string> = {
-    projects: "添加节点",
-    assets: "我的素材",
-    brand: "品牌管理",
-    templates: "工具箱",
-    history: "历史记录",
-    tutorial: "教程"
-  };
+  const drawerTitle = i18n[props.locale].drawer;
   return (
     <aside className="rh-drawer">
       <div className="rh-drawer-head">
@@ -1246,7 +1447,7 @@ function SideDrawer(props: {
       {props.panel === "brand" && props.activeBrand && <BrandPanel brands={props.brands} brand={props.activeBrand} assets={props.assets} onCreate={props.onCreateBrand} onSelect={props.onSelectBrand} onSave={props.onSaveBrand} onUpload={props.onUpload} />}
       {props.panel === "templates" && <TemplatePanel templates={props.templates} onUse={props.onUseTemplate} />}
       {props.panel === "history" && <HistoryPanel frames={props.frames} />}
-      {props.panel === "tutorial" && <TutorialPanel />}
+      {props.panel === "tutorial" && <TutorialPanel locale={props.locale} />}
     </aside>
   );
 }
@@ -1511,20 +1712,24 @@ function HistoryPanel({ frames }: { frames: Frame[] }) {
   );
 }
 
-function TutorialPanel() {
+function TutorialPanel({ locale }: { locale: Locale }) {
+  const lessons = i18n[locale].tutorial;
   return (
-    <div className="rh-panel-list">
-      {[
-        ["1. 建品牌", "在品牌管理里上传 Logo、产品、IP、模特等参考图。"],
-        ["2. 写一句话", "底部输入目标，系统会把品牌上下文整理进工作流。"],
-        ["3. 加节点", "在线路后的 + 继续添加图片、文本、脚本、视频或合成节点。"],
-        ["4. 选节点", "点击节点后在底部固定面板调整模型、比例、提示词和历史版本。"]
-      ].map(([title, copy]) => (
+    <div className="rh-panel-list rh-tutorial-panel">
+      {lessons.map(([title, copy]) => (
         <button type="button" key={title}>
           <HelpCircle />
           <div><strong>{title}</strong><small>{copy}</small></div>
         </button>
       ))}
+      <section className="rh-cal-cheatsheet">
+        {i18n[locale].login.syntax.map(([token, body]) => (
+          <article key={token}>
+            <code>{token}</code>
+            <small>{body}</small>
+          </article>
+        ))}
+      </section>
     </div>
   );
 }
