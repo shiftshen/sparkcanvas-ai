@@ -832,7 +832,7 @@ svg {
   left: 10px;
   top: 66px;
   bottom: 12px;
-  z-index: 70;
+  z-index: 160;
   width: 64px;
   display: grid;
   grid-auto-rows: min-content;
@@ -842,9 +842,16 @@ svg {
   background: rgba(10, 13, 23, 0.96);
   border: 1px solid rgba(148, 163, 184, 0.16);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+  contain: layout paint;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  touch-action: manipulation;
+  transform: none !important;
+  user-select: none;
 }
 
 .rh-rail button {
+  width: 48px;
   min-height: 48px;
   display: grid;
   place-items: center;
@@ -854,6 +861,21 @@ svg {
   background: transparent;
   font-size: 10px;
   font-weight: 900;
+  line-height: 1.05;
+  transform: none !important;
+}
+
+.rh-rail button svg {
+  width: 18px;
+  height: 18px;
+  transform: none !important;
+}
+
+.rh-rail button span {
+  max-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rh-rail button.active,
@@ -1351,10 +1373,11 @@ svg {
 
 .rh-canvas {
   position: fixed;
-  inset: 54px 0 82px 0;
+  inset: 54px 0 82px 86px;
   overflow: hidden;
   cursor: grab;
   background: #05070d;
+  z-index: 1;
 }
 
 .rh-canvas:active {
@@ -3545,6 +3568,11 @@ svg {
     width: 54px;
   }
 
+  .rh-rail button {
+    width: 38px;
+    min-height: 44px;
+  }
+
   .rh-rail button span {
     display: none;
   }
@@ -3558,6 +3586,10 @@ svg {
 
   .rh-canvas-hint {
     display: none;
+  }
+
+  .rh-canvas {
+    inset: 54px 0 82px 64px;
   }
 
   .rh-composer {

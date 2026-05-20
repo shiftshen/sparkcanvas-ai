@@ -1685,7 +1685,13 @@ function App() {
         </div>
       </header>
 
-      <aside className="rh-rail">
+      <aside
+        className="rh-rail"
+        onWheel={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+        onContextMenu={(event) => event.stopPropagation()}
+      >
         <RailButton active={panel === "projects"} icon={<Plus />} label={t.nav.projects} onClick={() => setPanel(panel === "projects" ? null : "projects")} />
         <RailButton active={panel === "templates"} icon={<Layers3 />} label={t.nav.templates} onClick={() => setPanel(panel === "templates" ? null : "templates")} />
         <RailButton active={panel === "assets"} icon={<Image />} label={t.nav.assets} onClick={() => setPanel(panel === "assets" ? null : "assets")} />
@@ -2472,12 +2478,27 @@ function Canvas(props: {
     setCanvasMenu(null);
   }
 
+  function canvasRect() {
+    return document.querySelector(".rh-canvas")?.getBoundingClientRect();
+  }
+
+  function worldToScreen(x: number, y: number) {
+    const rect = canvasRect();
+    return {
+      x: (rect?.left ?? 0) + props.viewport.x + x * props.viewport.scale,
+      y: (rect?.top ?? 0) + props.viewport.y + y * props.viewport.scale
+    };
+  }
+
   function openCanvasMenuAt(clientX: number, clientY: number) {
+    const rect = canvasRect();
+    const offsetX = clientX - (rect?.left ?? 0);
+    const offsetY = clientY - (rect?.top ?? 0);
     setCanvasMenu({
       x: clientX,
       y: clientY,
-      worldX: Math.round((clientX - props.viewport.x) / props.viewport.scale),
-      worldY: Math.round((clientY - props.viewport.y) / props.viewport.scale)
+      worldX: Math.round((offsetX - props.viewport.x) / props.viewport.scale),
+      worldY: Math.round((offsetY - props.viewport.y) / props.viewport.scale)
     });
   }
 
@@ -2652,13 +2673,10 @@ function Canvas(props: {
                 </label>
                 <button
                   type="button"
-                  onClick={() => openGalleryPickerAt(
-                    props.viewport.x + ((node.x ?? 0) + (node.w ?? 230) + 110) * props.viewport.scale,
-                    props.viewport.y + ((node.y ?? 0) + 110) * props.viewport.scale,
-                    (node.x ?? 0) + 300,
-                    node.y ?? 180,
-                    node.id
-                  )}
+                  onClick={() => {
+                    const screen = worldToScreen((node.x ?? 0) + (node.w ?? 230) + 110, (node.y ?? 0) + 110);
+                    openGalleryPickerAt(screen.x, screen.y, (node.x ?? 0) + 300, node.y ?? 180, node.id);
+                  }}
                   disabled={imageAssets.length === 0}
                   title={imageAssets.length ? "打开当前品牌素材图库并选择一张图片" : "素材库没有可用图片"}
                 ><Library />从图库选择</button>
