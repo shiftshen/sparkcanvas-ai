@@ -1312,10 +1312,10 @@ svg {
   top: 104px;
   z-index: 42;
   display: grid;
-  grid-template-columns: 34px minmax(0, auto) auto auto;
+  grid-template-columns: 34px minmax(0, auto) auto auto auto;
   align-items: center;
   gap: 10px;
-  max-width: min(560px, calc(100vw - 180px));
+  max-width: min(720px, calc(100vw - 180px));
   padding: 8px 10px;
   border-radius: 999px;
   color: #f9fafb;
@@ -1372,6 +1372,16 @@ svg {
 .rh-selection-pill button:hover {
   color: #111827;
   background: #e5e7eb;
+}
+
+.rh-selection-pill button.primary {
+  color: #07111f;
+  background: #f8fafc;
+}
+
+.rh-selection-pill button.primary:hover {
+  color: #07111f;
+  background: #ffffff;
 }
 
 .rh-world {
@@ -4038,9 +4048,12 @@ svg {
   flex: 0 0 92px;
 }
 
-.rh-advanced-toggle,
-.rh-composer .rh-send {
+.rh-advanced-toggle {
   flex: 0 0 38px;
+}
+
+.rh-composer .rh-send {
+  flex: 0 0 88px;
 }
 
 .rh-optimize,
@@ -4120,10 +4133,21 @@ svg {
 }
 
 .rh-composer .rh-send {
-  width: 38px !important;
-  min-width: 38px !important;
+  width: 88px !important;
+  min-width: 88px !important;
   height: 38px !important;
   border-radius: 10px !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.rh-composer .rh-send span {
+  display: inline;
 }
 
 .rh-composer-status {
@@ -4437,17 +4461,22 @@ svg {
     flex: 0 0 128px !important;
   }
 
-  .rh-advanced-toggle,
-  .rh-composer .rh-send {
+  .rh-advanced-toggle {
     flex: 0 0 42px !important;
     width: 42px !important;
     min-width: 42px !important;
   }
 
+  .rh-composer .rh-send {
+    flex: 0 0 88px !important;
+    width: 88px !important;
+    min-width: 88px !important;
+  }
+
   .rh-selection-pill {
     top: 82px;
     max-width: calc(100vw - 84px);
-    grid-template-columns: 30px minmax(0, 1fr) auto auto;
+    grid-template-columns: 30px minmax(0, 1fr) auto auto auto;
     gap: 6px;
     padding: 7px;
   }
@@ -4470,6 +4499,10 @@ svg {
 
   .rh-selection-pill button:not(:first-of-type) {
     width: 30px;
+  }
+
+  .rh-selection-pill button.primary {
+    width: 42px;
   }
 
   .rh-selection-pill button {

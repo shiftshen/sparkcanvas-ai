@@ -4,7 +4,7 @@ import type { ErrorRequestHandler, NextFunction, Request, Response } from "expre
 import PDFDocument from "pdfkit";
 import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createWriteStream, existsSync, readFileSync } from "node:fs";
+import { createWriteStream, existsSync, readFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
@@ -1978,6 +1978,15 @@ function imageExtensionForSkill(format: "png" | "jpeg" | "webp") {
   return format === "jpeg" ? "jpg" : format;
 }
 
+function detectImageExtension(filePath: string): "png" | "jpg" | "webp" | undefined {
+  if (!existsSync(filePath)) return undefined;
+  const header = readFileSync(filePath).subarray(0, 12);
+  if (header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "png";
+  if (header.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return "jpg";
+  if (header.subarray(0, 4).toString("ascii") === "RIFF" && header.subarray(8, 12).toString("ascii") === "WEBP") return "webp";
+  return undefined;
+}
+
 function fallbackImageDataUrl(label = "Image generation unavailable") {
   const safeLabel = label.replace(/[<>&]/g, "").slice(0, 80) || "Image generation unavailable";
   const svg = [
@@ -2055,7 +2064,16 @@ async function runImageGenerationSkill(prompt: string, references: ReferenceItem
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (code === 0) return resolve(`/generated/${filename}`);
+      if (code === 0) {
+        const actualExt = detectImageExtension(outputPath);
+        const expectedExt = imageExtensionForSkill(outputFormat);
+        if (actualExt && actualExt !== expectedExt) {
+          const actualName = `${outputName}.${actualExt}`;
+          renameSync(outputPath, path.join(generatedDir, actualName));
+          return resolve(`/generated/${actualName}`);
+        }
+        return resolve(`/generated/${filename}`);
+      }
       reject(new Error(stderr || stdout || `image generation skill exited with code ${code}`));
     });
   });

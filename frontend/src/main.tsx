@@ -532,6 +532,38 @@ function defaultPresetForOutput(output: WorkflowOutputTarget): WorkflowPreset {
   return workflowPresets.find((preset) => preset.formats.includes(output)) ?? workflowPresets[0];
 }
 
+function inferOutputTargetFromText(text: string): WorkflowOutputTarget {
+  const lower = text.toLowerCase();
+  const wantsPdf = /(^|\s|->|和)(pdf|教材|手册|文档)/i.test(lower);
+  const wantsVideo = /(^|\s|->|和)(mp4|视频|短视频|video)/i.test(lower);
+  if (wantsPdf && wantsVideo) return "kit";
+  if (wantsPdf) return "pdf";
+  if (wantsVideo) return "mp4";
+  if (/\bpng\b/i.test(lower)) return "png";
+  return "jpg";
+}
+
+function workflowControlsFromFrame(frame: Frame | undefined, sourcePrompt: string): WorkflowControls {
+  const outputTarget: WorkflowOutputTarget = frame?.outputs?.some((output) => output.kind === "document") && frame.outputs.some((output) => output.kind === "video")
+    ? "kit"
+    : frame?.outputs?.some((output) => output.kind === "document")
+      ? "pdf"
+      : frame?.outputs?.some((output) => output.kind === "video")
+        ? "mp4"
+        : frame?.outputs?.[0]?.title?.toLowerCase().includes("png")
+          ? "png"
+          : inferOutputTargetFromText(sourcePrompt);
+  const preset = workflowPresets.find((item) => item.formats.includes(outputTarget) && item.ratio === frame?.settings?.ratio) ?? defaultPresetForOutput(outputTarget);
+  return { outputTarget, orientation: preset.orientation, preset: preset.id };
+}
+
+function generationStatusText(frame?: Frame) {
+  if (!frame || frame.status !== "generating") return "";
+  return frame.progress >= 90
+    ? `生成中 ${frame.progress}% · @imgen 正在出图，通常需要 1-3 分钟`
+    : `生成中 ${frame.progress}% · 正在解析 CAL 和品牌引用`;
+}
+
 function dimensionsFromPreset(preset: WorkflowPreset) {
   const match = preset.size.match(/(\d+)\s*x\s*(\d+)/i);
   return {
@@ -1341,6 +1373,15 @@ function App() {
     }
   }
 
+  async function runCurrentWorkflow(promptOverride?: string) {
+    const sourcePrompt = (promptOverride ?? prompt).trim() || activeFrame?.prompt?.trim() || "";
+    if (!sourcePrompt) {
+      setError("请输入一句 CAL 指令，或先选择一个已有工作流。");
+      return;
+    }
+    await generate(sourcePrompt, undefined, workflowControlsFromFrame(activeFrame, sourcePrompt));
+  }
+
   async function createProject(options?: { title?: string; brandId?: string | null }) {
     const frame = await api.post<Frame>("/canvas/frames", {
       title: options?.title,
@@ -1597,6 +1638,7 @@ function App() {
         onGenerateScriptNode={(nodeId, nodePrompt, modelId, translate, contentLanguage) => generateNodeScript(nodeId, nodePrompt, modelId, translate, contentLanguage)}
         onGenerateVideoNode={(nodeId, nodePrompt, modelId, settings) => generateNodeVideo(nodeId, nodePrompt, modelId, settings)}
         onGenerateAudioNode={(nodeId, nodePrompt, modelId, settings) => generateNodeAudio(nodeId, nodePrompt, modelId, settings)}
+        onRunWorkflow={() => void runCurrentWorkflow()}
       />
 
       {!editingNodeId && (
@@ -1613,7 +1655,7 @@ function App() {
           aiDiagnostics={aiDiagnostics}
           credits={user.credits}
           locale={locale}
-          onGenerate={(controls, promptOverride) => void generate(promptOverride ?? prompt, undefined, controls)}
+          onGenerate={(controls, promptOverride) => void generate((promptOverride ?? prompt).trim() || activeFrame?.prompt || "", undefined, controls)}
           onCreateProject={() => void createProject({ brandId: projectBrand?.id ?? null })}
           onUpdateFrame={(patch) => activeFrame && void updateFrame(activeFrame.id, patch)}
         />
@@ -2030,6 +2072,7 @@ function Canvas(props: {
   onGenerateScriptNode: (nodeId: string, nodePrompt: string, modelId: string, translate: boolean, contentLanguage?: ContentLanguage) => ScriptGenerateResponse | void | Promise<ScriptGenerateResponse | void>;
   onGenerateVideoNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean; contentLanguage: ContentLanguage }) => VideoGenerateResponse | void | Promise<VideoGenerateResponse | void>;
   onGenerateAudioNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean; contentLanguage: ContentLanguage }) => AudioGenerateResponse | void | Promise<AudioGenerateResponse | void>;
+  onRunWorkflow: () => void;
 }) {
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   const [nodes, setNodes] = useState<WorkflowNode[]>(() => props.frame ? normalizeWorkflowNodes(props.frame.workflowNodes, shouldUseDefaultWorkflow(props.frame.workflowNodes)) : []);
@@ -2294,6 +2337,7 @@ function Canvas(props: {
         <div className="rh-selection-pill">
           <Wand2 />
           <div><strong>元素选择模式</strong><small>{activeSelectedNode.type === "reference" || activeSelectedNode.type === "image" || activeSelectedNode.type === "output" ? "点击图片预览，底部编辑生成参数" : "底部固定面板可编辑当前节点"}</small></div>
+          <button type="button" className="primary" onClick={props.onRunWorkflow} disabled={props.frame?.status === "generating"}><Play />运行工作流</button>
           <button type="button" onClick={() => props.setEditingNodeId(activeSelectedNode.id)}><Route />返回节点</button>
           <button type="button" onClick={closeNodeEditor}><X />退出</button>
         </div>
@@ -2302,7 +2346,7 @@ function Canvas(props: {
         {props.frame && (
           <div className="rh-project-title">
             <strong>{props.frame.title}</strong>
-            <small>{props.frame.status === "generating" ? `Generating ${props.frame.progress}%` : `品牌: ${props.frame.brandName || props.activeBrand?.name || "无"} · ${props.frame.settings?.brandInject ? "自动注入" : "仅显式引用"} · Ready`}</small>
+            <small>{props.frame.status === "generating" ? generationStatusText(props.frame) : `品牌: ${props.frame.brandName || props.activeBrand?.name || "无"} · ${props.frame.settings?.brandInject ? "自动注入" : "仅显式引用"} · Ready`}</small>
           </div>
         )}
         {props.frame && visibleNodes.length === 0 && (
@@ -3405,6 +3449,8 @@ function BottomComposer(props: {
   }
   const presetOptions = workflowPresets.filter((preset) => preset.formats.includes(outputTarget));
   const currentPreset = workflowPresets.find((preset) => preset.id === presetId) ?? defaultPresetForOutput(outputTarget);
+  const effectivePrompt = props.prompt.trim() || props.frame?.prompt?.trim() || "";
+  const isUsingFramePrompt = !props.prompt.trim() && Boolean(props.frame?.prompt?.trim());
   function applyPresetToCal(text: string) {
     const clean = text.replace(/\s+用途:[^-\n]+(?=\s->|$)/, "").replace(/\s+尺寸:[^-\n]+(?=\s->|$)/, "");
     const marker = `用途: ${currentPreset.label} 尺寸: ${currentPreset.size}`;
@@ -3417,7 +3463,7 @@ function BottomComposer(props: {
   const selectedBrandName = props.frame?.brandId
     ? props.brands.find((brand) => brand.id === props.frame?.brandId)?.name ?? props.activeBrand?.name ?? "Brand"
     : "无品牌";
-  const hasPrompt = Boolean(props.prompt.trim());
+  const hasPrompt = Boolean(effectivePrompt);
   const isGenerating = props.frame?.status === "generating";
   const generateBlockReason = !hasPrompt
       ? t.needPrompt
@@ -3467,9 +3513,9 @@ function BottomComposer(props: {
   }
   async function generateWithOptimization() {
     if (!canGenerate) return;
-    const shouldOptimize = !workflowMode || !/->/.test(props.prompt);
-    const nextPrompt = shouldOptimize ? await optimizeCurrentPrompt() : props.prompt;
-    props.onGenerate({ outputTarget, orientation, preset: currentPreset.id }, nextPrompt || props.prompt);
+    const shouldOptimize = Boolean(props.prompt.trim()) && (!workflowMode || !/->/.test(props.prompt));
+    const nextPrompt = shouldOptimize ? await optimizeCurrentPrompt() : effectivePrompt;
+    props.onGenerate({ outputTarget, orientation, preset: currentPreset.id }, nextPrompt || effectivePrompt);
   }
   return (
     <div className={`rh-composer ${workflowMode ? "workflow" : ""}`}>
@@ -3530,7 +3576,7 @@ function BottomComposer(props: {
         </select>
         <button type="button" className="rh-optimize" onClick={() => void optimizeCurrentPrompt()} disabled={optimizing || !props.prompt.trim()} title="CAL"><Wand2 />{optimizing ? t.optimizing : t.optimize}</button>
         <button type="button" className="rh-advanced-toggle" onClick={() => setAdvancedOpen((value) => !value)} title={t.advanced}><SlidersHorizontal /></button>
-        <button type="button" className="rh-send" onClick={() => void generateWithOptimization()} disabled={!canGenerate || optimizing} title={generateBlockReason || `生成当前画布，结果进入输出节点：${referencePreview.images.length} 张参考图 / ${referencePreview.texts.length} 个文本字段`}><Send /></button>
+        <button type="button" className="rh-send" onClick={() => void generateWithOptimization()} disabled={!canGenerate || optimizing} title={generateBlockReason || (isUsingFramePrompt ? "重新运行当前画布工作流" : `运行当前 CAL，结果进入输出节点：${referencePreview.images.length} 张参考图 / ${referencePreview.texts.length} 个文本字段`)}>{optimizing ? <Loader2 className="spin" /> : <Play />}<span>{isUsingFramePrompt ? "重跑" : "运行"}</span></button>
       </div>
       {advancedOpen && (
         <div className="rh-composer-advanced">
@@ -3546,9 +3592,11 @@ function BottomComposer(props: {
       <div className="rh-composer-status">
         <span>
           {props.frame?.status === "generating"
-            ? `生成中 ${props.frame.progress}% · 完成后显示在输出图节点`
+            ? generationStatusText(props.frame)
             : generateBlockReason
               ? generateBlockReason
+            : isUsingFramePrompt
+              ? "输入框为空，将重跑当前画布已有工作流"
             : props.frame?.outputs?.some((output) => output.imageUrl)
               ? "已生成 · 图片显示在画布输出图节点"
             : props.aiDiagnostics?.runtime.helpOk
