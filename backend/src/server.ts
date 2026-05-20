@@ -495,7 +495,15 @@ function normalizeLegacyPromptRefs(prompt: string) {
     [/@场景/g, "$brand.scene"],
     [/@禁用项/g, "$brand.forbidden"]
   ];
-  return replacements.reduce((next, [pattern, replacement]) => next.replace(pattern, replacement), prompt);
+  return replacements
+    .reduce((next, [pattern, replacement]) => next.replace(pattern, replacement), prompt)
+    .replace(/@((?!imgen\b)[\p{L}\p{N}_-]+\.[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*)/gu, "$$$1")
+    .replace(/#([\p{L}\p{N}_-]+)\.([\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*)/gu, (_match, brand, field) => {
+      const normalizedField = normalizeRefPath(String(field));
+      return normalizedField.startsWith("copy.") || normalizedField.startsWith("brand.")
+        ? `$${brand}.${normalizedField}`
+        : `$${brand}.copy.${normalizedField}`;
+    });
 }
 
 function extractLockedTexts(input: string) {
@@ -535,6 +543,7 @@ function extractParams(input: string) {
 }
 
 function isTextResourcePath(path: string) {
+  if (!path) return false;
   const head = path.split(".")[0];
   return head === "copy" || head === "brand" || ["brand_name", "slogan", "title", "subtitle", "promotion", "cta", "price", "address", "phone", "notice", "domain", "market", "tone", "style", "scene", "forbidden", "story", "audience"].includes(head);
 }
@@ -550,7 +559,7 @@ function parsePromptAssetRefs(prompt: string, currentBrand: Brand): ParsedAssetR
     const symbol = "$" as const;
     const parts = match[2].split(".");
     const first = normalizeKey(parts[0]);
-    const hasBrandPrefix = parts.length > 1 && knownBrandKeys.has(first);
+    const hasBrandPrefix = knownBrandKeys.has(first) && (parts.length === 1 || parts.length > 1);
     const brand = hasBrandPrefix ? first : currentKey;
     const path = normalizeRefPath((hasBrandPrefix ? parts.slice(1) : parts).join("."));
     refs.push({
@@ -559,7 +568,7 @@ function parsePromptAssetRefs(prompt: string, currentBrand: Brand): ParsedAssetR
       type: isTextResourcePath(path) ? "text" : "image",
       brandKey: brand,
       path,
-      fullKey: `${brand}.${path}`,
+      fullKey: path ? `${brand}.${path}` : brand,
       explicitBrand: hasBrandPrefix
     });
   }
@@ -594,6 +603,7 @@ function textValueForPath(brand: Brand, pathKey: string) {
 }
 
 function assetMatchesPath(asset: Asset, pathKey: string) {
+  if (!pathKey) return true;
   const role = assetTypeToReferenceRole(asset.type, asset.title);
   const text = `${asset.title} ${asset.meta}`.toLowerCase();
   const [head, ...rest] = pathKey.split(".");
@@ -623,6 +633,23 @@ function resolvePromptAssets(prompt: string, currentBrand: Brand): ResolvedPromp
       warnings.push(`未找到品牌 ${ref.brandKey}`);
       continue;
     }
+    if (!ref.path) {
+      const brandRefs = buildReferenceItems(brand, 12);
+      imageReferences.push(...brandRefs.map((reference) => ({
+        ...reference,
+        description: `${ref.fullKey}.${reference.role} · ${reference.description}`
+      })));
+      const brandValue = [
+        `${brand.name}: ${brand.slogan}`,
+        brand.visualStyle,
+        brand.tone,
+        brand.sceneKeywords?.length ? `场景: ${brand.sceneKeywords.join(", ")}` : "",
+        brand.forbiddenWords?.length ? `禁用: ${brand.forbiddenWords.join(", ")}` : ""
+      ].filter(Boolean).join("；");
+      textReferences.push({ key: `${brandKey(brand)}.brand_package`, value: brandValue, raw: ref.raw });
+      expandedPrompt = expandedPrompt.split(ref.raw).join(`参考品牌 ${brand.name} 的完整品牌素材、视觉风格和文案约束`);
+      continue;
+    }
     if (ref.type === "text") {
       const value = textValueForPath(brand, ref.path);
       if (!value) {
@@ -647,6 +674,7 @@ function resolvePromptAssets(prompt: string, currentBrand: Brand): ResolvedPromp
       color: asset.color,
       imageUrl: asset.imageUrl
     });
+    expandedPrompt = expandedPrompt.split(ref.raw).join(`参考图片 ${ref.fullKey}（${asset.title}）`);
   }
 
   const ast: CalAst = {

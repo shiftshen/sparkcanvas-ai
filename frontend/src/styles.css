@@ -492,6 +492,17 @@ svg {
   background: transparent;
 }
 
+.rh-top-status span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #9ca3af;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .rh-top-prompt button,
 .rh-send {
   min-height: 30px;
@@ -3566,18 +3577,18 @@ svg {
   right: auto !important;
   bottom: 18px !important;
   width: min(1120px, calc(100vw - 180px)) !important;
-  min-height: 112px !important;
-  height: 112px !important;
+  min-height: 136px !important;
+  height: 136px !important;
   display: grid !important;
   grid-template-columns: 54px minmax(0, 1fr) !important;
-  grid-template-rows: 46px 38px 8px !important;
+  grid-template-rows: 70px 38px 8px !important;
   gap: 8px !important;
   padding: 10px 12px !important;
   transform: translateX(-50%);
   border-radius: 12px !important;
   background: rgba(33, 33, 32, 0.98) !important;
   border: 1px solid rgba(148, 163, 184, 0.22) !important;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .rh-composer .rh-add {
@@ -3585,7 +3596,7 @@ svg {
   grid-row: 1 / span 2 !important;
   width: 54px;
   min-width: 54px;
-  height: 92px;
+  height: 116px;
   border-radius: 10px;
 }
 
@@ -3593,9 +3604,9 @@ svg {
   grid-column: 2 !important;
   grid-row: 1 !important;
   width: 100% !important;
-  height: 46px !important;
-  min-height: 46px !important;
-  max-height: 46px !important;
+  height: 70px !important;
+  min-height: 70px !important;
+  max-height: 70px !important;
   padding: 11px 12px !important;
   border-radius: 9px !important;
   background: rgba(12, 15, 22, 0.62) !important;
@@ -3664,8 +3675,20 @@ svg {
 .rh-mention-popover {
   left: 66px !important;
   bottom: calc(100% + 8px) !important;
-  width: min(520px, calc(100% - 80px)) !important;
+  width: min(680px, calc(100% - 80px)) !important;
+  max-height: min(420px, 52vh) !important;
   z-index: 120 !important;
+}
+
+.rh-mention-popover button {
+  min-height: 52px;
+  grid-template-columns: 46px minmax(0, 1fr) minmax(120px, auto);
+}
+
+.rh-mention-popover span {
+  width: 46px;
+  height: 46px;
+  border-radius: 9px;
 }
 
 .rh-text-tile.storyboard {

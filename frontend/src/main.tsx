@@ -452,6 +452,7 @@ function assetRole(asset: Pick<Asset, "title" | "meta" | "type">): BrandAssetRol
 function buildMentionItems(brand?: Brand, assets: Asset[] = []): MentionItem[] {
   if (!brand) return [];
   const key = currentBrandKey(brand);
+  const hasText = (value?: string) => Boolean(value?.trim());
   const agents: MentionItem[] = [
     ["@imgen", "imgen", "图片生成 Skill：通过本地脚本调用 otcbot / yijiarj 图片生成能力"]
   ].map(([token, role, description]) => ({
@@ -497,20 +498,45 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = []): MentionItem[] {
   }));
   const assetItems = assets
     .filter((asset) => asset.brandId === brand.id && !asset.type.startsWith("generated_") && asset.imageUrl)
-    .map((asset) => {
+    .flatMap((asset) => {
       const ref = assetToRef(asset);
-      return {
+      if (!hasText(ref.title) && !hasText(ref.description)) return [];
+      const shortItem = {
         ...ref,
         id: `asset_${asset.id}`,
         token: mentionTokenForRole(ref.role),
         group: "resource" as const,
         kind: "resource" as const
       };
+      const qualifiedItem = {
+        ...ref,
+        id: `asset_${asset.id}_qualified`,
+        token: `$${key}.${ref.role}`,
+        group: "resource" as const,
+        kind: "resource" as const,
+        description: `${ref.description} · 精确引用 ${brand.name}.${ref.role}`
+      };
+      return [shortItem, qualifiedItem];
     });
   const coveredRoles = new Set(assetItems.map((item) => item.role));
+  const brandPackage: MentionItem[] = [
+    {
+      id: `brand_package_${brand.id}`,
+      token: `$${key}`,
+      group: "resource",
+      kind: "resource",
+      role: "brand_package",
+      title: `${brand.name} 全品牌包`,
+      description: "引用该品牌全部可用图片素材、视觉风格和文本约束",
+      color: brand.primaryColor,
+      imageUrl: assetItems.find((item) => item.imageUrl)?.imageUrl
+    }
+  ];
   const brandItems: MentionItem[] = [
     { id: "brand_name", token: "$copy.brand_name", group: "copy", kind: "copy", role: "brand_name", title: brand.name, description: `跨品牌: $${key}.copy.brand_name`, color: brand.primaryColor },
+    { id: "brand_name_qualified", token: `$${key}.copy.brand_name`, group: "copy", kind: "copy", role: "brand_name", title: brand.name, description: "品牌名称", color: brand.primaryColor },
     { id: "brand_slogan", token: "$copy.slogan", group: "copy", kind: "copy", role: "slogan", title: brand.slogan, description: `跨品牌: $${key}.copy.slogan`, color: brand.accentColor },
+    { id: "brand_slogan_qualified", token: `$${key}.copy.slogan`, group: "copy", kind: "copy", role: "slogan", title: brand.slogan, description: "品牌口号", color: brand.accentColor },
     { id: "brand_promotion", token: "$copy.promotion", group: "copy", kind: "copy", role: "promotion", title: "促销文案", description: brand.slogan, color: brand.accentColor },
     { id: "brand_cta", token: "$copy.cta", group: "copy", kind: "copy", role: "cta", title: "行动按钮", description: "立即了解", color: brand.primaryColor },
     { id: "brand_logo_text", token: "$brand.logo_text", group: "copy", kind: "copy", role: "logo_text", title: brand.logoText, description: `跨品牌: $${key}.brand.logo_text`, color: brand.primaryColor },
@@ -518,8 +544,8 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = []): MentionItem[] {
     { id: "brand_visual", token: "$brand.style", group: "copy", kind: "copy", role: "style", title: "视觉风格", description: brand.visualStyle, color: brand.accentColor },
     { id: "brand_tone", token: "$brand.tone", group: "copy", kind: "copy", role: "tone", title: "语气", description: brand.tone, color: brand.primaryColor },
     { id: "brand_scene", token: "$brand.scene", group: "copy", kind: "copy", role: "scene", title: "场景关键词", description: (brand.sceneKeywords ?? []).join(", "), color: brand.accentColor }
-  ].filter((item): item is MentionItem => Boolean(item.title || item.description) && !coveredRoles.has(item.role));
-  return [...agents, ...commands, ...assetItems, ...brandItems, ...tags].filter((item, index, list) => list.findIndex((candidate) => candidate.token === item.token && candidate.title === item.title) === index);
+  ].filter((item): item is MentionItem => Boolean(hasText(item.title) && hasText(item.description)) && !coveredRoles.has(item.role));
+  return [...agents, ...commands, ...brandPackage, ...assetItems, ...brandItems, ...tags].filter((item, index, list) => list.findIndex((candidate) => candidate.token === item.token && candidate.title === item.title) === index);
 }
 
 function assetToRef(asset: Asset): ReferenceItem {
@@ -617,7 +643,12 @@ function normalizeLegacyPromptRefs(body: string) {
     .replace(/@视觉风格/g, "$brand.style")
     .replace(/@语气/g, "$brand.tone")
     .replace(/@场景/g, "$brand.scene")
-    .replace(/@禁用项/g, "$brand.forbidden");
+    .replace(/@禁用项/g, "$brand.forbidden")
+    .replace(/@((?!imgen\b)[\p{L}0-9_-]+\.[\p{L}0-9_-]+(?:\.[\p{L}0-9_-]+)*)/gu, "$$$1")
+    .replace(/#([\p{L}0-9_-]+)\.([\p{L}0-9_-]+(?:\.[\p{L}0-9_-]+)*)/gu, (_match, brand, field) => {
+      const normalized = field.toLowerCase() === "slogen" ? "slogan" : field.toLowerCase();
+      return normalized.startsWith("copy.") || normalized.startsWith("brand.") ? `$${brand}.${normalized}` : `$${brand}.copy.${normalized}`;
+    });
 }
 
 function insertReferenceToken(body: string, token: string) {
@@ -682,6 +713,7 @@ function filterMentionItems(items: MentionItem[], prompt: string) {
   });
   if (!active.query) return pool;
   return pool.filter((item) => {
+    if (active.query.includes(".")) return item.token.toLowerCase().includes(active.query);
     const haystack = `${item.token} ${item.title} ${item.description} ${item.role}`.toLowerCase();
     return haystack.includes(active.query);
   });
@@ -1035,13 +1067,6 @@ function App() {
     }
   }
 
-  const topMentionItems = buildMentionItems(activeBrand, assets);
-  const topActiveQuery = activeReferenceQuery(prompt);
-  const topFilteredMentionItems = filterMentionItems(topMentionItems, prompt).slice(0, 10);
-  function insertTopMention(item: MentionItem) {
-    setPrompt(insertReferenceToken(prompt, item.token));
-  }
-
   if (loading) return <div className="rh-loading"><Loader2 className="spin" /> SparkCanvas</div>;
   if (!user) return <LoginScreen error={error} onLogin={() => void login().catch((caught) => setError(caught instanceof Error ? caught.message : "登录失败"))} />;
 
@@ -1049,10 +1074,9 @@ function App() {
     <div className="rh-app">
       <header className="rh-topbar">
         <div className="rh-logo"><span>SC</span><div><strong>SparkCanvas</strong><small>{activeBrand?.name ?? "XMANX"}</small></div></div>
-        <div className="rh-top-prompt">
+        <div className="rh-top-prompt rh-top-status">
           <Sparkles />
-          <input value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void generate(); }} placeholder='@imgen cat，或 @imgen 使用 $logo 生成海报' />
-          {topActiveQuery && <MentionPopover items={topFilteredMentionItems} compact onPick={insertTopMention} />}
+          <span>在底部 CAL 输入框编写提示词，$ 图片资源会作为真实参考图传入 skill</span>
           <button type="button" onClick={() => void generate()} disabled={!prompt.trim()}><Send />生成</button>
         </div>
         <div className="rh-top-meta">
@@ -1135,7 +1159,7 @@ function App() {
           activeBrand={activeBrand}
           model={model}
           models={models}
-          assets={activeBrandAssets}
+          assets={assets}
           aiStatus={aiStatus}
           aiDiagnostics={aiDiagnostics}
           onGenerate={() => void generate()}
