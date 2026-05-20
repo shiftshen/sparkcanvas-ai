@@ -131,6 +131,8 @@ type AssetUploadOptions = {
 
 type GenerationSettings = {
   ratio: string;
+  width: number;
+  height: number;
   count: number;
   quality: "standard" | "hd" | "ultra";
   strength: number;
@@ -401,7 +403,7 @@ const requiredBrandSlots = [
   { role: "storefront", token: "$storefront", title: "店铺", hint: "官网、门店、直播间或电商页面", assetType: "upload" },
   { role: "environment", token: "$environment", title: "环境", hint: "使用场景、背景空间或品牌氛围", assetType: "upload" }
 ] as const satisfies ReadonlyArray<{ role: BrandAssetRole["role"]; token: string; title: string; hint: string; assetType: Asset["type"] }>;
-const defaultSettings: GenerationSettings = { ratio: "1:1", count: 1, quality: "hd", strength: 72, duration: 0, brandInject: false };
+const defaultSettings: GenerationSettings = { ratio: "1:1", width: 1080, height: 1080, count: 1, quality: "hd", strength: 72, duration: 0, brandInject: false };
 const workflowPresets: WorkflowPreset[] = [
   { id: "feed-45", label: "Meta Feed 4:5", size: "1080x1350", ratio: "4:5", orientation: "portrait", formats: ["jpg", "png"], note: "Facebook/Instagram 信息流竖图" },
   { id: "feed-square", label: "社媒方图", size: "1080x1080", ratio: "1:1", orientation: "square", formats: ["jpg", "png"], note: "Facebook/Instagram 方图" },
@@ -422,6 +424,14 @@ const workflowPresets: WorkflowPreset[] = [
 
 function defaultPresetForOutput(output: WorkflowOutputTarget): WorkflowPreset {
   return workflowPresets.find((preset) => preset.formats.includes(output)) ?? workflowPresets[0];
+}
+
+function dimensionsFromPreset(preset: WorkflowPreset) {
+  const match = preset.size.match(/(\d+)\s*x\s*(\d+)/i);
+  return {
+    width: match ? Number(match[1]) : 1080,
+    height: match ? Number(match[2]) : 1080
+  };
 }
 type GraphEdge = { from: WorkflowNode; to: WorkflowNode; id: string };
 
@@ -3227,9 +3237,12 @@ function BottomComposer(props: {
     props.onUpdateFrame({ settings: { ...settings, [key]: value } });
   }
   function settingsForResult(nextOutput: WorkflowOutputTarget, nextPreset: WorkflowPreset) {
+    const nextDimensions = dimensionsFromPreset(nextPreset);
     return {
       ...settings,
       ratio: nextPreset.ratio,
+      width: nextDimensions.width,
+      height: nextDimensions.height,
       count: 1,
       duration: nextOutput === "mp4" || nextOutput === "kit" ? Math.max(settings.duration || nextPreset.duration || 5, 1) : 0
     };
@@ -3374,7 +3387,9 @@ function BottomComposer(props: {
       </div>
       {advancedOpen && (
         <div className="rh-composer-advanced">
-          <span>{currentPreset.note} · {currentPreset.size} · {currentPreset.ratio}</span>
+          <span>{currentPreset.note} · 默认 {currentPreset.size} · 可自定义</span>
+          <label className="rh-composer-size">宽<input type="number" min={256} max={4096} step={8} value={settings.width || dimensionsFromPreset(currentPreset).width} onChange={(event) => updateSetting("width", Number(event.target.value))} /></label>
+          <label className="rh-composer-size">高<input type="number" min={256} max={4096} step={8} value={settings.height || dimensionsFromPreset(currentPreset).height} onChange={(event) => updateSetting("height", Number(event.target.value))} /></label>
           <select value={settings.quality} onChange={(event) => updateSetting("quality", event.target.value as GenerationSettings["quality"])}><option value="standard">standard</option><option value="hd">hd</option><option value="ultra">ultra</option></select>
           {(outputTarget === "jpg" || outputTarget === "png") && <select value={settings.count} onChange={(event) => updateSetting("count", Number(event.target.value))}><option value={1}>1x</option><option value={2}>2x</option><option value={4}>4x</option><option value={6}>6x</option></select>}
           {(outputTarget === "jpg" || outputTarget === "png") && <label className="rh-composer-slider">参考强度<input type="range" min={0} max={100} value={settings.strength} onChange={(event) => updateSetting("strength", Number(event.target.value))} /></label>}

@@ -148,6 +148,8 @@ type ResolvedPromptAssets = {
 
 type GenerationSettings = {
   ratio: string;
+  width: number;
+  height: number;
   count: number;
   quality: "standard" | "hd" | "ultra";
   strength: number;
@@ -649,6 +651,8 @@ function settingsForFinalOutput(target: WorkflowOutputTarget, orientation: Workf
   return {
     ...settings,
     ratio,
+    width: settings?.width ?? (orientation === "portrait" ? 1080 : orientation === "landscape" ? 1920 : 1080),
+    height: settings?.height ?? (orientation === "portrait" ? 1920 : orientation === "landscape" ? 1080 : 1080),
     count: 1,
     quality: settings?.quality ?? "hd",
     strength: settings?.strength ?? 70,
@@ -1175,6 +1179,8 @@ function estimateCost(prompt: string, mode: CanvasFrame["mode"], templateCost?: 
 function defaultSettings(prompt: string, settings?: Partial<GenerationSettings>): GenerationSettings {
   return {
     ratio: prompt.includes("视频") ? "9:16" : "1:1",
+    width: prompt.includes("视频") ? 1080 : 1080,
+    height: prompt.includes("视频") ? 1920 : 1080,
     count: 1,
     quality: "hd",
     strength: 70,
@@ -1338,6 +1344,7 @@ function executableImagePrompt(sourcePrompt: string, brand: Brand | undefined, t
     resolved.tags.length ? `Style tags: ${resolved.tags.join(", ")}.` : "",
     Object.keys(resolved.params).length ? `Parameters: ${JSON.stringify(resolved.params)}.` : "",
     settings?.ratio ? `Aspect ratio: ${settings.ratio}.` : "",
+    settings?.width && settings?.height ? `Output canvas size: ${settings.width}x${settings.height}px.` : "",
     "Hard constraints: no CAL syntax, no @agents, no $variables, no /commands, no -> targets, no JSON, no code, no markdown tables, no brand context lists, no resource parsing text, no xmanx.logo-style labels. Produce only the final visual artwork."
   ].filter(Boolean).join("\n");
 }
@@ -2900,6 +2907,8 @@ app.patch("/canvas/frames/:id", async (req, res) => {
     outputs: z.array(outputSchema).optional(),
     settings: z.object({
       ratio: z.string().optional(),
+      width: z.number().min(256).max(4096).optional(),
+      height: z.number().min(256).max(4096).optional(),
       count: z.number().min(1).max(6).optional(),
       quality: z.enum(["standard", "hd", "ultra"]).optional(),
       strength: z.number().min(0).max(100).optional(),
@@ -2995,6 +3004,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
     modelId: z.string().optional(),
     settings: z.object({
       ratio: z.string().optional(),
+      width: z.number().min(256).max(4096).optional(),
+      height: z.number().min(256).max(4096).optional(),
       count: z.number().min(1).max(6).optional(),
       quality: z.enum(["standard", "hd", "ultra"]).optional(),
       strength: z.number().min(0).max(100).optional(),
@@ -3039,7 +3050,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
   node.body = [
     node.body,
     `模型: ${selectedModel.name}`,
-    `参数: ${frame.settings.ratio} · ${frame.settings.quality} · strength ${frame.settings.strength}`,
+    `参数: ${frame.settings.ratio} · ${frame.settings.width ?? 1080}x${frame.settings.height ?? 1080} · ${frame.settings.quality} · strength ${frame.settings.strength}`,
     generationNote
   ].filter(Boolean).join("\n");
   const generatedRef: ReferenceItem = {
@@ -3347,6 +3358,8 @@ app.post("/generate", async (req, res) => {
     orientation: z.enum(["square", "portrait", "landscape"]).optional(),
     settings: z.object({
       ratio: z.string().optional(),
+      width: z.number().min(256).max(4096).optional(),
+      height: z.number().min(256).max(4096).optional(),
       count: z.number().min(1).max(6).optional(),
       quality: z.enum(["standard", "hd", "ultra"]).optional(),
       strength: z.number().min(0).max(100).optional(),

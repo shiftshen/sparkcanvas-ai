@@ -512,12 +512,12 @@ try {
       workflowNodes: editedWorkflowNodes,
       outputs: editedOutputs,
       modelId: "cliproxyapi-gpt-5",
-      settings: { ratio: "16:9", count: 4, quality: "ultra", strength: 88, duration: 5, brandInject: true }
+      settings: { ratio: "16:9", width: 1280, height: 720, count: 4, quality: "ultra", strength: 88, duration: 5, brandInject: true }
     })
   });
   assert(savedWorkflow.modelId === "cliproxyapi-gpt-5" && savedWorkflow.modelName.includes("gpt-5"), "model switch should persist");
   assert(savedWorkflow.brandId === brand.id, `workflow save should keep selected brand: ${savedWorkflow.brandId} !== ${brand.id}`);
-  assert(savedWorkflow.settings.ratio === "16:9" && savedWorkflow.settings.quality === "ultra" && savedWorkflow.settings.strength === 88, "generation parameters should persist");
+  assert(savedWorkflow.settings.ratio === "16:9" && savedWorkflow.settings.width === 1280 && savedWorkflow.settings.height === 720 && savedWorkflow.settings.quality === "ultra" && savedWorkflow.settings.strength === 88, "generation parameters and custom dimensions should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").body.includes("可编辑参考图"), "reference node edits should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").refs.some((reference) => reference.id === "ref_smoke_model"), "multi image reference edits should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").refs.some((reference) => reference.id === "ref_smoke_model" && reference.imageUrl?.startsWith("data:image")), "uploaded reference image data should persist");

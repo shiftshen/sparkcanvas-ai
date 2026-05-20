@@ -4067,9 +4067,9 @@ svg {
   position: absolute;
   right: 62px;
   bottom: calc(100% + 10px);
-  width: min(640px, calc(100vw - 220px));
+  width: min(780px, calc(100vw - 220px));
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 76px 92px 70px 112px 84px;
+  grid-template-columns: minmax(180px, 1fr) 92px 92px 76px 76px 112px 84px;
   gap: 7px;
   align-items: center;
   min-width: 0;
@@ -4087,6 +4087,21 @@ svg {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.rh-composer-size,
+.rh-composer-slider,
+.rh-composer-number {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.rh-composer-size input {
+  width: 58px !important;
 }
 
 .rh-composer-slider input {
