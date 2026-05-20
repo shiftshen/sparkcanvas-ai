@@ -84,6 +84,8 @@ type CanvasFrame = {
 type OutputKind = "image" | "video" | "document";
 type WorkflowOutputTarget = "jpg" | "png" | "poster" | "pdf" | "mp4" | "kit";
 type WorkflowOrientation = "square" | "portrait" | "landscape";
+const contentLanguageValues = ["auto", "none", "zh", "en", "th", "zh-en", "zh-th", "en-th", "zh-en-th"] as const;
+type ContentLanguage = typeof contentLanguageValues[number];
 
 type WorkflowNode = {
   id: string;
@@ -155,6 +157,7 @@ type GenerationSettings = {
   strength: number;
   duration: number;
   brandInject: boolean;
+  contentLanguage: ContentLanguage;
 };
 
 type GenerationTask = {
@@ -220,6 +223,19 @@ const assetRoleSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
   color: z.string().optional()
+});
+const contentLanguageSchema = z.enum(contentLanguageValues);
+
+const generationSettingsPatchSchema = z.object({
+  ratio: z.string().optional(),
+  width: z.number().min(256).max(4096).optional(),
+  height: z.number().min(256).max(4096).optional(),
+  count: z.number().min(1).max(6).optional(),
+  quality: z.enum(["standard", "hd", "ultra"]).optional(),
+  strength: z.number().min(0).max(100).optional(),
+  duration: z.number().min(0).max(60).optional(),
+  brandInject: z.boolean().optional(),
+  contentLanguage: contentLanguageSchema.optional()
 });
 
 const brandDetailSchema = z.object({
@@ -656,8 +672,48 @@ function settingsForFinalOutput(target: WorkflowOutputTarget, orientation: Workf
     count: 1,
     quality: settings?.quality ?? "hd",
     strength: settings?.strength ?? 70,
-    duration: target === "mp4" || target === "kit" ? Math.max(settings?.duration ?? 5, 5) : 0
+    duration: target === "mp4" || target === "kit" ? Math.max(settings?.duration ?? 5, 5) : 0,
+    contentLanguage: settings?.contentLanguage ?? "zh-en"
   };
+}
+
+function contentLanguageLabel(language?: ContentLanguage | string) {
+  const value = language ?? "zh-en";
+  const labels: Record<string, string> = {
+    auto: "auto, follow the user's prompt language",
+    none: "no text, no subtitles, no voice-over copy",
+    zh: "Chinese",
+    en: "English",
+    th: "Thai",
+    "zh-en": "Chinese + English",
+    "zh-th": "Chinese + Thai",
+    "en-th": "English + Thai",
+    "zh-en-th": "Chinese + English + Thai"
+  };
+  return labels[value] ?? labels["zh-en"];
+}
+
+function contentLanguageInstruction(settings?: Partial<GenerationSettings> | { contentLanguage?: ContentLanguage | string }, target: "image" | "video" | "text" | "script" | "pdf" = "image") {
+  const language = settings?.contentLanguage ?? "zh-en";
+  const label = contentLanguageLabel(language);
+  if (language === "none") {
+    if (target === "video") return "Language rule: do not add subtitles, captions, voice-over copy, or on-screen text unless the user explicitly locks exact text.";
+    if (target === "image") return "Language rule: text-free visual. Do not draw typography unless exact locked text is explicitly provided.";
+    return "Language rule: keep generated copy minimal and avoid customer-facing text unless required by the node.";
+  }
+  if (target === "image") {
+    return `Image text language: ${label}. Use only short, clean, legible copy when text is explicitly requested or locked. Avoid gibberish and do not invent extra wording.`;
+  }
+  if (target === "video") {
+    return `Video language: ${label}. If subtitles, captions, voice-over, or on-screen text are needed, use this language setting and keep wording short.`;
+  }
+  if (target === "script") {
+    return `Script language: ${label}. Write scene descriptions, subtitles, voice-over, and table fields in this language setting.`;
+  }
+  if (target === "pdf") {
+    return `Document language: ${label}. Keep headings, body copy, CTA, and notes in this language setting.`;
+  }
+  return `Content language: ${label}.`;
 }
 
 function finalOutputFromPrompt(prompt: string): WorkflowOutputTarget {
@@ -960,6 +1016,10 @@ async function migrateDb() {
       frame.settings.brandInject = true;
       changed = true;
     }
+    if (!contentLanguageValues.includes(frame.settings.contentLanguage)) {
+      frame.settings.contentLanguage = "zh-en";
+      changed = true;
+    }
     if (!originalBrandId || !db.brands.some((item) => item.id === originalBrandId) || frame.brandName !== brand.name) {
       frame.brandId = brand.id;
       frame.brandName = brand.name;
@@ -1186,6 +1246,7 @@ function defaultSettings(prompt: string, settings?: Partial<GenerationSettings>)
     strength: 70,
     duration: prompt.includes("视频") ? 15 : 0,
     brandInject: false,
+    contentLanguage: "zh-en",
     ...settings
   };
 }
@@ -1276,7 +1337,7 @@ function availableCalRefs(brand?: Brand) {
   return `$${brandKey(brand)}`;
 }
 
-function optimizeWorkflowPrompt(input: string, brand: Brand | undefined, target: WorkflowOutputTarget, orientation: WorkflowOrientation) {
+function optimizeWorkflowPrompt(input: string, brand: Brand | undefined, target: WorkflowOutputTarget, orientation: WorkflowOrientation, settings?: Partial<GenerationSettings>) {
   const normalized = normalizeLegacyPromptRefs(input).trim();
   const withoutOutput = normalized.replace(/->\s*.+$/gmu, "").trim();
   const hasCal = /[@$/%]/u.test(withoutOutput);
@@ -1284,6 +1345,7 @@ function optimizeWorkflowPrompt(input: string, brand: Brand | undefined, target:
   const refs = availableCalRefs(brand);
   const outputTargets = outputTargetsForFinal(target);
   const orientationTag = target === "mp4" || target === "kit" ? tagForOrientation(orientation) : "";
+  const languageParam = settings?.contentLanguage && settings.contentLanguage !== "auto" ? `语言: ${contentLanguageLabel(settings.contentLanguage)}` : "";
   const brandHint = brand && !brandReferenceKeys(brand).some((key) => key && normalizeKey(withoutOutput).includes(key)) ? `为 ${brandKey(brand)}` : "";
   const targetHint = target === "mp4"
     ? "生成图生视频工作流，先生成可控首帧，再创建 MP4 视频任务"
@@ -1293,35 +1355,36 @@ function optimizeWorkflowPrompt(input: string, brand: Brand | undefined, target:
         ? "生成完整投放套装工作流，包含主视觉、PDF 教材和 MP4 视频"
         : "生成最终投放海报/图片";
   const body = hasCal
-    ? withoutOutput
-    : ["@imgen", command, refs ? `使用 ${refs}` : "", brandHint, withoutOutput, targetHint, orientationTag].filter(Boolean).join(" ");
+    ? [withoutOutput, !/语言\s*:/u.test(withoutOutput) ? languageParam : ""].filter(Boolean).join(" ")
+    : ["@imgen", command, refs ? `使用 ${refs}` : "", brandHint, withoutOutput, targetHint, orientationTag, languageParam].filter(Boolean).join(" ");
   const withCommand = body.includes("/") ? body : `@imgen ${command} ${body}`;
   const withAgent = withCommand.includes("@imgen") ? withCommand : `@imgen ${withCommand}`;
   const withOrientation = !orientationTag || /%(vertical|landscape|square)|%竖屏|%横屏|%方图/i.test(withAgent) ? withAgent : `${withAgent} ${orientationTag}`;
   return `${withOrientation.replace(/\s+/g, " ").trim()} -> ${outputTargets.join(", ")}`;
 }
 
-function optimizeNodePrompt(input: string, brand: Brand | undefined, nodeType: WorkflowNode["type"], target: WorkflowOutputTarget, orientation: WorkflowOrientation) {
+function optimizeNodePrompt(input: string, brand: Brand | undefined, nodeType: WorkflowNode["type"], target: WorkflowOutputTarget, orientation: WorkflowOrientation, settings?: Partial<GenerationSettings>) {
   const normalized = normalizeLegacyPromptRefs(input).replace(/->\s*.+$/gmu, "").trim();
   const refs = availableCalRefs(brand);
   const base = normalized || "根据当前画布目标生成可编辑内容";
   const orientationTag = tagForOrientation(orientation);
+  const languageParam = settings?.contentLanguage && settings.contentLanguage !== "auto" ? `语言: ${contentLanguageLabel(settings.contentLanguage)}` : "";
   if (nodeType === "video") {
-    return `@imgen /generate-video ${refs ? `使用 ${refs}` : ""} ${base} 生成 ${orientation === "portrait" ? "竖屏" : orientation === "square" ? "方形" : "横屏"} 5s 品牌短视频，镜头包含开场钩子、主体展示、品牌收尾 ${orientationTag} -> mp4`.replace(/\s+/g, " ").trim();
+    return `@imgen /generate-video ${refs ? `使用 ${refs}` : ""} ${base} 生成 ${orientation === "portrait" ? "竖屏" : orientation === "square" ? "方形" : "横屏"} 5s 品牌短视频，镜头包含开场钩子、主体展示、品牌收尾 ${orientationTag} ${languageParam} -> mp4`.replace(/\s+/g, " ").trim();
   }
   if (nodeType === "script") {
-    return `/write-video-script ${refs ? `使用 ${refs}` : ""} ${base} 输出分镜表格：镜号 | 画面 | 运镜 | 时长 | 音效 | 字幕，便于后续生成 MP4。`.replace(/\s+/g, " ").trim();
+    return `/write-video-script ${refs ? `使用 ${refs}` : ""} ${base} 输出分镜表格：镜号 | 画面 | 运镜 | 时长 | 音效 | 字幕，便于后续生成 MP4。${languageParam}`.replace(/\s+/g, " ").trim();
   }
   if (nodeType === "process" || nodeType === "prompt" || nodeType === "brand") {
-    return `/write-copy ${refs ? `使用 ${refs}` : ""} ${base} 输出可编辑 Markdown：标题、卖点、正文、CTA，不要输出表格。`.replace(/\s+/g, " ").trim();
+    return `/write-copy ${refs ? `使用 ${refs}` : ""} ${base} 输出可编辑 Markdown：标题、卖点、正文、CTA，不要输出表格。${languageParam}`.replace(/\s+/g, " ").trim();
   }
   if (nodeType === "audio") {
-    return `/write-audio ${refs ? `使用 ${refs}` : ""} ${base} 输出音频提示词：情绪、节奏、乐器、段落、结尾记忆点。`.replace(/\s+/g, " ").trim();
+    return `/write-audio ${refs ? `使用 ${refs}` : ""} ${base} 输出音频提示词：情绪、节奏、乐器、段落、结尾记忆点。${languageParam}`.replace(/\s+/g, " ").trim();
   }
   if (nodeType === "compose") {
     return `/compose-video ${base} 按 开场钩子 -> 产品证明 -> 优惠 CTA 合成，转场干净，输出 MP4。`;
   }
-  return optimizeWorkflowPrompt(base, brand, target, orientation);
+  return optimizeWorkflowPrompt(base, brand, target, orientation, settings);
 }
 
 function executableImagePrompt(sourcePrompt: string, brand: Brand | undefined, targetLabel: string, settings?: Partial<GenerationSettings>) {
@@ -1341,6 +1404,7 @@ function executableImagePrompt(sourcePrompt: string, brand: Brand | undefined, t
     brand ? `Brand look: ${brand.name}; use the provided logo/product/IP reference images for visual consistency; color palette ${brand.primaryColor}, ${brand.accentColor}; style ${brand.visualStyle}; tone ${brand.tone}.` : "Brand: none unless explicitly shown in the user intent.",
     `Attached image references: ${attachedRefs}. Use them visually for identity, product shape, character consistency and color; never draw filenames, role names, variable names, or reference labels.`,
     `Text references for meaning only: ${textRefs}.`,
+    contentLanguageInstruction(settings, "image"),
     resolved.tags.length ? `Style tags: ${resolved.tags.join(", ")}.` : "",
     Object.keys(resolved.params).length ? `Parameters: ${JSON.stringify(resolved.params)}.` : "",
     settings?.ratio ? `Aspect ratio: ${settings.ratio}.` : "",
@@ -1349,7 +1413,7 @@ function executableImagePrompt(sourcePrompt: string, brand: Brand | undefined, t
   ].filter(Boolean).join("\n");
 }
 
-function executableVideoPrompt(sourcePrompt: string, brand: Brand | undefined, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean }) {
+function executableVideoPrompt(sourcePrompt: string, brand: Brand | undefined, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }) {
   const resolved = resolvePromptAssets(sourcePrompt, brand);
   const cleanIntent = stripCalForExecution(sourcePrompt, resolved);
   return [
@@ -1358,6 +1422,7 @@ function executableVideoPrompt(sourcePrompt: string, brand: Brand | undefined, s
     brand ? `Brand: ${brand.name}; visual style ${brand.visualStyle}; tone ${brand.tone}; colors ${brand.primaryColor} and ${brand.accentColor}.` : "Brand: none unless explicitly referenced.",
     resolved.imageReferences.length ? `Visual references are represented in the canvas: ${resolved.imageReferences.map((item) => `${item.role} ${item.title}`).join("; ")}.` : "",
     resolved.lockedTexts.length ? `Only use these exact on-screen texts if needed: ${resolved.lockedTexts.map((item) => `"${item}"`).join(", ")}.` : "Avoid on-screen text unless necessary.",
+    contentLanguageInstruction(settings, "video"),
     resolved.tags.length ? `Style tags: ${resolved.tags.join(", ")}.` : "",
     `Video mode: ${settings?.mode ?? "text-to-video"}; ratio ${settings?.ratio ?? "16:9"}; duration ${settings?.duration ?? "5s"}; audio ${settings?.sound === false ? "off" : "on"}.`,
     "Hard constraints: do not show CAL syntax, variables, tables, JSON, or UI screenshots. Generate the final advertisement motion."
@@ -1668,7 +1733,7 @@ async function refreshPendingVideoOutputs(limit = 2) {
   if (results.some(Boolean)) await persistDb();
 }
 
-async function runVideoGeneration(prompt: string, modelName?: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean }) {
+async function runVideoGeneration(prompt: string, modelName?: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }) {
   const config = serviceConfig("video");
   if (!config.apiKey) return undefined;
   const model = modelName || config.model;
@@ -1701,7 +1766,7 @@ async function runVideoGeneration(prompt: string, modelName?: string, settings?:
   return { videoId, videoUrl: "", raw: last };
 }
 
-async function createVideoGenerationJob(prompt: string, modelName?: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean }, timeoutMs = Number(process.env.WORKFLOW_VIDEO_CREATE_TIMEOUT_MS ?? "45000")) {
+async function createVideoGenerationJob(prompt: string, modelName?: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }, timeoutMs = Number(process.env.WORKFLOW_VIDEO_CREATE_TIMEOUT_MS ?? "45000")) {
   const config = serviceConfig("video");
   if (!config.apiKey) return undefined;
   const model = modelName || config.model;
@@ -2206,9 +2271,9 @@ async function fillFrameOutputs(frame: CanvasFrame) {
     if (output.kind === "video") {
       try {
         const video = await createVideoGenerationJob(
-          executableVideoPrompt(frame.prompt, brand, { ratio: frame.settings.ratio, duration: `${frame.settings.duration || 5}s`, sound: true }),
+          executableVideoPrompt(frame.prompt, brand, { ratio: frame.settings.ratio, duration: `${frame.settings.duration || 5}s`, sound: true, contentLanguage: frame.settings.contentLanguage }),
           serviceConfig("video").model,
-          { mode: "文生视频", ratio: `${frame.settings.ratio} · 720P · ${frame.settings.duration || 5}s`, duration: `${frame.settings.duration || 5}s`, sound: true, translate: false }
+          { mode: "文生视频", ratio: `${frame.settings.ratio} · 720P · ${frame.settings.duration || 5}s`, duration: `${frame.settings.duration || 5}s`, sound: true, translate: false, contentLanguage: frame.settings.contentLanguage }
         );
         if (video?.videoId) output.videoId = video.videoId;
         if (video?.videoUrl) output.videoUrl = video.videoUrl;
@@ -2818,14 +2883,15 @@ app.post("/ai/transform-text", async (req, res) => {
     model: z.string().optional(),
     outputTarget: z.enum(["jpg", "png", "poster", "pdf", "mp4", "kit"]).default("jpg"),
     orientation: z.enum(["square", "portrait", "landscape"]).default("landscape"),
+    contentLanguage: contentLanguageSchema.default("zh-en"),
     nodeType: z.enum(["image", "brand", "prompt", "model", "output", "reference", "process", "script", "video", "compose", "audio"]).optional()
   }).parse(req.body);
   const brand = findBrand(input.brandId);
   const resolved = resolvePromptAssets(input.text, brand);
   if (input.action === "optimize") {
     const text = input.nodeType
-      ? optimizeNodePrompt(input.text, brand, input.nodeType, input.outputTarget, input.orientation)
-      : optimizeWorkflowPrompt(input.text, brand, input.outputTarget, input.orientation);
+      ? optimizeNodePrompt(input.text, brand, input.nodeType, input.outputTarget, input.orientation, { contentLanguage: input.contentLanguage })
+      : optimizeWorkflowPrompt(input.text, brand, input.outputTarget, input.orientation, { contentLanguage: input.contentLanguage });
     return res.json({ text, action: input.action, model: "cal-optimizer", resolved: resolvePromptAssets(text, brand) });
   }
   const instruction = input.action === "translate"
@@ -2842,6 +2908,7 @@ app.post("/ai/transform-text", async (req, res) => {
         `当前品牌: ${brand.name}`,
         `品牌风格: ${brand.visualStyle}`,
         `资源解析: ${JSON.stringify({ imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params })}`,
+        contentLanguageInstruction({ contentLanguage: input.contentLanguage }, "text"),
         `用户内容:\n${input.text}`
       ].join("\n"),
       input.model
@@ -2905,16 +2972,7 @@ app.patch("/canvas/frames/:id", async (req, res) => {
     brandContext: z.string().optional(),
     workflowNodes: z.array(workflowNodeSchema).optional(),
     outputs: z.array(outputSchema).optional(),
-    settings: z.object({
-      ratio: z.string().optional(),
-      width: z.number().min(256).max(4096).optional(),
-      height: z.number().min(256).max(4096).optional(),
-      count: z.number().min(1).max(6).optional(),
-      quality: z.enum(["standard", "hd", "ultra"]).optional(),
-      strength: z.number().min(0).max(100).optional(),
-      duration: z.number().min(0).max(60).optional(),
-      brandInject: z.boolean().optional()
-    }).optional()
+    settings: generationSettingsPatchSchema.optional()
   }).parse(req.body);
 
   const manualWorkflowNodes = input.workflowNodes;
@@ -3002,16 +3060,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
   const input = z.object({
     prompt: z.string().min(1).optional(),
     modelId: z.string().optional(),
-    settings: z.object({
-      ratio: z.string().optional(),
-      width: z.number().min(256).max(4096).optional(),
-      height: z.number().min(256).max(4096).optional(),
-      count: z.number().min(1).max(6).optional(),
-      quality: z.enum(["standard", "hd", "ultra"]).optional(),
-      strength: z.number().min(0).max(100).optional(),
-      duration: z.number().min(0).max(60).optional(),
-      brandInject: z.boolean().optional()
-    }).optional()
+    settings: generationSettingsPatchSchema.optional()
   }).parse(req.body);
 
   const brand = frameBrand(frame);
@@ -3050,7 +3099,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
   node.body = [
     node.body,
     `模型: ${selectedModel.name}`,
-    `参数: ${frame.settings.ratio} · ${frame.settings.width ?? 1080}x${frame.settings.height ?? 1080} · ${frame.settings.quality} · strength ${frame.settings.strength}`,
+    `参数: ${frame.settings.ratio} · ${frame.settings.width ?? 1080}x${frame.settings.height ?? 1080} · ${frame.settings.quality} · strength ${frame.settings.strength} · ${contentLanguageLabel(frame.settings.contentLanguage)}`,
     generationNote
   ].filter(Boolean).join("\n");
   const generatedRef: ReferenceItem = {
@@ -3093,11 +3142,13 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
     prompt: z.string().min(1),
     model: z.string().optional(),
     translate: z.boolean().optional(),
+    contentLanguage: contentLanguageSchema.optional(),
     mode: z.enum(["story", "table"]).optional()
   }).parse(req.body);
 
   const brand = frameBrand(frame);
   const contextBrand = frameContextBrand(frame);
+  const contentLanguage = input.contentLanguage ?? frame.settings.contentLanguage;
   const source = input.prompt.trim();
   const resolved = resolvePromptAssets(source, brand);
   const translated = input.translate
@@ -3107,6 +3158,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
     translated,
     "",
     `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
+    contentLanguageInstruction({ contentLanguage }, "text"),
     "输出要求: 作为文本节点内容直接进入画布编辑器；可包含标题、段落、列表、提示词或文案，但不要输出分镜表格。分镜表格和故事版请使用脚本节点。"
   ].join("\n");
   let generatedText = fallbackText;
@@ -3118,7 +3170,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
         `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
         `品牌: ${brandLabel(contextBrand)}`,
         `品牌风格: ${brandVisualStyle(contextBrand)}`,
-        `品牌语气: ${brandTone(contextBrand)}`
+        `品牌语气: ${brandTone(contextBrand)}`,
+        contentLanguageInstruction({ contentLanguage }, "text")
       ].join("\n"),
       input.model
     );
@@ -3144,11 +3197,13 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
   const input = z.object({
     prompt: z.string().min(1),
     model: z.string().optional(),
-    translate: z.boolean().optional()
+    translate: z.boolean().optional(),
+    contentLanguage: contentLanguageSchema.optional()
   }).parse(req.body);
 
   const brand = frameBrand(frame);
   const contextBrand = frameContextBrand(frame);
+  const contentLanguage = input.contentLanguage ?? frame.settings.contentLanguage;
   const source = input.prompt.trim();
   const resolved = resolvePromptAssets(source, brand);
   const wantsTable = /表格|故事版|分镜表|storyboard|table/i.test(source);
@@ -3166,6 +3221,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
         "",
         `剧情目标: ${resolved.prompt}`,
         `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
+        contentLanguageInstruction({ contentLanguage }, "script"),
         "",
         "镜头 1",
         "- 时长: 3s",
@@ -3198,6 +3254,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
         `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
         `品牌: ${brandLabel(contextBrand)}`,
         `品牌风格: ${brandVisualStyle(contextBrand)}`,
+        contentLanguageInstruction({ contentLanguage }, "script"),
         input.translate ? "同时整理为英文视频模型易读结构。" : ""
       ].filter(Boolean).join("\n"),
       input.model
@@ -3230,7 +3287,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
       ratio: z.string().optional(),
       duration: z.string().optional(),
       sound: z.boolean().optional(),
-      translate: z.boolean().optional()
+      translate: z.boolean().optional(),
+      contentLanguage: contentLanguageSchema.optional()
     }).optional()
   }).parse(req.body);
 
@@ -3265,6 +3323,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
     `视频类型: ${settings.mode ?? "文生视频"}`,
     `模型: ${input.model ?? serviceConfig("video").model}`,
     `规格: ${settings.ratio ?? "16:9 · 720P · 5s"}`,
+    `语言: ${contentLanguageLabel(settings.contentLanguage ?? frame.settings.contentLanguage)}`,
     `声音: ${settings.sound === false ? "关闭" : "开启"}`,
     `翻译: ${settings.translate ? "开启" : "关闭"}`,
     `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
@@ -3305,7 +3364,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
       duration: z.string().optional(),
       scene: z.string().optional(),
       loop: z.boolean().optional(),
-      translate: z.boolean().optional()
+      translate: z.boolean().optional(),
+      contentLanguage: contentLanguageSchema.optional()
     }).optional()
   }).parse(req.body);
 
@@ -3314,6 +3374,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
   const settings = input.settings ?? {};
   const resolved = resolvePromptAssets(input.prompt.trim(), brand);
   const prompt = resolved.prompt;
+  const contentLanguage = settings.contentLanguage ?? frame.settings.contentLanguage;
   const audioPlan = [
     prompt,
     "",
@@ -3321,6 +3382,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
     `模型: ${input.model ?? "cliproxyapi · gpt-5.4"}`,
     `时长: ${settings.duration ?? "15s"}`,
     `场景: ${settings.scene ?? "广告短视频"}`,
+    `语言: ${contentLanguageLabel(contentLanguage)}`,
     `循环: ${settings.loop ? "开启" : "关闭"}`,
     `翻译: ${settings.translate ? "开启" : "关闭"}`,
     `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
@@ -3356,16 +3418,7 @@ app.post("/generate", async (req, res) => {
     outputs: z.array(outputSchema).optional(),
     outputTarget: z.enum(["jpg", "png", "poster", "pdf", "mp4", "kit"]).optional(),
     orientation: z.enum(["square", "portrait", "landscape"]).optional(),
-    settings: z.object({
-      ratio: z.string().optional(),
-      width: z.number().min(256).max(4096).optional(),
-      height: z.number().min(256).max(4096).optional(),
-      count: z.number().min(1).max(6).optional(),
-      quality: z.enum(["standard", "hd", "ultra"]).optional(),
-      strength: z.number().min(0).max(100).optional(),
-      duration: z.number().min(0).max(60).optional(),
-      brandInject: z.boolean().optional()
-    }).optional(),
+    settings: generationSettingsPatchSchema.optional(),
     x: z.number().optional(),
     y: z.number().optional()
   }).parse(req.body);
@@ -3374,7 +3427,7 @@ app.post("/generate", async (req, res) => {
   const inferredBrand = input.brandId === null ? undefined : input.brandId ? db.brands.find((item) => item.id === input.brandId) : inferBrandFromPrompt(input.prompt);
   const effectiveOutputTarget = input.outputTarget ?? finalOutputFromPrompt(input.prompt);
   const effectiveOrientation = input.orientation ?? "landscape";
-  const optimizedPrompt = optimizeWorkflowPrompt(input.prompt, inferredBrand, effectiveOutputTarget, effectiveOrientation);
+  const optimizedPrompt = optimizeWorkflowPrompt(input.prompt, inferredBrand, effectiveOutputTarget, effectiveOrientation, input.settings);
   const prompt = template ? `${template.title}：${optimizedPrompt || template.intent}` : optimizedPrompt;
   const optimizedSettings = settingsForFinalOutput(effectiveOutputTarget, effectiveOrientation, input.settings);
   const taskId = nanoid(10);

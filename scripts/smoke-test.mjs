@@ -257,9 +257,10 @@ try {
   assert(emptyFrame.workflowNodes.length === 0 && emptyFrame.outputs.length === 0 && emptyFrame.prompt === "", "new canvas should start from a truly empty frame");
   const emptyFrameSettings = await request(`/canvas/frames/${emptyFrame.id}`, {
     method: "PATCH",
-    body: JSON.stringify({ settings: { ratio: "4:5", count: 1, quality: "hd", strength: 72, brandInject: true } })
+    body: JSON.stringify({ settings: { ratio: "4:5", count: 1, quality: "hd", strength: 72, brandInject: true, contentLanguage: "zh-th" } })
   });
   assert(emptyFrameSettings.workflowNodes.length === 0, "settings changes on empty canvas must not inject default nodes");
+  assert(emptyFrameSettings.settings.contentLanguage === "zh-th", "content language setting should persist on empty canvas");
   const emptyFrameLegacyCoreCleanup = await request(`/canvas/frames/${emptyFrame.id}`, {
     method: "PATCH",
     body: JSON.stringify({
@@ -410,7 +411,7 @@ try {
       modelId: "imgen-skill",
       outputTarget: "png",
       orientation: "portrait",
-      settings: { ratio: "9:16", count: 1, quality: "hd", strength: 70, duration: 0 },
+      settings: { ratio: "9:16", count: 1, quality: "hd", strength: 70, duration: 0, contentLanguage: "zh-th" },
       x: 280,
       y: 220
     })
@@ -418,6 +419,7 @@ try {
   const pngOutputCompleted = await waitForTask(pngOutputGenerated.taskId);
   assert(pngOutputCompleted.frame.outputs.some((output) => output.kind === "image" && output.title.includes("PNG")), "PNG output target should create a PNG-labeled image output");
   assert(pngOutputCompleted.frame.settings.ratio === "9:16", "PNG preset ratio should persist to workflow settings");
+  assert(pngOutputCompleted.frame.settings.contentLanguage === "zh-th" && pngOutputCompleted.frame.prompt.includes("Chinese + Thai"), "workflow optimizer should keep selected content language in CAL prompt");
 
   const multiOutputGenerated = await request("/generate", {
     method: "POST",
@@ -446,10 +448,11 @@ try {
   assert(multiOutputCompleted.frame.steps.some((step) => step.includes("PDF") && step.includes("MP4")), "workflow steps should mention requested PDF and MP4 outputs");
   const mp4OutputNode = await request(`/canvas/frames/${multiOutputCompleted.frame.id}/nodes/output-mp4/generate-video`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "刷新 MP4 输出任务", model: "grok-imagine-1.0-video-super-720p", settings: { mode: "图生视频", ratio: "16:9 · 720P · 5s", duration: "5s", sound: true, translate: false } })
+    body: JSON.stringify({ prompt: "刷新 MP4 输出任务", model: "grok-imagine-1.0-video-super-720p", settings: { mode: "图生视频", ratio: "16:9 · 720P · 5s", duration: "5s", sound: true, translate: false, contentLanguage: "zh-th" } })
   });
   assert(mp4OutputNode.node.id === "output-mp4" && mp4OutputNode.node.type === "output", "MP4 output node generation should keep the node as an output node");
   assert(mp4OutputNode.frame.outputs.some((output) => output.kind === "video" && /执行状态|视频任务|MP4/.test(output.copy)), "MP4 output node should update the video output status instead of calling image generation");
+  assert(mp4OutputNode.videoPlan.includes("Video language: Chinese + Thai") && mp4OutputNode.videoPlan.includes("语言: Chinese + Thai"), "video generation prompt should carry content language");
 
   const generated = await request("/generate", {
     method: "POST",
@@ -512,12 +515,12 @@ try {
       workflowNodes: editedWorkflowNodes,
       outputs: editedOutputs,
       modelId: "cliproxyapi-gpt-5",
-      settings: { ratio: "16:9", width: 1280, height: 720, count: 4, quality: "ultra", strength: 88, duration: 5, brandInject: true }
+      settings: { ratio: "16:9", width: 1280, height: 720, count: 4, quality: "ultra", strength: 88, duration: 5, brandInject: true, contentLanguage: "en-th" }
     })
   });
   assert(savedWorkflow.modelId === "cliproxyapi-gpt-5" && savedWorkflow.modelName.includes("gpt-5"), "model switch should persist");
   assert(savedWorkflow.brandId === brand.id, `workflow save should keep selected brand: ${savedWorkflow.brandId} !== ${brand.id}`);
-  assert(savedWorkflow.settings.ratio === "16:9" && savedWorkflow.settings.width === 1280 && savedWorkflow.settings.height === 720 && savedWorkflow.settings.quality === "ultra" && savedWorkflow.settings.strength === 88, "generation parameters and custom dimensions should persist");
+  assert(savedWorkflow.settings.ratio === "16:9" && savedWorkflow.settings.width === 1280 && savedWorkflow.settings.height === 720 && savedWorkflow.settings.quality === "ultra" && savedWorkflow.settings.strength === 88 && savedWorkflow.settings.contentLanguage === "en-th", "generation parameters, custom dimensions and content language should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").body.includes("可编辑参考图"), "reference node edits should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").refs.some((reference) => reference.id === "ref_smoke_model"), "multi image reference edits should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").refs.some((reference) => reference.id === "ref_smoke_model" && reference.imageUrl?.startsWith("data:image")), "uploaded reference image data should persist");
@@ -531,9 +534,10 @@ try {
 
   const textNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_text/generate-text`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "写一段兔兔赛跑的故事剧情", model: "gpt-5.4", translate: false })
+    body: JSON.stringify({ prompt: "写一段兔兔赛跑的故事剧情", model: "gpt-5.4", translate: false, contentLanguage: "en-th" })
   });
   assert(textNode.node.type === "process" && !textNode.text.includes("| 镜号 |"), "text node should generate editable text, not storyboard table");
+  assert(textNode.text.includes("English + Thai"), "text generation should carry selected content language");
 
   const scriptNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_script/generate-script`, {
     method: "POST",
@@ -575,7 +579,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "model", "model-type-guard", "parameters", "workflow-nodes", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));

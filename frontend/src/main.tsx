@@ -138,6 +138,7 @@ type GenerationSettings = {
   strength: number;
   duration: number;
   brandInject: boolean;
+  contentLanguage: ContentLanguage;
 };
 
 type Frame = {
@@ -247,6 +248,7 @@ type User = {
 type FramePatch = Partial<Pick<Frame, "title" | "prompt" | "modelId" | "settings" | "brandContext" | "workflowNodes" | "outputs">> & { brandId?: string | null; brandInject?: boolean };
 type PanelKey = "projects" | "assets" | "brand" | "templates" | "history" | "tutorial" | null;
 type Locale = "zh" | "en" | "th";
+type ContentLanguage = "auto" | "none" | "zh" | "en" | "th" | "zh-en" | "zh-th" | "en-th" | "zh-en-th";
 type Viewport = { x: number; y: number; scale: number };
 type PreviewTarget = { title: string; subtitle?: string; imageUrl?: string; color?: string; nodeId?: string };
 type NodeGenerateResponse = { frame: Frame; node: WorkflowNode; imageUrl: string; generated?: boolean; message?: string };
@@ -264,6 +266,22 @@ const localeOptions: Array<{ id: Locale; label: string }> = [
   { id: "en", label: "EN" },
   { id: "th", label: "ไทย" }
 ];
+const contentLanguageOptions: Array<{ id: ContentLanguage; labels: Record<Locale, string>; short: Record<Locale, string> }> = [
+  { id: "auto", labels: { zh: "跟随提示词", en: "Follow prompt", th: "ตามพรอมป์" }, short: { zh: "自动", en: "Auto", th: "Auto" } },
+  { id: "none", labels: { zh: "无文字/无字幕", en: "No text/subtitles", th: "ไม่มีข้อความ" }, short: { zh: "无文字", en: "No text", th: "No text" } },
+  { id: "zh", labels: { zh: "中文", en: "Chinese", th: "จีน" }, short: { zh: "中文", en: "ZH", th: "ZH" } },
+  { id: "en", labels: { zh: "English", en: "English", th: "อังกฤษ" }, short: { zh: "EN", en: "EN", th: "EN" } },
+  { id: "th", labels: { zh: "ไทย", en: "Thai", th: "ไทย" }, short: { zh: "TH", en: "TH", th: "TH" } },
+  { id: "zh-en", labels: { zh: "中文 + English", en: "Chinese + English", th: "จีน + อังกฤษ" }, short: { zh: "中英", en: "ZH+EN", th: "ZH+EN" } },
+  { id: "zh-th", labels: { zh: "中文 + ไทย", en: "Chinese + Thai", th: "จีน + ไทย" }, short: { zh: "中泰", en: "ZH+TH", th: "ZH+TH" } },
+  { id: "en-th", labels: { zh: "English + ไทย", en: "English + Thai", th: "อังกฤษ + ไทย" }, short: { zh: "英泰", en: "EN+TH", th: "EN+TH" } },
+  { id: "zh-en-th", labels: { zh: "中文 + English + ไทย", en: "Chinese + English + Thai", th: "จีน + อังกฤษ + ไทย" }, short: { zh: "三语", en: "3 langs", th: "3 ภาษา" } }
+];
+
+function contentLanguageLabel(language: ContentLanguage | undefined, locale: Locale, compact = false) {
+  const item = contentLanguageOptions.find((option) => option.id === language) ?? contentLanguageOptions.find((option) => option.id === "zh-en")!;
+  return compact ? item.short[locale] : item.labels[locale];
+}
 const defaultLocale = ((window.localStorage.getItem("sparkcanvas.locale") as Locale | null)
   || (navigator.language.toLowerCase().startsWith("th") ? "th" : navigator.language.toLowerCase().startsWith("en") ? "en" : "zh")) as Locale;
 const i18n = {
@@ -273,6 +291,28 @@ const i18n = {
     topStatus: "在底部 CAL 输入框编写提示词，$ 图片资源会作为真实参考图传入 skill",
     generate: "生成",
     check: "检查",
+    composer: {
+      placeholder: "为 xmanx 生成 5.1 活动投放画面",
+      contentLanguage: "内容语言",
+      brandNone: "无品牌",
+      injectOn: "注入",
+      injectOff: "显式",
+      outputFormat: "输出文件格式",
+      preset: "用途和尺寸",
+      optimize: "优化",
+      optimizing: "优化中",
+      advanced: "高级参数",
+      newCanvas: "新建项目画布",
+      width: "宽",
+      height: "高",
+      strength: "参考强度",
+      duration: "时长",
+      needPrompt: "请输入一句自然语言或 CAL 指令",
+      noCredits: "积分不足，无法提交生成任务",
+      generating: "生成中",
+      ready: "Skill ready · runtime ok",
+      keyMissing: "Skill key missing"
+    },
     login: {
       badge: "CAL 1.0 · Prompt Asset Reference System",
       title: "像写代码一样用 AI 设计品牌内容",
@@ -309,6 +349,28 @@ const i18n = {
     topStatus: "Write CAL prompts in the bottom composer. $ image resources are sent to the skill as real references.",
     generate: "Generate",
     check: "Check",
+    composer: {
+      placeholder: "Create a 5.1 campaign visual for xmanx",
+      contentLanguage: "Content language",
+      brandNone: "No brand",
+      injectOn: "Inject",
+      injectOff: "Explicit",
+      outputFormat: "Output format",
+      preset: "Use case and size",
+      optimize: "Optimize",
+      optimizing: "Optimizing",
+      advanced: "Advanced parameters",
+      newCanvas: "New project canvas",
+      width: "W",
+      height: "H",
+      strength: "Reference strength",
+      duration: "Duration",
+      needPrompt: "Enter natural language or a CAL command",
+      noCredits: "Not enough credits to submit generation",
+      generating: "Generating",
+      ready: "Skill ready · runtime ok",
+      keyMissing: "Skill key missing"
+    },
     login: {
       badge: "CAL 1.0 · Prompt Asset Reference System",
       title: "Design with AI like writing code",
@@ -345,6 +407,28 @@ const i18n = {
     topStatus: "เขียนพรอมป์ CAL ด้านล่าง โดยรูปภาพ $ จะถูกส่งให้ skill เป็นภาพอ้างอิงจริง",
     generate: "สร้าง",
     check: "ตรวจสอบ",
+    composer: {
+      placeholder: "สร้างภาพแคมเปญ 5.1 สำหรับ xmanx",
+      contentLanguage: "ภาษาคอนเทนต์",
+      brandNone: "ไม่มีแบรนด์",
+      injectOn: "Inject",
+      injectOff: "Explicit",
+      outputFormat: "รูปแบบไฟล์",
+      preset: "การใช้งานและขนาด",
+      optimize: "Optimize",
+      optimizing: "Optimizing",
+      advanced: "Advanced",
+      newCanvas: "สร้างแคนวาสใหม่",
+      width: "W",
+      height: "H",
+      strength: "Reference strength",
+      duration: "Duration",
+      needPrompt: "พิมพ์ภาษาธรรมชาติหรือคำสั่ง CAL",
+      noCredits: "เครดิตไม่พอสำหรับการสร้าง",
+      generating: "Generating",
+      ready: "Skill ready · runtime ok",
+      keyMissing: "Skill key missing"
+    },
     login: {
       badge: "CAL 1.0 · ระบบอ้างอิงทรัพยากรในพรอมป์",
       title: "ออกแบบด้วย AI ให้เหมือนเขียนโค้ด",
@@ -381,6 +465,28 @@ const i18n = {
   topStatus: string;
   generate: string;
   check: string;
+  composer: {
+    placeholder: string;
+    contentLanguage: string;
+    brandNone: string;
+    injectOn: string;
+    injectOff: string;
+    outputFormat: string;
+    preset: string;
+    optimize: string;
+    optimizing: string;
+    advanced: string;
+    newCanvas: string;
+    width: string;
+    height: string;
+    strength: string;
+    duration: string;
+    needPrompt: string;
+    noCredits: string;
+    generating: string;
+    ready: string;
+    keyMissing: string;
+  };
   login: {
     badge: string;
     title: string;
@@ -403,7 +509,7 @@ const requiredBrandSlots = [
   { role: "storefront", token: "$storefront", title: "店铺", hint: "官网、门店、直播间或电商页面", assetType: "upload" },
   { role: "environment", token: "$environment", title: "环境", hint: "使用场景、背景空间或品牌氛围", assetType: "upload" }
 ] as const satisfies ReadonlyArray<{ role: BrandAssetRole["role"]; token: string; title: string; hint: string; assetType: Asset["type"] }>;
-const defaultSettings: GenerationSettings = { ratio: "1:1", width: 1080, height: 1080, count: 1, quality: "hd", strength: 72, duration: 0, brandInject: false };
+const defaultSettings: GenerationSettings = { ratio: "1:1", width: 1080, height: 1080, count: 1, quality: "hd", strength: 72, duration: 0, brandInject: false, contentLanguage: "zh-en" };
 const workflowPresets: WorkflowPreset[] = [
   { id: "feed-45", label: "Meta Feed 4:5", size: "1080x1350", ratio: "4:5", orientation: "portrait", formats: ["jpg", "png"], note: "Facebook/Instagram 信息流竖图" },
   { id: "feed-square", label: "社媒方图", size: "1080x1080", ratio: "1:1", orientation: "square", formats: ["jpg", "png"], note: "Facebook/Instagram 方图" },
@@ -1208,7 +1314,8 @@ function App() {
     const generationBrand = naturalBrand ?? selectedProjectBrand;
     const shouldInjectBrand = Boolean(generationBrand && (promptRequestsWholeBrand(input, generationBrand) || activeFrame?.settings?.brandInject));
     const settings = {
-      ...(activeFrame?.settings ?? defaultSettings),
+      ...defaultSettings,
+      ...(activeFrame?.settings ?? {}),
       brandInject: shouldInjectBrand
     };
     try {
@@ -1349,11 +1456,11 @@ function App() {
     }
   }
 
-  async function generateNodeText(nodeId: string, nodePrompt: string, modelId: string, translate: boolean, mode = "story") {
+  async function generateNodeText(nodeId: string, nodePrompt: string, modelId: string, translate: boolean, mode = "story", contentLanguage: ContentLanguage = activeFrame?.settings?.contentLanguage ?? defaultSettings.contentLanguage) {
     if (!activeFrame) return;
     setError("");
     try {
-      const result = await api.post<TextGenerateResponse>(`/canvas/frames/${activeFrame.id}/nodes/${nodeId}/generate-text`, { prompt: nodePrompt, model: modelId, translate, mode });
+      const result = await api.post<TextGenerateResponse>(`/canvas/frames/${activeFrame.id}/nodes/${nodeId}/generate-text`, { prompt: nodePrompt, model: modelId, translate, mode, contentLanguage });
       setFrames((current) => current.map((frame) => frame.id === result.frame.id ? result.frame : frame));
       return result;
     } catch (caught) {
@@ -1362,11 +1469,11 @@ function App() {
     }
   }
 
-  async function generateNodeScript(nodeId: string, nodePrompt: string, modelId: string, translate: boolean) {
+  async function generateNodeScript(nodeId: string, nodePrompt: string, modelId: string, translate: boolean, contentLanguage: ContentLanguage = activeFrame?.settings?.contentLanguage ?? defaultSettings.contentLanguage) {
     if (!activeFrame) return;
     setError("");
     try {
-      const result = await api.post<ScriptGenerateResponse>(`/canvas/frames/${activeFrame.id}/nodes/${nodeId}/generate-script`, { prompt: nodePrompt, model: modelId, translate });
+      const result = await api.post<ScriptGenerateResponse>(`/canvas/frames/${activeFrame.id}/nodes/${nodeId}/generate-script`, { prompt: nodePrompt, model: modelId, translate, contentLanguage });
       setFrames((current) => current.map((frame) => frame.id === result.frame.id ? result.frame : frame));
       return result;
     } catch (caught) {
@@ -1375,7 +1482,7 @@ function App() {
     }
   }
 
-  async function generateNodeVideo(nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean }) {
+  async function generateNodeVideo(nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean; contentLanguage: ContentLanguage }) {
     if (!activeFrame) return;
     setError("");
     try {
@@ -1388,7 +1495,7 @@ function App() {
     }
   }
 
-  async function generateNodeAudio(nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean }) {
+  async function generateNodeAudio(nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean; contentLanguage: ContentLanguage }) {
     if (!activeFrame) return;
     setError("");
     try {
@@ -1477,6 +1584,7 @@ function App() {
         activeBrand={projectBrand}
         model={model}
         models={models}
+        locale={locale}
         viewport={viewport}
         setViewport={setViewport}
         preview={preview}
@@ -1485,8 +1593,8 @@ function App() {
         setEditingNodeId={setEditingNodeId}
         onUpdateFrame={(patch) => activeFrame ? updateFrame(activeFrame.id, patch) : undefined}
         onGenerateNode={(nodeId, nodePrompt, modelId, settings) => generateNodeImage(nodeId, nodePrompt, modelId, settings)}
-        onGenerateTextNode={(nodeId, nodePrompt, modelId, translate, mode) => generateNodeText(nodeId, nodePrompt, modelId, translate, mode)}
-        onGenerateScriptNode={(nodeId, nodePrompt, modelId, translate) => generateNodeScript(nodeId, nodePrompt, modelId, translate)}
+        onGenerateTextNode={(nodeId, nodePrompt, modelId, translate, mode, contentLanguage) => generateNodeText(nodeId, nodePrompt, modelId, translate, mode, contentLanguage)}
+        onGenerateScriptNode={(nodeId, nodePrompt, modelId, translate, contentLanguage) => generateNodeScript(nodeId, nodePrompt, modelId, translate, contentLanguage)}
         onGenerateVideoNode={(nodeId, nodePrompt, modelId, settings) => generateNodeVideo(nodeId, nodePrompt, modelId, settings)}
         onGenerateAudioNode={(nodeId, nodePrompt, modelId, settings) => generateNodeAudio(nodeId, nodePrompt, modelId, settings)}
       />
@@ -1504,6 +1612,7 @@ function App() {
           aiStatus={aiStatus}
           aiDiagnostics={aiDiagnostics}
           credits={user.credits}
+          locale={locale}
           onGenerate={(controls, promptOverride) => void generate(promptOverride ?? prompt, undefined, controls)}
           onCreateProject={() => void createProject({ brandId: projectBrand?.id ?? null })}
           onUpdateFrame={(patch) => activeFrame && void updateFrame(activeFrame.id, patch)}
@@ -1908,6 +2017,7 @@ function Canvas(props: {
   activeBrand?: Brand;
   model?: ModelOption;
   models: ModelOption[];
+  locale: Locale;
   viewport: Viewport;
   setViewport: React.Dispatch<React.SetStateAction<Viewport>>;
   preview: PreviewTarget | null;
@@ -1916,10 +2026,10 @@ function Canvas(props: {
   setEditingNodeId: (nodeId: string | null) => void;
   onUpdateFrame: (patch: Partial<Pick<Frame, "prompt" | "modelId" | "settings" | "brandId" | "brandContext" | "workflowNodes" | "outputs">>) => void | Promise<Frame | void>;
   onGenerateNode: (nodeId: string, nodePrompt: string, modelId?: string, settings?: Partial<GenerationSettings>) => NodeGenerateResponse | void | Promise<NodeGenerateResponse | void>;
-  onGenerateTextNode: (nodeId: string, nodePrompt: string, modelId: string, translate: boolean, mode?: string) => TextGenerateResponse | void | Promise<TextGenerateResponse | void>;
-  onGenerateScriptNode: (nodeId: string, nodePrompt: string, modelId: string, translate: boolean) => ScriptGenerateResponse | void | Promise<ScriptGenerateResponse | void>;
-  onGenerateVideoNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean }) => VideoGenerateResponse | void | Promise<VideoGenerateResponse | void>;
-  onGenerateAudioNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean }) => AudioGenerateResponse | void | Promise<AudioGenerateResponse | void>;
+  onGenerateTextNode: (nodeId: string, nodePrompt: string, modelId: string, translate: boolean, mode?: string, contentLanguage?: ContentLanguage) => TextGenerateResponse | void | Promise<TextGenerateResponse | void>;
+  onGenerateScriptNode: (nodeId: string, nodePrompt: string, modelId: string, translate: boolean, contentLanguage?: ContentLanguage) => ScriptGenerateResponse | void | Promise<ScriptGenerateResponse | void>;
+  onGenerateVideoNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean; contentLanguage: ContentLanguage }) => VideoGenerateResponse | void | Promise<VideoGenerateResponse | void>;
+  onGenerateAudioNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean; contentLanguage: ContentLanguage }) => AudioGenerateResponse | void | Promise<AudioGenerateResponse | void>;
 }) {
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   const [nodes, setNodes] = useState<WorkflowNode[]>(() => props.frame ? normalizeWorkflowNodes(props.frame.workflowNodes, shouldUseDefaultWorkflow(props.frame.workflowNodes)) : []);
@@ -2313,6 +2423,7 @@ function Canvas(props: {
             models={props.models}
             frameSettings={props.frame?.settings ?? defaultSettings}
             framePrompt={props.frame?.prompt ?? ""}
+            locale={props.locale}
             output={nodes.find((node) => node.id === props.editingNodeId)?.type === "output" && props.editingNodeId ? outputForNode(props.frame, outputNodes, props.editingNodeId) : undefined}
             onClose={closeNodeEditor}
             onSave={(patch) => props.editingNodeId && saveNode(props.editingNodeId, patch)}
@@ -2329,13 +2440,13 @@ function Canvas(props: {
                 });
             }}
             onGenerationProgress={(progress) => props.editingNodeId && setNodeGeneration(progress === null ? null : { nodeId: props.editingNodeId, progress })}
-            onGenerateText={(nodePrompt, modelId, translate, mode) => {
+            onGenerateText={(nodePrompt, modelId, translate, mode, contentLanguage) => {
               if (!props.editingNodeId) return;
-              return props.onGenerateTextNode(props.editingNodeId, nodePrompt, modelId, translate, mode);
+              return props.onGenerateTextNode(props.editingNodeId, nodePrompt, modelId, translate, mode, contentLanguage);
             }}
-            onGenerateScript={(nodePrompt, modelId, translate) => {
+            onGenerateScript={(nodePrompt, modelId, translate, contentLanguage) => {
               if (!props.editingNodeId) return;
-              return props.onGenerateScriptNode(props.editingNodeId, nodePrompt, modelId, translate);
+              return props.onGenerateScriptNode(props.editingNodeId, nodePrompt, modelId, translate, contentLanguage);
             }}
             onGenerateVideo={(nodePrompt, modelId, settings) => {
               if (!props.editingNodeId) return;
@@ -2506,6 +2617,7 @@ function NodeEditor({
   models,
   frameSettings,
   framePrompt,
+  locale,
   output,
   onClose,
   onSave,
@@ -2523,14 +2635,15 @@ function NodeEditor({
   models: ModelOption[];
   frameSettings: GenerationSettings;
   framePrompt: string;
+  locale: Locale;
   output?: Frame["outputs"][number];
   onClose: () => void;
   onSave: (patch: Partial<WorkflowNode>) => void;
   onGenerate: (prompt: string, modelId?: string, settings?: Partial<GenerationSettings>) => NodeGenerateResponse | void | Promise<NodeGenerateResponse | void>;
-  onGenerateText: (prompt: string, modelId: string, translate: boolean, mode?: string) => TextGenerateResponse | void | Promise<TextGenerateResponse | void>;
-  onGenerateScript: (prompt: string, modelId: string, translate: boolean) => ScriptGenerateResponse | void | Promise<ScriptGenerateResponse | void>;
-  onGenerateVideo: (prompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean }) => VideoGenerateResponse | void | Promise<VideoGenerateResponse | void>;
-  onGenerateAudio: (prompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean }) => AudioGenerateResponse | void | Promise<AudioGenerateResponse | void>;
+  onGenerateText: (prompt: string, modelId: string, translate: boolean, mode?: string, contentLanguage?: ContentLanguage) => TextGenerateResponse | void | Promise<TextGenerateResponse | void>;
+  onGenerateScript: (prompt: string, modelId: string, translate: boolean, contentLanguage?: ContentLanguage) => ScriptGenerateResponse | void | Promise<ScriptGenerateResponse | void>;
+  onGenerateVideo: (prompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean; contentLanguage: ContentLanguage }) => VideoGenerateResponse | void | Promise<VideoGenerateResponse | void>;
+  onGenerateAudio: (prompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean; contentLanguage: ContentLanguage }) => AudioGenerateResponse | void | Promise<AudioGenerateResponse | void>;
   onGenerationProgress: (progress: number | null) => void;
   onPreview: (target: PreviewTarget) => void;
 }) {
@@ -2544,6 +2657,7 @@ function NodeEditor({
   const [imageQuality, setImageQuality] = useState<GenerationSettings["quality"]>(frameSettings.quality);
   const [imageCount, setImageCount] = useState(frameSettings.count);
   const [imageStrength, setImageStrength] = useState(frameSettings.strength);
+  const [contentLanguage, setContentLanguage] = useState<ContentLanguage>(frameSettings.contentLanguage ?? defaultSettings.contentLanguage);
   const [textModel, setTextModel] = useState("gpt-5.4");
   const [translateText, setTranslateText] = useState(false);
   const [scriptModel, setScriptModel] = useState("gpt-5.4");
@@ -2568,6 +2682,7 @@ function NodeEditor({
     setDraft(node);
     setGenerationMessage("");
     setGenerationProgress(0);
+    setContentLanguage(frameSettings.contentLanguage ?? defaultSettings.contentLanguage);
   }, [node]);
   if (!draft) return null;
 
@@ -2645,7 +2760,8 @@ function NodeEditor({
         ratio: imageRatio,
         quality: imageQuality,
         count: imageCount,
-        strength: imageStrength
+        strength: imageStrength,
+        contentLanguage
       }));
       if (result?.node) {
         setDraft(result.node);
@@ -2741,6 +2857,7 @@ function NodeEditor({
         action,
         brandId: activeBrand?.id,
         model: textModel,
+        contentLanguage,
         outputTarget: draft.type === "video" || isVideoOutput ? "mp4" : isDocumentOutput ? "pdf" : "jpg",
         orientation: videoRatio.startsWith("9:16") ? "portrait" : videoRatio.startsWith("1:1") ? "square" : "landscape",
         nodeType: isVideoOutput ? "video" : isDocumentOutput ? "process" : draft.type
@@ -2795,6 +2912,9 @@ function NodeEditor({
         <div className="rh-image-editor-footer">
           <select value={imageModelId} onChange={(event) => setImageModelId(event.target.value)}>
             {imageModels.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="内容语言">
+            {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <select value={imageRatio} onChange={(event) => setImageRatio(event.target.value)}>
             <option>1:1</option><option>3:4</option><option>4:5</option><option>9:16</option><option>16:9</option>
@@ -2862,7 +2982,7 @@ function NodeEditor({
       onSave({ title: currentDraft.title, body: currentDraft.body });
       const timer = window.setInterval(() => setGenerationProgress((current) => Math.min(92, current + (current < 38 ? 8 : 4))), 700);
       try {
-        const result = await Promise.resolve(onGenerateText(currentDraft.body || currentDraft.title, textModel, translateText));
+        const result = await Promise.resolve(onGenerateText(currentDraft.body || currentDraft.title, textModel, translateText, "story", contentLanguage));
         if (result?.node) {
           setDraft(result.node);
           onSave({ title: result.node.title, body: result.node.body, refs: result.node.refs });
@@ -2914,6 +3034,9 @@ function NodeEditor({
             <option>deepseek-ai/DeepSeek-V4-Flash</option>
             <option>Lib Nano Pro</option>
           </select>
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="内容语言">
+            {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
+          </select>
           <span />
           <button type="button" onClick={() => void handleTransformDraft("optimize")} title="优化 CAL"><Wand2 /></button>
           <button type="button" className={translateText ? "active" : ""} onClick={() => void handleTransformDraft("translate")} title="调用文本模型翻译"><Languages /></button>
@@ -2960,7 +3083,8 @@ function NodeEditor({
           duration: audioDuration,
           scene: audioScene,
           loop: audioLoop,
-          translate: translateAudio
+          translate: translateAudio,
+          contentLanguage
         }));
         if (result?.node) {
           setDraft(result.node);
@@ -3011,6 +3135,9 @@ function NodeEditor({
           <select value={audioScene} onChange={(event) => setAudioScene(event.target.value)}>
             <option>广告短视频</option><option>产品展示</option><option>品牌片</option><option>直播间</option><option>故事版</option>
           </select>
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="内容语言">
+            {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
+          </select>
           <span />
           <button type="button" className={audioLoop ? "active" : ""} onClick={() => setAudioLoop((value) => !value)} title="循环"><RefreshCw /></button>
           <button type="button" onClick={() => void handleTransformDraft("optimize")} title="优化 CAL"><Wand2 /></button>
@@ -3031,7 +3158,7 @@ function NodeEditor({
       setGenerating(true);
       onSave({ title: currentDraft.title, body: currentDraft.body });
       try {
-        const result = await Promise.resolve(onGenerateScript(currentDraft.body || currentDraft.title, scriptModel, translateScript));
+        const result = await Promise.resolve(onGenerateScript(currentDraft.body || currentDraft.title, scriptModel, translateScript, contentLanguage));
         if (result?.node) {
           setDraft(result.node);
           onSave({ title: result.node.title, body: result.node.body });
@@ -3057,6 +3184,9 @@ function NodeEditor({
             <option>gpt-5.4</option>
             <option>deepseek-ai/DeepSeek-V4-Flash</option>
           </select>
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="内容语言">
+            {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
+          </select>
           <span />
           <button type="button" onClick={() => void handleTransformDraft("optimize")} title="优化 CAL"><Wand2 /></button>
           <button type="button" className={translateScript ? "active" : ""} onClick={() => void handleTransformDraft("translate")} title="调用文本模型翻译"><Languages /></button>
@@ -3081,7 +3211,8 @@ function NodeEditor({
           ratio: videoRatio,
           duration: "5s",
           sound: videoSound,
-          translate: translateVideo
+          translate: translateVideo,
+          contentLanguage
         }));
         if (result?.node) {
           setDraft(result.node);
@@ -3130,6 +3261,9 @@ function NodeEditor({
             <option>16:9 · 720P · 5s</option>
             <option>9:16 · 720P · 5s</option>
             <option>1:1 · 720P · 5s</option>
+          </select>
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="字幕/旁白语言">
+            {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <button type="button" className={videoSound ? "active" : ""} onClick={() => setVideoSound((value) => !value)} title="音效"><Volume2 /></button>
           <span />
@@ -3203,17 +3337,19 @@ function BottomComposer(props: {
   aiStatus: AiStatus | null;
   aiDiagnostics: AiDiagnostics | null;
   credits: number;
+  locale: Locale;
   onGenerate: (controls: WorkflowControls, promptOverride?: string) => void;
   onCreateProject: () => void;
   onUpdateFrame: (patch: Partial<Pick<Frame, "settings" | "modelId">> & { brandId?: string | null; brandInject?: boolean }) => void;
 }) {
-  const settings = props.frame?.settings ?? defaultSettings;
+  const t = i18n[props.locale].composer;
+  const settings = { ...defaultSettings, ...(props.frame?.settings ?? {}) };
   const [outputTarget, setOutputTarget] = useState<WorkflowOutputTarget>("jpg");
   const [orientation, setOrientation] = useState<WorkflowOrientation>("portrait");
   const [presetId, setPresetId] = useState<WorkflowPresetId>("feed-45");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
-  const composerExample = "为 xmanx 生成 5.1 活动投放画面";
+  const composerExample = t.placeholder;
   const workflowMode = /(^|\s)@[\p{L}0-9_-]+|(^|\s)\/[\p{L}0-9_-]+|->/u.test(props.prompt);
   useEffect(() => {
     if (!props.frame?.outputs?.length) return;
@@ -3277,11 +3413,11 @@ function BottomComposer(props: {
   const hasPrompt = Boolean(props.prompt.trim());
   const isGenerating = props.frame?.status === "generating";
   const generateBlockReason = !hasPrompt
-    ? "请输入一句自然语言或 CAL 指令"
+      ? t.needPrompt
     : props.credits <= 0
-      ? "积分不足，无法提交生成任务"
+      ? t.noCredits
       : isGenerating
-        ? `当前画布生成中 ${props.frame?.progress ?? 0}%`
+        ? `${t.generating} ${props.frame?.progress ?? 0}%`
         : "";
   const canGenerate = !generateBlockReason;
   function insertMention(item: MentionItem) {
@@ -3312,7 +3448,8 @@ function BottomComposer(props: {
         brandId: props.frame?.brandId || props.activeBrand?.id,
         model: props.model?.model ?? props.model?.id,
         outputTarget,
-        orientation
+        orientation,
+        contentLanguage: settings.contentLanguage
       });
       const optimized = applyPresetToCal(result.text);
       props.setPrompt(optimized);
@@ -3329,8 +3466,8 @@ function BottomComposer(props: {
   }
   return (
     <div className={`rh-composer ${workflowMode ? "workflow" : ""}`}>
-      <button type="button" className="rh-add" onClick={props.onCreateProject} title="新建项目画布"><Plus /><span>New</span></button>
-      <textarea value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} placeholder={composerExample} aria-label="生成当前画布提示词" />
+      <button type="button" className="rh-add" onClick={props.onCreateProject} title={t.newCanvas}><Plus /><span>New</span></button>
+      <textarea value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} placeholder={composerExample} aria-label={t.placeholder} />
       {referencePreview.total > 0 && (
         <div className="rh-composer-refs">
           <strong>{referencePreview.images.length} 图 / {referencePreview.texts.length} 文本</strong>
@@ -3359,7 +3496,7 @@ function BottomComposer(props: {
           {props.models.filter((item) => item.type === "image").map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
         </select>
         <select className="rh-brand-select" value={props.frame?.brandId ?? ""} onChange={(event) => updateProjectBrand(event.target.value)} title="项目品牌">
-          <option value="">无品牌</option>
+          <option value="">{t.brandNone}</option>
           {props.brands.map((brand) => <option value={brand.id} key={brand.id}>{brand.name}</option>)}
         </select>
         <button
@@ -3369,31 +3506,34 @@ function BottomComposer(props: {
           disabled={!props.frame?.brandId}
           title={props.frame?.brandId ? `项目品牌：${selectedBrandName}。${settings.brandInject ? "生成时自动注入完整品牌上下文" : "只使用提示词里显式 $ 引用的品牌素材"}` : "未绑定项目品牌"}
         >
-          <Palette />{settings.brandInject ? "注入" : "显式"}
+          <Palette />{settings.brandInject ? t.injectOn : t.injectOff}
         </button>
-        <select value={outputTarget} onChange={(event) => updateOutputTarget(event.target.value as WorkflowOutputTarget)} title="输出文件格式">
+        <select className="rh-content-lang-select" value={settings.contentLanguage} onChange={(event) => updateSetting("contentLanguage", event.target.value as ContentLanguage)} title={t.contentLanguage}>
+          {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, props.locale, true)}</option>)}
+        </select>
+        <select value={outputTarget} onChange={(event) => updateOutputTarget(event.target.value as WorkflowOutputTarget)} title={t.outputFormat}>
           <option value="jpg">JPG</option>
           <option value="png">PNG</option>
           <option value="pdf">PDF</option>
           <option value="mp4">MP4</option>
           <option value="kit">套装</option>
         </select>
-        <select className="rh-preset-select" value={currentPreset.id} onChange={(event) => updatePreset(event.target.value as WorkflowPresetId)} title="用途和尺寸">
+        <select className="rh-preset-select" value={currentPreset.id} onChange={(event) => updatePreset(event.target.value as WorkflowPresetId)} title={t.preset}>
           {presetOptions.map((preset) => <option value={preset.id} key={preset.id}>{preset.label} · {preset.size}</option>)}
         </select>
-        <button type="button" className="rh-optimize" onClick={() => void optimizeCurrentPrompt()} disabled={optimizing || !props.prompt.trim()} title="把自然语言优化为 CAL 工作流"><Wand2 />{optimizing ? "优化中" : "优化"}</button>
-        <button type="button" className="rh-advanced-toggle" onClick={() => setAdvancedOpen((value) => !value)} title="高级参数"><SlidersHorizontal /></button>
+        <button type="button" className="rh-optimize" onClick={() => void optimizeCurrentPrompt()} disabled={optimizing || !props.prompt.trim()} title="CAL"><Wand2 />{optimizing ? t.optimizing : t.optimize}</button>
+        <button type="button" className="rh-advanced-toggle" onClick={() => setAdvancedOpen((value) => !value)} title={t.advanced}><SlidersHorizontal /></button>
         <button type="button" className="rh-send" onClick={() => void generateWithOptimization()} disabled={!canGenerate || optimizing} title={generateBlockReason || `生成当前画布，结果进入输出节点：${referencePreview.images.length} 张参考图 / ${referencePreview.texts.length} 个文本字段`}><Send /></button>
       </div>
       {advancedOpen && (
         <div className="rh-composer-advanced">
-          <span>{currentPreset.note} · 默认 {currentPreset.size} · 可自定义</span>
-          <label className="rh-composer-size">宽<input type="number" min={256} max={4096} step={8} value={settings.width || dimensionsFromPreset(currentPreset).width} onChange={(event) => updateSetting("width", Number(event.target.value))} /></label>
-          <label className="rh-composer-size">高<input type="number" min={256} max={4096} step={8} value={settings.height || dimensionsFromPreset(currentPreset).height} onChange={(event) => updateSetting("height", Number(event.target.value))} /></label>
+          <span>{currentPreset.note} · {currentPreset.size} · {t.contentLanguage}: {contentLanguageLabel(settings.contentLanguage, props.locale)}</span>
+          <label className="rh-composer-size">{t.width}<input type="number" min={256} max={4096} step={8} value={settings.width || dimensionsFromPreset(currentPreset).width} onChange={(event) => updateSetting("width", Number(event.target.value))} /></label>
+          <label className="rh-composer-size">{t.height}<input type="number" min={256} max={4096} step={8} value={settings.height || dimensionsFromPreset(currentPreset).height} onChange={(event) => updateSetting("height", Number(event.target.value))} /></label>
           <select value={settings.quality} onChange={(event) => updateSetting("quality", event.target.value as GenerationSettings["quality"])}><option value="standard">standard</option><option value="hd">hd</option><option value="ultra">ultra</option></select>
           {(outputTarget === "jpg" || outputTarget === "png") && <select value={settings.count} onChange={(event) => updateSetting("count", Number(event.target.value))}><option value={1}>1x</option><option value={2}>2x</option><option value={4}>4x</option><option value={6}>6x</option></select>}
-          {(outputTarget === "jpg" || outputTarget === "png") && <label className="rh-composer-slider">参考强度<input type="range" min={0} max={100} value={settings.strength} onChange={(event) => updateSetting("strength", Number(event.target.value))} /></label>}
-          {(outputTarget === "mp4" || outputTarget === "kit") && <label className="rh-composer-number">时长<input type="number" min={1} max={60} value={settings.duration || 5} onChange={(event) => updateSetting("duration", Number(event.target.value))} /></label>}
+          {(outputTarget === "jpg" || outputTarget === "png") && <label className="rh-composer-slider">{t.strength}<input type="range" min={0} max={100} value={settings.strength} onChange={(event) => updateSetting("strength", Number(event.target.value))} /></label>}
+          {(outputTarget === "mp4" || outputTarget === "kit") && <label className="rh-composer-number">{t.duration}<input type="number" min={1} max={60} value={settings.duration || 5} onChange={(event) => updateSetting("duration", Number(event.target.value))} /></label>}
         </div>
       )}
       <div className="rh-composer-status">
@@ -3405,10 +3545,10 @@ function BottomComposer(props: {
             : props.frame?.outputs?.some((output) => output.imageUrl)
               ? "已生成 · 图片显示在画布输出图节点"
             : props.aiDiagnostics?.runtime.helpOk
-              ? props.aiDiagnostics.runtime.canAttemptGeneration ? "Skill ready · runtime ok" : "Skill runtime ok · key missing"
+              ? props.aiDiagnostics.runtime.canAttemptGeneration ? t.ready : "Skill runtime ok · key missing"
             : props.aiStatus?.imageGeneration.configured
               ? `Skill ready · ${props.aiStatus.imageGeneration.keySource}`
-              : "Skill key missing"}
+              : t.keyMissing}
         </span>
         <i><b style={{ width: `${props.frame?.progress ?? 0}%` }} /></i>
       </div>

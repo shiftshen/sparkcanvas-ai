@@ -3921,11 +3921,11 @@ svg {
   right: auto !important;
   bottom: 18px !important;
   width: min(1120px, calc(100vw - 180px)) !important;
-  min-height: 136px !important;
-  height: 136px !important;
+  min-height: 178px !important;
+  height: 178px !important;
   display: grid !important;
   grid-template-columns: 54px minmax(0, 1fr) !important;
-  grid-template-rows: 70px 38px auto 8px !important;
+  grid-template-rows: 72px 78px auto 8px !important;
   gap: 8px !important;
   padding: 10px 12px !important;
   transform: translateX(-50%);
@@ -3940,7 +3940,7 @@ svg {
   grid-row: 1 / span 2 !important;
   width: 54px;
   min-width: 54px;
-  height: 116px;
+  height: 158px;
   border-radius: 10px;
 }
 
@@ -3948,9 +3948,9 @@ svg {
   grid-column: 2 !important;
   grid-row: 1 !important;
   width: 100% !important;
-  height: 70px !important;
-  min-height: 70px !important;
-  max-height: 70px !important;
+  height: 72px !important;
+  min-height: 72px !important;
+  max-height: 72px !important;
   padding: 11px 12px !important;
   border-radius: 9px !important;
   background: rgba(12, 15, 22, 0.62) !important;
@@ -3962,6 +3962,8 @@ svg {
   grid-row: 2 !important;
   display: flex !important;
   align-items: center;
+  align-content: flex-start;
+  flex-wrap: wrap;
   gap: 7px !important;
   min-width: 0;
   overflow: visible !important;
@@ -4016,6 +4018,11 @@ svg {
 
 .rh-composer-row .rh-brand-select {
   flex-basis: 108px;
+}
+
+.rh-composer-row .rh-content-lang-select,
+.rh-content-language-select {
+  flex: 0 0 104px;
 }
 
 .rh-brand-inject {
@@ -4371,31 +4378,33 @@ svg {
     bottom: 10px !important;
     width: auto !important;
     height: auto !important;
-    min-height: 136px !important;
+    min-height: 190px !important;
     transform: none;
     grid-template-columns: 48px minmax(0, 1fr) !important;
-    grid-template-rows: 64px auto 8px !important;
+    grid-template-rows: 72px auto 8px !important;
     overflow: visible;
   }
 
   .rh-composer .rh-add {
     width: 48px;
     min-width: 48px;
-    height: 92px;
+    height: 164px;
   }
 
   .rh-composer-row {
-    display: grid !important;
-    grid-template-columns: minmax(96px, 1fr) minmax(82px, 0.75fr) 42px 42px !important;
-    overflow-x: auto !important;
+    display: flex !important;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    overflow: visible !important;
     padding-bottom: 2px;
   }
 
   .rh-composer-row .rh-brand-select,
+  .rh-composer-row .rh-content-lang-select,
   .rh-composer-row .rh-preset-select,
   .rh-composer-row .rh-brand-inject,
   .rh-composer-row .rh-workflow-pill {
-    display: none !important;
+    display: inline-flex !important;
   }
 
   .rh-composer-row select,
@@ -4403,8 +4412,36 @@ svg {
   .rh-advanced-toggle,
   .rh-composer .rh-send {
     flex: none !important;
-    width: 100% !important;
-    min-width: 0 !important;
+    width: auto !important;
+    min-width: 0;
+  }
+
+  .rh-composer-row select {
+    flex: 0 0 132px !important;
+  }
+
+  .rh-composer-row .rh-brand-select,
+  .rh-composer-row .rh-content-lang-select {
+    flex: 0 0 116px !important;
+  }
+
+  .rh-composer-row .rh-preset-select {
+    flex: 1 1 220px !important;
+  }
+
+  .rh-brand-inject {
+    flex: 0 0 92px !important;
+  }
+
+  .rh-optimize {
+    flex: 0 0 128px !important;
+  }
+
+  .rh-advanced-toggle,
+  .rh-composer .rh-send {
+    flex: 0 0 42px !important;
+    width: 42px !important;
+    min-width: 42px !important;
   }
 
   .rh-selection-pill {
