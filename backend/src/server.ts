@@ -2846,7 +2846,6 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         imageUrl: storyboardSheetUrl
       } : undefined;
       if (storyboardRef) {
-        upsertNodeReference(outputNode, storyboardRef);
         const scriptNode = frame.workflowNodes.find((node) => node.type === "script");
         const videoNode = frame.workflowNodes.find((node) => node.type === "video" || node.id.includes("mp4"));
         const composeNode = frame.workflowNodes.find((node) => node.type === "compose");
@@ -2883,7 +2882,6 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         imageUrl
       }));
       for (const keyframeRef of keyframeRefs) {
-        upsertNodeReference(outputNode, keyframeRef);
         const videoNode = frame.workflowNodes.find((node) => node.type === "video" || node.id.includes("mp4"));
         upsertNodeReference(videoNode, keyframeRef);
       }
@@ -2930,6 +2928,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
           if (composedUrl) output.videoUrl = composedUrl;
           else if (!videoNeedsCompose(durationSeconds)) output.videoUrl = videoUrls[0];
         }
+        if (output.videoUrl && firstFrameUrl) output.imageUrl = firstFrameUrl;
         if (fallbackReasons.length) output.copy = appendCopyNote(output.copy, fallbackReasons[0]);
         if (segmentResults.some((video) => video?.usedFirstFrame)) output.copy = appendCopyNote(output.copy, `已提交图片 skill 首帧/关键帧约束视频模型，使用 ${videoPromptRefs.filter((reference) => reference.role !== "first-frame").length} 张品牌参考图生成。`);
         if (videoUrls.length === segmentPlan.length && videoNeedsCompose(durationSeconds)) {
@@ -4301,15 +4300,19 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   for (const keyframeRef of generatedKeyframeRefs) upsertNodeReference(node, keyframeRef);
   if (node.type === "output") {
     if (targetOutput) {
-      if (firstFrameUrl) targetOutput.imageUrl = firstFrameUrl;
       if (videoId) targetOutput.videoId = videoId;
-      if (videoUrl) targetOutput.videoUrl = videoUrl;
+      if (videoUrl) {
+        targetOutput.videoUrl = videoUrl;
+        if (firstFrameUrl) targetOutput.imageUrl = firstFrameUrl;
+      }
       if (firstFrameNote) targetOutput.copy = appendCopyNote(targetOutput.copy, firstFrameNote);
       if (usedFirstFrame) targetOutput.copy = appendCopyNote(targetOutput.copy, "已提交视频首帧 image_url 以锁定人物、Logo 和品牌画面。");
       if (fallbackReason) targetOutput.copy = appendCopyNote(targetOutput.copy, fallbackReason);
       targetOutput.copy = appendCopyNote(targetOutput.copy, generationLines.join(" ") || "执行状态: 已保存视频生成配置，未配置视频 API Key。");
-      const ref = generatedReference(`generated_${node.id}_${Date.now().toString(36)}`, targetOutput, node.preview ?? "#0f172a", "video-preview");
-      upsertNodeReference(node, ref);
+      if (targetOutput.videoUrl) {
+        const ref = generatedReference(`generated_${node.id}_${Date.now().toString(36)}`, targetOutput, node.preview ?? "#0f172a", "video-preview");
+        upsertNodeReference(node, ref);
+      }
     }
   }
   frame.updatedAt = now();
