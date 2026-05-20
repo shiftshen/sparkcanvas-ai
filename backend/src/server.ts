@@ -444,10 +444,17 @@ function assetTypeToReferenceRole(type: Asset["type"], title = "", meta = ""): B
   if (type === "product") return "product";
   if (type === "model" && /(?:^|[\s_$.-])ip(?:$|[\s_$.-])|navigator|mascot|角色|吉祥物|主理人/i.test(text)) return "ip";
   if (type === "model") return "model";
+  if (/\$menu\b|\bmenu\b|菜单|菜品|汤底|soup|buffet|price|299|399|499/i.test(text)) return "menu";
+  if (/\$equipment\b|\bequipment\b|设备|餐具|锅|drink station|sauce station|饮料|酱料/i.test(text)) return "equipment";
   if (type === "upload" && /store|storefront|店铺|门店|官网|直播间|电商页面/i.test(text)) return "storefront";
   if (type === "upload" && /environment|scene|background|环境|场景|背景|空间|氛围/i.test(text)) return "environment";
   if (type === "upload") return "general";
   return "general";
+}
+
+function assetReferencePath(asset: Pick<Asset, "meta">) {
+  const match = asset.meta.match(/\$([\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*)/u);
+  return match ? normalizeRefPath(match[1]) : "";
 }
 
 function normalizeKey(value = "") {
@@ -813,8 +820,12 @@ function assetMatchesPath(asset: Asset, pathKey: string) {
   if (!pathKey) return true;
   const role = assetTypeToReferenceRole(asset.type, asset.title, asset.meta);
   const text = `${asset.title} ${asset.meta}`.toLowerCase();
+  const explicitPath = assetReferencePath(asset);
+  if (explicitPath && pathKey === explicitPath) return true;
   const [head, ...rest] = pathKey.split(".");
   if (head === "brand") return role === "logo";
+  if (head === "menu") return role === "menu" && (rest.length === 0 || rest.every((part) => text.includes(part.replace(/_/g, " "))));
+  if (head === "equipment") return role === "equipment" && (rest.length === 0 || rest.every((part) => text.includes(part.replace(/_/g, " "))));
   if (head === "background" || head === "scene") return role === "environment" || role === "storefront" || role === "general";
   if (head !== role && !(head === "store" && role === "storefront")) return false;
   return rest.length === 0 || rest.every((part) => text.includes(part.replace(/_/g, " ")));
@@ -1322,6 +1333,8 @@ function buildBrandContext(brand: Brand) {
     model: "$model",
     storefront: "$storefront",
     environment: "$environment",
+    menu: "$menu",
+    equipment: "$equipment",
     general: "$asset",
     upload: "$asset"
     };
@@ -1331,7 +1344,7 @@ function buildBrandContext(brand: Brand) {
   const materialLines = db.assets
     .filter((asset) => asset.brandId === brand.id && !asset.type.startsWith("generated_") && asset.imageUrl)
     .slice(0, 12)
-    .map((asset) => `${mentionForRole(assetTypeToReferenceRole(asset.type, asset.title, asset.meta))} ${asset.title} [image]；${asset.meta}`)
+    .map((asset) => `${assetReferencePath(asset) ? `$${assetReferencePath(asset)}` : mentionForRole(assetTypeToReferenceRole(asset.type, asset.title, asset.meta))} ${asset.title} [image]；${asset.meta}`)
     .join("\n");
   return [
     `$copy.brand_name ${brand.name}`,
@@ -2481,7 +2494,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
 }
 
 function buildReferenceItems(brand: Brand, limit = 6): ReferenceItem[] {
-  const priority = ["logo", "ip", "model", "product", "storefront", "environment", "general"];
+  const priority = ["logo", "ip", "model", "product", "menu", "storefront", "environment", "equipment", "general"];
   const assetRefs: ReferenceItem[] = db.assets
     .filter((asset) => asset.brandId === brand.id && !asset.type.startsWith("generated_") && asset.imageUrl)
     .map((asset) => ({

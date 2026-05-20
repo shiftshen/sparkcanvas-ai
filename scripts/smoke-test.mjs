@@ -229,16 +229,20 @@ try {
     method: "POST",
     body: JSON.stringify({ title: "DAPOT Hot Pot Product", type: "product", brandId: dapotBrand.id, color: "#E60012", meta: "$product · hot pot buffet product image", imageUrl: "/brand-assets/generated/xmanx-product.png" })
   });
+  await request("/assets", {
+    method: "POST",
+    body: JSON.stringify({ title: "DAPOT Buffet Menu 299 399 499", type: "upload", brandId: dapotBrand.id, color: "#E60012", meta: "$menu.buffet · self-service buffet menu sets 299 399 499 drinks desserts sauce station", imageUrl: "/brand-assets/generated/xmanx-product.png" })
+  });
   const dapotRefs = await request("/ai/resolve-references", {
     method: "POST",
     body: JSON.stringify({
-      prompt: "@imgen /生成海报 使用 $dapot $dapot.logo $dapot.ip $dapot.product，显示 $copy.slogan -> JPG",
+      prompt: "@imgen /生成海报 使用 $dapot $dapot.logo $dapot.ip $dapot.product $dapot.menu.buffet，显示 $copy.slogan -> JPG",
       brandId: dapotBrand.id,
       brandInject: true
     })
   });
   assert(dapotRefs.brandKey === "dapot", "brand key should prefer brand name over market first word");
-  assert(["logo", "ip", "product"].every((role) => dapotRefs.imageReferences.some((reference) => reference.role === role && reference.imageUrl)), "$dapot.* references should resolve to real DAPOT logo/IP/product image assets");
+  assert(["logo", "ip", "product", "menu"].every((role) => dapotRefs.imageReferences.some((reference) => reference.role === role && reference.imageUrl)), "$dapot.* references should resolve to real DAPOT logo/IP/product/menu image assets");
   assert(dapotRefs.finalPrompt.includes("Eat the World in One Hot Pot") && dapotRefs.finalPrompt.includes("DAPOT"), "DAPOT resolved prompt should include brand text context");
   assert(dapotRefs.warnings.length === 0, `DAPOT CAL references should resolve without warnings: ${dapotRefs.warnings.join("; ")}`);
 
@@ -699,7 +703,7 @@ try {
   const reloadedInputRefs = reloadedSavedFrame?.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [];
   assert(reloadedInputRefs.some((ref) => ref.id === "ref_smoke_png_upload" && ref.imageUrl?.startsWith("/generated/brand-assets/")), "materialized uploaded PNG reference should survive workspace reload without base64");
   assert(migratedEmptyFrame?.workflowNodes.some((node) => node.id === plainImageNode.id && node.refs?.length), "workspace should keep generated image nodes on canvas");
-  assert(after.assets.length === initial.assets.length + 9, "only manually created brand materials should be added to assets");
+  assert(after.assets.length === initial.assets.length + 10, "only manually created brand materials should be added to assets");
   assert(after.frames[0].status === "success", "latest frame should be successful");
 
   const exported = await request("/workspace/export");

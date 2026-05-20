@@ -790,12 +790,42 @@ function mentionTokenForRole(role: string) {
     model: "$model",
     storefront: "$storefront",
     environment: "$environment",
+    menu: "$menu",
+    equipment: "$equipment",
     upload: "$asset",
     general: "$asset",
     generated_image: "$generated_image",
     generated_video: "$video"
   };
   return map[role] ?? "$asset";
+}
+
+function assetReferencePath(asset: Pick<Asset, "meta">) {
+  const match = asset.meta.match(/\$([\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*)/u);
+  return match ? match[1] : "";
+}
+
+function assetReferenceToken(asset: Pick<Asset, "meta" | "title" | "type">, brand?: Brand) {
+  const path = assetReferencePath(asset);
+  const token = path ? `$${path}` : mentionTokenForRole(assetRole(asset));
+  const brandKey = brand ? currentBrandKey(brand) : "";
+  if (!brandKey || token.startsWith(`$${brandKey}.`)) return token;
+  return token;
+}
+
+function assetQualifiedReferenceToken(asset: Pick<Asset, "meta" | "title" | "type">, brand?: Brand) {
+  const path = assetReferencePath(asset) || mentionTokenForRole(assetRole(asset)).slice(1);
+  const brandKey = brand ? currentBrandKey(brand) : "";
+  if (!brandKey) return `$${path}`;
+  return path.startsWith(`${brandKey}.`) ? `$${path}` : `$${brandKey}.${path}`;
+}
+
+function updateAssetMetaToken(meta: string, nextToken: string) {
+  const cleanToken = nextToken.trim().replace(/^#+/, "$").replace(/^@+/, "$").replace(/^\$?/, "$");
+  const normalized = /^\$[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*$/u.test(cleanToken) ? cleanToken : "$asset";
+  return /\$[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*/u.test(meta)
+    ? meta.replace(/\$[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*/u, normalized)
+    : `${normalized} · ${meta || "manual asset"}`;
 }
 
 function normalizeBrandKey(value = "") {
@@ -845,6 +875,8 @@ function assetRole(asset: Pick<Asset, "title" | "meta" | "type">): BrandAssetRol
   if (/^ip\b|@ip|\bip\b|navigator|角色|吉祥物|主理人/.test(text)) return "ip";
   if (asset.type === "product" || /@产品|product|sku|商品|产品|包装/.test(text)) return "product";
   if (asset.type === "model" || /@模特|model|模特|真人|数字人|穿搭/.test(text)) return "model";
+  if (/\$menu\b|\bmenu\b|菜单|菜品|汤底|soup|buffet|price|299|399|499/.test(text)) return "menu";
+  if (/\$equipment\b|\bequipment\b|设备|餐具|锅|drink station|sauce station|饮料|酱料/.test(text)) return "equipment";
   if (/@店铺|store|storefront|店铺|门店|官网|直播间|电商页面/.test(text)) return "storefront";
   if (/@环境|environment|scene|环境|场景|背景|空间|氛围/.test(text)) return "environment";
   return "general";
@@ -929,17 +961,17 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = []): MentionItem[] {
       const shortItem = {
         ...ref,
         id: `asset_${asset.id}`,
-        token: mentionTokenForRole(ref.role),
+        token: assetReferenceToken(asset, brand),
         group: "resource" as const,
         kind: "resource" as const
       };
       const qualifiedItem = {
         ...ref,
         id: `asset_${asset.id}_qualified`,
-        token: `$${key}.${ref.role}`,
+        token: assetQualifiedReferenceToken(asset, brand),
         group: "resource" as const,
         kind: "resource" as const,
-        description: `${ref.description} · 精确引用 ${brand.name}.${ref.role}`
+        description: `${ref.description} · 精确引用 ${assetQualifiedReferenceToken(asset, brand)}`
       };
       return [shortItem, qualifiedItem];
     });
@@ -2012,6 +2044,10 @@ function AssetPanel(props: {
               {!asset.imageUrl && <Image />}
             </button>
             <input value={asset.title} onChange={(event) => props.onUpdate(asset.id, { title: event.target.value })} aria-label="素材名称" />
+            <label className="rh-asset-token">
+              引用标签
+              <input value={assetReferenceToken(asset)} onChange={(event) => props.onUpdate(asset.id, { meta: updateAssetMetaToken(asset.meta, event.target.value) })} aria-label="素材引用标签" />
+            </label>
             <textarea value={asset.meta} onChange={(event) => props.onUpdate(asset.id, { meta: event.target.value })} aria-label="素材用途" />
             <select value={asset.type} onChange={(event) => props.onUpdate(asset.id, { type: event.target.value as Asset["type"] })} aria-label="素材类型">
               <option value="logo">Logo</option>
