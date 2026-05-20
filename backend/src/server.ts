@@ -681,10 +681,19 @@ function tagForOrientation(orientation: WorkflowOrientation) {
   return "%square";
 }
 
-function settingsForFinalOutput(target: WorkflowOutputTarget, orientation: WorkflowOrientation, settings?: Partial<GenerationSettings>) {
+function promptDurationSeconds(prompt: string) {
+  const match = prompt.match(/(\d{1,2})\s*秒/) ?? prompt.match(/(\d{1,2})\s*(s|sec|secs|second|seconds)\b/i);
+  if (!match) return undefined;
+  const seconds = Number(match[1]);
+  if (!Number.isFinite(seconds)) return undefined;
+  return Math.max(1, Math.min(60, seconds));
+}
+
+function settingsForFinalOutput(target: WorkflowOutputTarget, orientation: WorkflowOrientation, settings?: Partial<GenerationSettings>, sourcePrompt = "") {
   const ratio = target === "mp4" || target === "kit"
     ? orientation === "portrait" ? "9:16" : "16:9"
     : settings?.ratio ?? "1:1";
+  const inferredDuration = promptDurationSeconds(sourcePrompt);
   return {
     ...settings,
     ratio,
@@ -693,7 +702,7 @@ function settingsForFinalOutput(target: WorkflowOutputTarget, orientation: Workf
     count: 1,
     quality: settings?.quality ?? "hd",
     strength: settings?.strength ?? 70,
-    duration: target === "mp4" || target === "kit" ? Math.max(settings?.duration ?? 5, 5) : 0,
+    duration: target === "mp4" || target === "kit" ? Math.max(settings?.duration || inferredDuration || 5, 5) : 0,
     contentLanguage: settings?.contentLanguage ?? "zh-en"
   };
 }
@@ -1310,6 +1319,7 @@ function estimateCost(prompt: string, mode: CanvasFrame["mode"], templateCost?: 
 }
 
 function defaultSettings(prompt: string, settings?: Partial<GenerationSettings>): GenerationSettings {
+  const inferredDuration = promptDurationSeconds(prompt);
   return {
     ratio: prompt.includes("视频") ? "9:16" : "1:1",
     width: prompt.includes("视频") ? 1080 : 1080,
@@ -1317,7 +1327,7 @@ function defaultSettings(prompt: string, settings?: Partial<GenerationSettings>)
     count: 1,
     quality: "hd",
     strength: 70,
-    duration: prompt.includes("视频") ? 15 : 0,
+    duration: prompt.includes("视频") ? inferredDuration ?? 15 : 0,
     brandInject: false,
     contentLanguage: "zh-en",
     ...settings
@@ -4291,7 +4301,7 @@ app.post("/generate", async (req, res) => {
   const effectiveOrientation = input.orientation ?? "landscape";
   const optimizedPrompt = optimizeWorkflowPrompt(input.prompt, inferredBrand, effectiveOutputTarget, effectiveOrientation, input.settings);
   const prompt = template ? `${template.title}：${optimizedPrompt || template.intent}` : optimizedPrompt;
-  const optimizedSettings = settingsForFinalOutput(effectiveOutputTarget, effectiveOrientation, input.settings);
+  const optimizedSettings = settingsForFinalOutput(effectiveOutputTarget, effectiveOrientation, input.settings, optimizedPrompt || input.prompt);
   const taskId = nanoid(10);
   const frame = createFrame(
     prompt,

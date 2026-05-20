@@ -583,6 +583,19 @@ function inferOutputTargetFromText(text: string): WorkflowOutputTarget {
   return "jpg";
 }
 
+function inferVideoDurationSecondsFromText(text: string) {
+  const match = text.match(/(\d{1,2})\s*秒/) ?? text.match(/(\d{1,2})\s*(s|sec|secs|second|seconds)\b/i);
+  if (!match) return undefined;
+  const seconds = Number(match[1]);
+  if (!Number.isFinite(seconds)) return undefined;
+  return Math.max(1, Math.min(60, seconds));
+}
+
+function inferVideoDurationLabel(text: string, fallbackSeconds?: number) {
+  const seconds = inferVideoDurationSecondsFromText(text) ?? (fallbackSeconds && fallbackSeconds > 0 ? fallbackSeconds : undefined);
+  return `${seconds ?? 5}s`;
+}
+
 function workflowControlsFromFrame(frame: Frame | undefined, sourcePrompt: string): WorkflowControls {
   const outputTarget: WorkflowOutputTarget = frame?.outputs?.some((output) => output.kind === "document") && frame.outputs.some((output) => output.kind === "video")
     ? "kit"
@@ -1419,6 +1432,9 @@ function App() {
     const settings = {
       ...defaultSettings,
       ...(activeFrame?.settings ?? {}),
+      duration: inferOutputTargetFromText(input) === "mp4" || inferOutputTargetFromText(input) === "kit"
+        ? inferVideoDurationSecondsFromText(input) ?? activeFrame?.settings?.duration ?? 15
+        : activeFrame?.settings?.duration ?? defaultSettings.duration,
       brandInject: shouldInjectBrand
     };
     try {
@@ -1458,7 +1474,12 @@ function App() {
     try {
       const result = await api.post<WorkflowGenerateResponse>(`/canvas/frames/${activeFrame.id}/run`, {
         modelId: model?.id,
-        settings: activeFrame.settings
+        settings: {
+          ...activeFrame.settings,
+          duration: activeFrame.outputs.some((output) => output.kind === "video")
+            ? inferVideoDurationSecondsFromText(sourcePrompt) ?? activeFrame.settings.duration
+            : activeFrame.settings.duration
+        }
       });
       setFrames((current) => current.map((frame) => frame.id === result.frame.id ? result.frame : frame));
       setTasks((current) => [result.task, ...current.filter((task) => task.id !== result.task.id)]);
@@ -2652,7 +2673,7 @@ function Canvas(props: {
         <div className="rh-selection-pill">
           <Wand2 />
           <div><strong>元素选择模式</strong><small>{activeSelectedNode.type === "reference" || activeSelectedNode.type === "image" || activeSelectedNode.type === "output" ? "点击图片预览，底部编辑生成参数" : "底部固定面板可编辑当前节点"}</small></div>
-          <button type="button" className="primary" onClick={props.onRunWorkflow} disabled={props.frame?.status === "generating" || Boolean(props.editingNodeId)} title={props.editingNodeId ? "请先保存或关闭节点编辑器，再运行整个工作流。" : "运行当前画布工作流"}><Play />{props.editingNodeId ? "关闭后运行" : "运行工作流"}</button>
+          <button type="button" className="primary" onClick={props.onRunWorkflow} disabled={props.frame?.status === "generating"} title="运行当前画布工作流"><Play />运行工作流</button>
           <button type="button" onClick={() => props.setEditingNodeId(activeSelectedNode.id)}><Route />返回节点</button>
           <button type="button" onClick={closeNodeEditor}><X />退出</button>
         </div>
@@ -3075,7 +3096,7 @@ function NodeEditor({
   const [videoMode, setVideoMode] = useState("图生视频");
   const [videoModel, setVideoModel] = useState("grok-imagine-1.0-video-super-720p");
   const [videoRatio, setVideoRatio] = useState("16:9 · 720P");
-  const [videoDuration, setVideoDuration] = useState("5s");
+  const [videoDuration, setVideoDuration] = useState(() => inferVideoDurationLabel(`${node?.body ?? ""} ${framePrompt}`, frameSettings.duration));
   const [videoSound, setVideoSound] = useState(true);
   const [translateVideo, setTranslateVideo] = useState(false);
   const [audioMode, setAudioMode] = useState("配乐");
@@ -3094,6 +3115,7 @@ function NodeEditor({
     setGenerationMessage("");
     setGenerationProgress(0);
     setContentLanguage(frameSettings.contentLanguage ?? defaultSettings.contentLanguage);
+    setVideoDuration(inferVideoDurationLabel(`${node?.body ?? ""} ${framePrompt}`, frameSettings.duration));
   }, [node]);
   if (!draft) return null;
 
@@ -3697,7 +3719,7 @@ function NodeEditor({
         )}
         <div className="rh-video-preview">
           {output?.imageUrl ? <img src={output.imageUrl} alt={draft.title} /> : <Play />}
-          <span>{output?.videoUrl ? "最终 MP4 已生成，可下载" : output?.videoId ? `视频片段任务已创建，等待合成/裁切: ${output.videoId}` : draft.body ? "视频配置已保存，需点击运行生成真实 MP4" : "空视频节点"}</span>
+          <span>{generating ? "正在创建视频任务，请等待返回视频ID" : output?.videoUrl ? "最终 MP4 已生成，可下载" : output?.videoId ? `视频片段任务已创建，等待合成/裁切: ${output.videoId}` : draft.body ? "视频配置已保存，需点击生成视频或运行工作流" : "空视频节点"}</span>
         </div>
         <div className="rh-video-editor-footer">
           <select value={videoModel} onChange={(event) => setVideoModel(event.target.value)}>
@@ -3723,7 +3745,10 @@ function NodeEditor({
           <button type="button">1个</button>
           <small>♦ 135</small>
           {output?.videoUrl && <button type="button" onClick={() => downloadFile(output.videoUrl, draft.title, "mp4")}><ArrowDownToLine />下载MP4</button>}
-          <button type="button" className="submit" title={isVideoOutput ? "创建或刷新视频任务" : "生成视频配置"} aria-label="生成视频配置" onClick={() => void handleVideoGenerate()} disabled={generating || !(draft.body || framePrompt).trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
+          <button type="button" className="submit" title={isVideoOutput ? "创建或刷新视频任务" : "生成视频"} aria-label={isVideoOutput ? "生成MP4" : "生成视频"} onClick={() => void handleVideoGenerate()} disabled={generating || !(draft.body || framePrompt).trim()}>
+            {generating ? <Loader2 className="spin" /> : <Send />}
+            <span>{generating ? "创建中" : isVideoOutput ? "生成MP4" : "生成视频"}</span>
+          </button>
         </div>
       </aside>
     );
