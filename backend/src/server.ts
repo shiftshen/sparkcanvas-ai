@@ -1950,9 +1950,15 @@ app.get("/canvas/frames", (_req, res) => {
 
 app.post("/canvas/frames", async (req, res) => {
   const input = z.object({
-    brandId: z.string().optional()
+    brandId: z.string().nullable().optional(),
+    title: z.string().optional()
   }).parse(req.body);
-  const frame = createEmptyFrame(input.brandId);
+  const frame = createEmptyFrame(input.brandId ?? undefined);
+  if (input.brandId === null) {
+    frame.brandId = "";
+    frame.brandName = "无品牌";
+  }
+  if (input.title?.trim()) frame.title = input.title.trim();
   db.frames.unshift(frame);
   await persistDb();
   res.status(201).json(frame);
@@ -1969,7 +1975,7 @@ app.patch("/canvas/frames/:id", async (req, res) => {
     title: z.string().optional(),
     prompt: z.string().optional(),
     modelId: z.string().optional(),
-    brandId: z.string().optional(),
+    brandId: z.string().nullable().optional(),
     brandInject: z.boolean().optional(),
     brandContext: z.string().optional(),
     workflowNodes: z.array(workflowNodeSchema).optional(),
@@ -2002,7 +2008,13 @@ app.patch("/canvas/frames/:id", async (req, res) => {
   if (typeof input.brandInject === "boolean") {
     frame.settings.brandInject = input.brandInject;
   }
-  if (input.brandId) {
+  if (input.brandId === null) {
+    frame.brandId = "";
+    frame.brandName = "无品牌";
+    frame.brandContext = "";
+    frame.brandInjected = false;
+    frame.settings.brandInject = false;
+  } else if (input.brandId) {
     const requestedBrand = db.brands.find((item) => item.id === input.brandId);
     if (requestedBrand) {
       frame.brandId = requestedBrand.id;
@@ -2011,14 +2023,20 @@ app.patch("/canvas/frames/:id", async (req, res) => {
   }
 
   const model = models.find((item) => item.id === frame.modelId) ?? models[0];
-  const brand = findBrand(frame.brandId);
+  const hasFrameBrand = Boolean(frame.brandId && db.brands.some((item) => item.id === frame.brandId));
+  const brand = hasFrameBrand ? findBrand(frame.brandId) : activeBrand();
   const generatedBrandContext = buildBrandContext(brand);
   const nextBrandContext = input.brandContext ?? (frame.brandContext || generatedBrandContext);
-  frame.brandId = brand.id;
-  frame.brandName = brand.name;
-  frame.brandInjected = frame.settings.brandInject;
+  if (hasFrameBrand) {
+    frame.brandId = brand.id;
+    frame.brandName = brand.name;
+  } else {
+    frame.brandId = "";
+    frame.brandName = "无品牌";
+  }
+  frame.brandInjected = hasFrameBrand && frame.settings.brandInject;
   frame.brandContext = frame.brandInjected ? nextBrandContext : "";
-  frame.finalPrompt = buildFinalPrompt(frame.prompt, nextBrandContext, frame.brandInjected, brand);
+  frame.finalPrompt = buildFinalPrompt(frame.prompt, nextBrandContext, frame.brandInjected, hasFrameBrand ? brand : undefined);
   const emptyManualCoreWorkflow = Boolean(manualWorkflowNodes?.length) && !frame.prompt.trim() && manualWorkflowNodes!.every((node) => autoCoreNodeIds.has(node.id));
   if (emptyManualCoreWorkflow || (!manualWorkflowNodes && isEmptyAutoWorkflowFrame(frame))) {
     frame.workflowNodes = [];
@@ -2031,10 +2049,7 @@ app.patch("/canvas/frames/:id", async (req, res) => {
     await persistDb();
     return res.json(frame);
   }
-  frame.workflowNodes = manualWorkflowNodes
-    ?? (frame.workflowNodes.length === 0 && !frame.prompt.trim()
-      ? []
-      : mergeWorkflowNodes(buildWorkflowNodes(frame.prompt, brand, model, frame.settings, nextBrandContext, frame.brandInjected), frame.workflowNodes));
+  frame.workflowNodes = manualWorkflowNodes ?? frame.workflowNodes;
   frame.outputs = manualOutputs ?? frame.outputs;
   frame.steps = buildWorkflow(frame.prompt, brand, frame.brandInjected);
 

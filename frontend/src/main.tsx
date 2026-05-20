@@ -226,6 +226,7 @@ type User = {
   credits: number;
 };
 
+type FramePatch = Partial<Pick<Frame, "title" | "prompt" | "modelId" | "settings" | "brandContext" | "workflowNodes" | "outputs">> & { brandId?: string | null; brandInject?: boolean };
 type PanelKey = "projects" | "assets" | "brand" | "templates" | "history" | "tutorial" | null;
 type Viewport = { x: number; y: number; scale: number };
 type PreviewTarget = { title: string; subtitle?: string; imageUrl?: string; color?: string; nodeId?: string };
@@ -795,8 +796,10 @@ function App() {
 
   const activeBrand = brands.find((brand) => brand.active) ?? brands[0];
   const activeFrame = selectedFrameId ? frames.find((frame) => frame.id === selectedFrameId) : frames[0];
+  const frameBrand = activeFrame?.brandId ? brands.find((brand) => brand.id === activeFrame.brandId) : undefined;
+  const projectBrand = frameBrand ?? (activeFrame?.brandId === "" ? undefined : activeBrand);
   const model = models.find((item) => item.id === activeFrame?.modelId) ?? models[0];
-  const activeBrandAssets = activeBrand ? assets.filter((asset) => asset.brandId === activeBrand.id) : [];
+  const activeBrandAssets = projectBrand ? assets.filter((asset) => asset.brandId === projectBrand.id) : [];
 
   async function loadWorkspace() {
     const workspace = await api.get<Workspace>("/workspace");
@@ -850,7 +853,7 @@ function App() {
     }
   }
 
-  async function updateFrame(frameId: string, patch: Partial<Pick<Frame, "prompt" | "modelId" | "settings" | "brandId" | "brandContext" | "workflowNodes" | "outputs">> & { brandInject?: boolean }) {
+  async function updateFrame(frameId: string, patch: FramePatch) {
     const updated = await api.patch<Frame>(`/canvas/frames/${frameId}`, patch);
     setFrames((current) => current.map((frame) => frame.id === updated.id ? updated : frame));
     return updated;
@@ -906,9 +909,12 @@ function App() {
     }
   }
 
-  async function createProject() {
+  async function createProject(options?: { title?: string; brandId?: string | null }) {
     if (!activeBrand) return;
-    const frame = await api.post<Frame>("/canvas/frames", { brandId: activeBrand.id });
+    const frame = await api.post<Frame>("/canvas/frames", {
+      title: options?.title,
+      brandId: options?.brandId === undefined ? activeBrand.id : options.brandId
+    });
     setFrames((current) => [frame, ...current]);
     setSelectedFrameId(frame.id);
     setEditingNodeId(null);
@@ -1113,7 +1119,8 @@ function App() {
             templates={templates}
             assetSelection={assetSelection}
             onSelectFrame={(id) => { setSelectedFrameId(id); setPanel(null); }}
-            onCreateProject={() => void createProject()}
+            onCreateProject={(options) => void createProject(options)}
+            onUpdateFrame={(frameId, patch) => void updateFrame(frameId, patch)}
             onCreateBrand={() => void createBrand()}
             onSelectBrand={(brandId) => {
               const selected = brands.find((brand) => brand.id === brandId);
@@ -1134,7 +1141,7 @@ function App() {
       <Canvas
         frame={activeFrame}
         assets={assets}
-        activeBrand={activeBrand}
+        activeBrand={projectBrand}
         model={model}
         models={models}
         viewport={viewport}
@@ -1156,7 +1163,8 @@ function App() {
           frame={activeFrame}
           prompt={prompt}
           setPrompt={setPrompt}
-          activeBrand={activeBrand}
+          activeBrand={projectBrand ?? activeBrand}
+          brands={brands}
           model={model}
           models={models}
           assets={assets}
@@ -1202,7 +1210,8 @@ function SideDrawer(props: {
   templates: Template[];
   assetSelection: string[];
   onSelectFrame: (id: string) => void;
-  onCreateProject: () => void;
+  onCreateProject: (options?: { title?: string; brandId?: string | null }) => void;
+  onUpdateFrame: (frameId: string, patch: Pick<FramePatch, "title" | "settings" | "brandId" | "brandInject">) => void;
   onCreateBrand: () => void;
   onSelectBrand: (id: string) => void;
   onSelectAsset: (id: string) => void;
@@ -1228,7 +1237,7 @@ function SideDrawer(props: {
         <strong>{drawerTitle[props.panel]}</strong>
         <button type="button" onClick={props.onClose}><PanelLeftClose /></button>
       </div>
-      {props.panel === "projects" && <ProjectPanel frames={props.frames} selectedFrameId={props.selectedFrameId} onSelect={props.onSelectFrame} onCreate={props.onCreateProject} />}
+      {props.panel === "projects" && <ProjectPanel frames={props.frames} brands={props.brands} activeBrand={props.activeBrand} selectedFrameId={props.selectedFrameId} onSelect={props.onSelectFrame} onCreate={props.onCreateProject} onUpdateFrame={props.onUpdateFrame} />}
       {props.panel === "assets" && <AssetPanel assets={props.assets} selection={props.assetSelection} onSelect={props.onSelectAsset} onAddAssets={props.onAddAssets} onUpload={props.onUpload} onUpdate={props.onUpdateAsset} onDelete={props.onDeleteAsset} />}
       {props.panel === "brand" && props.activeBrand && <BrandPanel brands={props.brands} brand={props.activeBrand} assets={props.assets} onCreate={props.onCreateBrand} onSelect={props.onSelectBrand} onSave={props.onSaveBrand} onUpload={props.onUpload} />}
       {props.panel === "templates" && <TemplatePanel templates={props.templates} onUse={props.onUseTemplate} />}
@@ -1238,17 +1247,70 @@ function SideDrawer(props: {
   );
 }
 
-function ProjectPanel({ frames, selectedFrameId, onSelect, onCreate }: { frames: Frame[]; selectedFrameId?: string; onSelect: (id: string) => void; onCreate: () => void }) {
+function ProjectPanel({
+  frames,
+  brands,
+  activeBrand,
+  selectedFrameId,
+  onSelect,
+  onCreate,
+  onUpdateFrame
+}: {
+  frames: Frame[];
+  brands: Brand[];
+  activeBrand?: Brand;
+  selectedFrameId?: string;
+  onSelect: (id: string) => void;
+  onCreate: (options?: { title?: string; brandId?: string | null }) => void;
+  onUpdateFrame: (frameId: string, patch: Pick<FramePatch, "title" | "settings" | "brandId" | "brandInject">) => void;
+}) {
+  const selectedFrame = frames.find((frame) => frame.id === selectedFrameId);
+  const [newTitle, setNewTitle] = useState("");
+  const [newBrandId, setNewBrandId] = useState<string | null>(activeBrand?.id ?? null);
+  const projectCount = frames.length + 1;
+  const selectedBrandId = selectedFrame?.brandId || "";
+  function createNamedProject() {
+    onCreate({
+      title: newTitle.trim() || `未命名画布 ${projectCount}`,
+      brandId: newBrandId
+    });
+    setNewTitle("");
+  }
+  function updateProjectBrand(brandId: string) {
+    if (!selectedFrame) return;
+    const nextBrandId = brandId || null;
+    onUpdateFrame(selectedFrame.id, {
+      brandId: nextBrandId,
+      settings: { ...selectedFrame.settings, brandInject: Boolean(nextBrandId && selectedFrame.settings.brandInject) },
+      brandInject: Boolean(nextBrandId && selectedFrame.settings.brandInject)
+    });
+  }
   return (
     <div className="rh-panel-list">
-      <button className="rh-create-project" type="button" onClick={onCreate}>
-        <span><Plus /></span>
-        <div><strong>新建项目 / 流程</strong><small>用当前提示词创建一个新画布</small></div>
-      </button>
+      <section className="rh-project-create">
+        <div className="rh-project-create-head"><Plus /><strong>新建项目 / 流程</strong></div>
+        <input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder={`未命名画布 ${projectCount}`} />
+        <select value={newBrandId ?? ""} onChange={(event) => setNewBrandId(event.target.value || null)}>
+          <option value="">无品牌项目</option>
+          {brands.map((brand) => <option value={brand.id} key={brand.id}>{brand.name}</option>)}
+        </select>
+        <button className="rh-create-project" type="button" onClick={createNamedProject}>创建空画布</button>
+      </section>
+      {selectedFrame && (
+        <section className="rh-project-settings">
+          <strong>当前项目</strong>
+          <input value={selectedFrame.title} onChange={(event) => onUpdateFrame(selectedFrame.id, { title: event.target.value })} aria-label="项目名称" />
+          <select value={selectedBrandId} onChange={(event) => updateProjectBrand(event.target.value)}>
+            <option value="">无品牌</option>
+            {brands.map((brand) => <option value={brand.id} key={brand.id}>{brand.name}</option>)}
+          </select>
+          <small>{selectedBrandId ? "项目属于该品牌；生成时可选择是否注入品牌上下文。" : "无品牌项目不会自动注入品牌；仍可用 $xmanx.logo 跨品牌引用。"}</small>
+        </section>
+      )}
       {frames.map((frame) => (
         <button className={frame.id === selectedFrameId ? "active" : ""} type="button" key={frame.id} onClick={() => onSelect(frame.id)}>
           <span>{frame.status === "generating" ? <Loader2 className="spin" /> : <FolderKanban />}</span>
-          <div><strong>{frame.title}</strong><small>{frame.modelName} · {frame.progress}%</small></div>
+          <div><strong>{frame.title}</strong><small>{frame.brandName || "无品牌"} · {frame.modelName} · {frame.progress}%</small></div>
         </button>
       ))}
     </div>
@@ -1740,7 +1802,7 @@ function Canvas(props: {
       <section className="rh-world" style={{ transform: `translate(${props.viewport.x}px, ${props.viewport.y}px) scale(${props.viewport.scale})` }}>
         {props.frame && (
           <div className="rh-project-title">
-            <strong>{props.frame.settings?.brandInject ? `${props.activeBrand?.name ?? "Brand"} Canvas` : props.frame.title}</strong>
+            <strong>{props.frame.settings?.brandInject ? `${props.frame.brandName || props.activeBrand?.name || "Brand"} Canvas` : props.frame.title}</strong>
             <small>{props.frame.status === "generating" ? `Generating ${props.frame.progress}%` : `${props.frame.settings?.brandInject ? "品牌启用" : "品牌关闭"} · Ready`}</small>
           </div>
         )}
@@ -2640,6 +2702,7 @@ function BottomComposer(props: {
   prompt: string;
   setPrompt: (prompt: string) => void;
   activeBrand?: Brand;
+  brands: Brand[];
   model?: ModelOption;
   models: ModelOption[];
   assets: Asset[];
@@ -2647,7 +2710,7 @@ function BottomComposer(props: {
   aiDiagnostics: AiDiagnostics | null;
   onGenerate: () => void;
   onCreateProject: () => void;
-  onUpdateFrame: (patch: Partial<Pick<Frame, "settings" | "modelId">>) => void;
+  onUpdateFrame: (patch: Partial<Pick<Frame, "settings" | "modelId">> & { brandId?: string | null; brandInject?: boolean }) => void;
 }) {
   const settings = props.frame?.settings ?? defaultSettings;
   function updateSetting<K extends keyof GenerationSettings>(key: K, value: GenerationSettings[K]) {
@@ -2659,6 +2722,14 @@ function BottomComposer(props: {
   const activeQuery = activeReferenceQuery(props.prompt);
   function insertMention(item: MentionItem) {
     props.setPrompt(insertReferenceToken(props.prompt, item.token));
+  }
+  function updateProjectBrand(brandId: string) {
+    const hasBrand = Boolean(brandId);
+    props.onUpdateFrame({
+      brandId: hasBrand ? brandId : null,
+      settings: { ...settings, brandInject: hasBrand },
+      brandInject: hasBrand
+    });
   }
   return (
     <div className="rh-composer">
@@ -2690,12 +2761,15 @@ function BottomComposer(props: {
         <select value={props.model?.id ?? "imgen-skill"} onChange={(event) => props.onUpdateFrame({ modelId: event.target.value })}>
           {props.models.filter((item) => item.type === "image").map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
         </select>
+        <select className="rh-brand-select" value={props.frame?.brandId ?? ""} onChange={(event) => updateProjectBrand(event.target.value)} title="项目品牌">
+          <option value="">无品牌</option>
+          {props.brands.map((brand) => <option value={brand.id} key={brand.id}>{brand.name}</option>)}
+        </select>
         <select value={settings.ratio} onChange={(event) => updateSetting("ratio", event.target.value)}><option>1:1</option><option>3:4</option><option>4:5</option><option>9:16</option><option>16:9</option></select>
         <select value={settings.count} onChange={(event) => updateSetting("count", Number(event.target.value))}><option value={1}>1x</option><option value={2}>2x</option><option value={4}>4x</option><option value={6}>6x</option></select>
         <select value={settings.quality} onChange={(event) => updateSetting("quality", event.target.value as GenerationSettings["quality"])}><option value="standard">standard</option><option value="hd">hd</option><option value="ultra">ultra</option></select>
         <label className="rh-composer-slider">强度<input type="range" min={0} max={100} value={settings.strength} onChange={(event) => updateSetting("strength", Number(event.target.value))} /></label>
         <label className="rh-composer-number">时长<input type="number" min={0} max={60} value={settings.duration} onChange={(event) => updateSetting("duration", Number(event.target.value))} /></label>
-        <label className="rh-composer-check"><input type="checkbox" checked={settings.brandInject} onChange={(event) => updateSetting("brandInject", event.target.checked)} />品牌</label>
         <button type="button" className="rh-send" onClick={props.onGenerate} title={`生成当前画布，结果进入输出图节点：${referencePreview.images.length} 张参考图 / ${referencePreview.texts.length} 个文本字段`}><Send /></button>
       </div>
       <div className="rh-composer-status">

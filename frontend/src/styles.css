@@ -667,6 +667,53 @@ svg {
   outline: 1px solid #a7f3d0;
 }
 
+.rh-project-create,
+.rh-project-settings {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(16, 19, 29, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.rh-project-create-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #e5e7eb;
+}
+
+.rh-project-create-head svg {
+  width: 16px;
+  height: 16px;
+}
+
+.rh-project-create input,
+.rh-project-create select,
+.rh-project-settings input,
+.rh-project-settings select {
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: #e5e7eb;
+  background: #090d16;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.rh-project-create .rh-create-project {
+  min-height: 38px;
+  display: inline-flex;
+  justify-content: center;
+  color: #07110d;
+  background: #a7f3d0;
+  font-weight: 900;
+}
+
+.rh-project-settings strong {
+  color: #e5e7eb;
+}
+
 .rh-upload-row {
   margin-bottom: 10px;
 }
@@ -3617,7 +3664,7 @@ svg {
   grid-column: 2 !important;
   grid-row: 2 !important;
   display: grid !important;
-  grid-template-columns: 146px 80px 80px 100px 112px 84px 74px 38px;
+  grid-template-columns: 146px 104px 80px 70px 88px 112px 84px 38px;
   align-items: center;
   gap: 7px !important;
   min-width: 0;
@@ -3625,6 +3672,7 @@ svg {
 }
 
 .rh-composer-row select,
+.rh-brand-select,
 .rh-composer-slider,
 .rh-composer-number,
 .rh-composer-check {
