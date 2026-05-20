@@ -94,7 +94,8 @@ try {
   const initial = await request("/workspace");
   assert(initial.brands.some((brand) => brand.id === "brand_xmanx" && brand.active), "XMANX should be the active default brand");
   assert(initial.templates.some((template) => template.id === "tpl_brandkit"), "brand kit template should exist");
-  assert(initial.models[0]?.id === "yijiarj-nano-banana-2", "default image model should be yijiarj nano_banana_2");
+  assert(initial.models[0]?.id === "imgen-skill", "default image role should be @imgen skill");
+  assert(initial.models.some((model) => model.id === "yijiarj-nano-banana-2"), "model selector should still expose yijiarj nano_banana_2");
   assert(initial.models.some((model) => model.id === "yijiarj-grok-video-720p"), "model selector should expose verified yijiarj video model");
   assert(initial.models.some((model) => model.id === "cliproxyapi-gpt-5"), "model selector should keep legacy switchable models");
   assert(typeof initial.ai?.imageGeneration?.model === "string" && initial.ai.imageGeneration.model.length > 0, "workspace should expose sanitized AI skill status");
@@ -197,12 +198,13 @@ try {
   const resolvedRefs = await request("/ai/resolve-references", {
     method: "POST",
     body: JSON.stringify({
-      prompt: '@设计师 /生成海报 使用 $model，显示 "会员免费锅底"，画面中心写 $copy.slogan，再加入 $copy.brand_name，主题 %高级感 尺寸: 1080x1350 -> 海报',
+      prompt: '@imgen /生成海报 使用 $model，显示 "会员免费锅底"，画面中心写 $copy.slogan，再加入 $copy.brand_name，主题 %高级感 尺寸: 1080x1350 -> 海报',
       brandId: brand.id,
       brandInject: true
     })
   });
   assert(resolvedRefs.imageReferences.some((reference) => reference.role === "model" && reference.imageUrl), "resolved CAL resources should expose concrete image references");
+  assert(resolvedRefs.agents.includes("imgen"), "@imgen should be parsed as the image generation skill agent");
   assert(resolvedRefs.textReferences.some((reference) => reference.key.endsWith(".copy.slogan") && reference.value === brand.slogan), "$copy.slogan should resolve to current brand slogan");
   assert(resolvedRefs.lockedTexts.includes("会员免费锅底") && resolvedRefs.tags.includes("高级感") && resolvedRefs.params["尺寸"] === "1080x1350", "CAL parser should extract locked text, tags and params");
   assert(resolvedRefs.prompt.includes(`"${brand.slogan}"`) && resolvedRefs.finalPrompt.includes("图片资源"), "resolved payload should expand text and keep image reference summary");
@@ -243,12 +245,44 @@ try {
   });
   assert(emptyFrameLegacyCoreCleanup.workflowNodes.length === 0, "legacy auto core nodes should be cleaned from empty canvases");
 
+  const plainImageNode = {
+    id: "node_plain_horse",
+    type: "image",
+    title: "Image",
+    body: "马",
+    preview: "#f97316",
+    refs: [],
+    x: 120,
+    y: 160,
+    w: 250,
+    h: 300
+  };
+  const frameWithPlainNode = await request(`/canvas/frames/${emptyFrame.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      settings: { ratio: "1:1", count: 1, quality: "hd", strength: 70, brandInject: false },
+      workflowNodes: [plainImageNode]
+    })
+  });
+  assert(frameWithPlainNode.workflowNodes.length === 1 && frameWithPlainNode.workflowNodes[0].body === "马", "plain prompt image node should stay on empty canvas");
+  const plainGeneratedNode = await request(`/canvas/frames/${emptyFrame.id}/nodes/${plainImageNode.id}/generate`, {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "马",
+      modelId: "imgen-skill",
+      settings: { ratio: "1:1", count: 1, quality: "hd", strength: 70, brandInject: false }
+    })
+  });
+  assert(plainGeneratedNode.node.body.startsWith("马\n模型:"), "plain prompt generation should not prepend brand workflow context");
+  assert(!plainGeneratedNode.node.body.includes("XMANX") && !plainGeneratedNode.node.body.includes("xmanx.com"), "plain prompt generation should not include XMANX unless referenced");
+  assert(plainGeneratedNode.node.refs?.[0]?.imageUrl?.startsWith("data:image/svg+xml") || plainGeneratedNode.node.refs?.[0]?.imageUrl?.startsWith("/generated/"), "generated image node should keep a displayable image on canvas");
+
   const generated = await request("/generate", {
     method: "POST",
     body: JSON.stringify({
-      prompt: '@设计师 /生成海报 使用 $model $logo，显示 $copy.slogan，为 xmanx.com 黑橙色运动鞋生成首发海报，主题 %新品上市',
+      prompt: '@imgen /生成海报 使用 $model $logo，显示 $copy.slogan，为 xmanx.com 黑橙色运动鞋生成首发海报，主题 %新品上市',
       mode: "magic",
-      modelId: "yijiarj-nano-banana-2",
+      modelId: "imgen-skill",
       brandId: brand.id,
       brandInject: true,
       settings: { ratio: "4:5", count: 2, quality: "hd", strength: 66, duration: 0, brandInject: true },
@@ -260,7 +294,7 @@ try {
 
   const completed = await waitForTask(generated.taskId);
   assert(completed.frame.progress === 100, "completed frame should reach 100%");
-  assert(completed.frame.modelName === "yijiarj · nano_banana_2", "selected model should be stored on the frame");
+  assert(completed.frame.modelName === "@imgen · image skill", "selected @imgen skill role should be stored on the frame");
   assert(completed.frame.brandId === brand.id && completed.frame.brandInjected === true, "generated frame should store brand injection state");
   assert(completed.frame.brandContext.includes("XM Smoke IP"), "brand context should include IP details");
   assert(completed.frame.finalPrompt.includes("$copy.brand_name XMANX Smoke") && completed.frame.finalPrompt.includes("【本次任务】"), "final prompt should include code-style organized brand context");
@@ -356,7 +390,7 @@ try {
 
   const after = await request("/workspace");
   const migratedEmptyFrame = after.frames.find((frame) => frame.id === emptyFrame.id);
-  assert(migratedEmptyFrame?.workflowNodes.length === 0, "workspace should keep cleaned empty canvases empty");
+  assert(migratedEmptyFrame?.workflowNodes.some((node) => node.id === plainImageNode.id && node.refs?.length), "workspace should keep generated image nodes on canvas");
   assert(after.assets.length === initial.assets.length + 4, "only manually created brand materials should be added to assets");
   assert(after.frames[0].status === "success", "latest frame should be successful");
 

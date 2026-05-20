@@ -140,7 +140,12 @@ def is_gemini_image_model(model: str) -> bool:
 
 def is_openai_image_model(model: str) -> bool:
     normalized = model.lower()
-    return "nano_banana" in normalized or "nano-banana" in normalized
+    return (
+        "nano_banana" in normalized
+        or "nano-banana" in normalized
+        or normalized.startswith("grok-imagine-image")
+        or normalized.startswith("image2")
+    )
 
 
 def gemini_base_url(base_url: str) -> str:

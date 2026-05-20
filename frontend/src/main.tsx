@@ -246,7 +246,7 @@ const requiredBrandSlots = [
   { role: "storefront", token: "$storefront", title: "店铺", hint: "官网、门店、直播间或电商页面", assetType: "upload" },
   { role: "environment", token: "$environment", title: "环境", hint: "使用场景、背景空间或品牌氛围", assetType: "upload" }
 ] as const satisfies ReadonlyArray<{ role: BrandAssetRole["role"]; token: string; title: string; hint: string; assetType: Asset["type"] }>;
-const defaultSettings: GenerationSettings = { ratio: "16:9", count: 1, quality: "hd", strength: 72, duration: 0, brandInject: true };
+const defaultSettings: GenerationSettings = { ratio: "1:1", count: 1, quality: "hd", strength: 72, duration: 0, brandInject: false };
 type GraphEdge = { from: WorkflowNode; to: WorkflowNode; id: string };
 
 const api = {
@@ -453,14 +453,7 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = []): MentionItem[] {
   if (!brand) return [];
   const key = currentBrandKey(brand);
   const agents: MentionItem[] = [
-    ["@设计师", "designer", "海报、主图、详情页、社媒图、视觉排版"],
-    ["@文案", "copywriter", "标题、广告语、促销文案、品牌故事"],
-    ["@修图师", "retoucher", "换模特、换背景、抠图、扩图、局部重绘"],
-    ["@摄影师", "photographer", "真实商业摄影、产品拍摄、模特大片"],
-    ["@视频导演", "video_director", "短视频脚本、分镜、动态展示、视频提示词"],
-    ["@品牌顾问", "brand_consultant", "品牌定位、视觉方向、IP 策略"],
-    ["@审核员", "reviewer", "错字、品牌一致性、广告规范检查"],
-    ["@翻译", "translator", "中文、英文、泰文等多语言转换"]
+    ["@imgen", "imgen", "图片生成 Skill：通过本地脚本调用 otcbot / yijiarj 图片生成能力"]
   ].map(([token, role, description]) => ({
     id: `agent_${role}`,
     token,
@@ -670,7 +663,7 @@ function buildPromptReferencePreview(prompt: string, items: MentionItem[]) {
 }
 
 function activeReferenceQuery(prompt: string) {
-  const normalized = prompt.replace(/＠/g, "@").replace(/＃/g, "#").replace(/＄/g, "$").replace(/％/g, "%").replace(/\s+$/g, "");
+  const normalized = prompt.replace(/＠/g, "@").replace(/＃/g, "#").replace(/＄/g, "$").replace(/％/g, "%");
   const match = normalized.match(/([@#/$%])([^@#/$%\s]*)$/u);
   if (!match) return null;
   return { symbol: match[1] as "@" | "#" | "/" | "$" | "%", query: match[2].toLowerCase() };
@@ -769,7 +762,7 @@ function App() {
   const [assetSelection, setAssetSelection] = useState<string[]>([]);
 
   const activeBrand = brands.find((brand) => brand.active) ?? brands[0];
-  const activeFrame = selectedFrameId ? frames.find((frame) => frame.id === selectedFrameId) : undefined;
+  const activeFrame = selectedFrameId ? frames.find((frame) => frame.id === selectedFrameId) : frames[0];
   const model = models.find((item) => item.id === activeFrame?.modelId) ?? models[0];
   const activeBrandAssets = activeBrand ? assets.filter((asset) => asset.brandId === activeBrand.id) : [];
 
@@ -783,7 +776,7 @@ function App() {
     setFrames(workspace.frames);
     setTasks(workspace.tasks);
     setAiStatus(workspace.ai ?? null);
-    setSelectedFrameId((current) => current && workspace.frames.some((frame) => frame.id === current) ? current : null);
+    setSelectedFrameId((current) => current && workspace.frames.some((frame) => frame.id === current) ? current : workspace.frames[0]?.id ?? null);
     setLoading(false);
   }
 
@@ -831,28 +824,54 @@ function App() {
     return updated;
   }
 
+  function canvasImageNode(nodePrompt: string, frame?: Frame): WorkflowNode {
+    const existingNodes = frame?.workflowNodes ?? [];
+    const siblingCount = existingNodes.filter((node) => node.type === "image" || node.type === "reference" || node.type === "output").length;
+    return {
+      id: `node_img_${Date.now().toString(36)}`,
+      type: "image",
+      title: "Image",
+      body: nodePrompt,
+      preview: activeBrand?.accentColor ?? "#f97316",
+      refs: [],
+      x: 120 + (siblingCount % 4) * 280,
+      y: 140 + Math.floor(siblingCount / 4) * 310,
+      w: 250,
+      h: 300
+    };
+  }
+
   async function generate(input = prompt, template?: Template, reuseCurrentWorkflow = true) {
     if (!input.trim() || !activeBrand || !model) return;
     setError("");
-    const nodes = reuseCurrentWorkflow && activeFrame ? normalizeWorkflowNodes(activeFrame.workflowNodes, shouldUseDefaultWorkflow(activeFrame.workflowNodes)) : undefined;
-    const settings = activeFrame?.settings ?? defaultSettings;
-    const response = await api.post<{ task: GenerationTask; frame: Frame; credits: number }>("/generate", {
-      prompt: template ? template.intent : input,
-      mode: template ? "template" : "magic",
-      templateId: template?.id,
+    const nodePrompt = template ? template.intent : input;
+    const targetFrame = activeFrame ?? await api.post<Frame>("/canvas/frames", { brandId: activeBrand.id });
+    if (!activeFrame) {
+      setFrames((current) => [targetFrame, ...current]);
+      setSelectedFrameId(targetFrame.id);
+    }
+    const settings = { ...(targetFrame.settings ?? defaultSettings), brandInject: false };
+    const currentNodes = reuseCurrentWorkflow ? normalizeWorkflowNodes(targetFrame.workflowNodes, shouldUseDefaultWorkflow(targetFrame.workflowNodes)) : [];
+    const node = canvasImageNode(nodePrompt, { ...targetFrame, workflowNodes: currentNodes });
+    const frameWithNode = await updateFrame(targetFrame.id, {
       modelId: model.id,
-      brandId: activeBrand.id,
-      brandInject: settings.brandInject,
-      brandContext: buildBrandContext(activeBrand, assets),
-      workflowNodes: nodes,
       settings,
-      x: 120,
-      y: 120
+      brandInject: false,
+      workflowNodes: [...currentNodes, node]
     });
-    setFrames((current) => [response.frame, ...current]);
-    setTasks((current) => [response.task, ...current]);
-    setUser((current) => current ? { ...current, credits: response.credits } : current);
-    setSelectedFrameId(response.frame.id);
+    setSelectedFrameId(frameWithNode.id);
+    try {
+      const result = await api.post<NodeGenerateResponse>(`/canvas/frames/${frameWithNode.id}/nodes/${node.id}/generate`, {
+        prompt: nodePrompt,
+        modelId: model.id,
+        settings
+      });
+      setFrames((current) => current.map((frame) => frame.id === result.frame.id ? result.frame : frame));
+      if (result.generated === false) setError(result.message ?? "图片生成已降级，请检查图片生成 Skill。");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "图片生成失败");
+      throw caught;
+    }
   }
 
   async function createProject() {
@@ -862,6 +881,7 @@ function App() {
     setSelectedFrameId(frame.id);
     setEditingNodeId(null);
     setPanel("projects");
+    return frame;
   }
 
   async function saveBrand(brand: Brand) {
@@ -1031,12 +1051,12 @@ function App() {
         <div className="rh-logo"><span>SC</span><div><strong>SparkCanvas</strong><small>{activeBrand?.name ?? "XMANX"}</small></div></div>
         <div className="rh-top-prompt">
           <Sparkles />
-          <input value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void generate(); }} placeholder='@设计师 /生成海报 使用 $logo，#slogan 兼容旧写法' />
+          <input value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void generate(); }} placeholder='@imgen cat，或 @imgen 使用 $logo 生成海报' />
           {topActiveQuery && <MentionPopover items={topFilteredMentionItems} compact onPick={insertTopMention} />}
           <button type="button" onClick={() => void generate()} disabled={!prompt.trim()}><Send />生成</button>
         </div>
         <div className="rh-top-meta">
-          <span>{model?.name ?? "yijiarj · nano_banana_2"}</span>
+          <span>{model?.name ?? "@imgen · image skill"}</span>
           <em className={aiStatus?.imageGeneration.configured ? "ready" : "missing"}>
             {aiStatus?.imageGeneration.configured ? `Skill · ${aiStatus.imageGeneration.model}` : "Skill key missing"}
           </em>
@@ -1694,7 +1714,12 @@ function Canvas(props: {
         </div>
       )}
       <section className="rh-world" style={{ transform: `translate(${props.viewport.x}px, ${props.viewport.y}px) scale(${props.viewport.scale})` }}>
-        {props.frame && <div className="rh-project-title"><strong>{props.activeBrand?.name ?? "XMANX"} Canvas</strong><small>{props.frame.status === "generating" ? `Generating ${props.frame.progress}%` : "Ready"}</small></div>}
+        {props.frame && (
+          <div className="rh-project-title">
+            <strong>{props.frame.settings?.brandInject ? `${props.activeBrand?.name ?? "Brand"} Canvas` : props.frame.title}</strong>
+            <small>{props.frame.status === "generating" ? `Generating ${props.frame.progress}%` : `${props.frame.settings?.brandInject ? "品牌启用" : "品牌关闭"} · Ready`}</small>
+          </div>
+        )}
         <svg className="rh-lines" viewBox="0 0 2200 900">
           {edges.map((edge) => {
             const x1 = (edge.from.x ?? 0) + (edge.from.w ?? 230);
@@ -1744,7 +1769,7 @@ function Canvas(props: {
         {visibleNodes.map((node) => (
           <NodeCard
             key={node.id}
-            node={node.type === "model" ? { ...node, body: props.model?.name ?? "yijiarj · nano_banana_2" } : node}
+            node={node.type === "model" ? { ...node, body: props.model?.name ?? "@imgen · image skill" } : node}
             output={node.type === "output" ? props.frame?.outputs[outputNodes.findIndex((item) => item.id === node.id)] ?? props.frame?.outputs[0] : undefined}
             refs={node.id === "input-image" ? refs : node.refs ?? []}
             selected={selectedNode === node.id || props.editingNodeId === node.id}
@@ -1890,7 +1915,7 @@ function NodeCard(props: {
           </div>
         </div>
       ) : props.node.type === "model" ? (
-        <div className="rh-node-body compact"><Settings2 /><strong>{props.node.body || "yijiarj · nano_banana_2"}</strong></div>
+        <div className="rh-node-body compact"><Settings2 /><strong>{props.node.body || "@imgen · image skill"}</strong></div>
       ) : props.node.type === "process" ? (
         <button type="button" className={`rh-text-tile ${parseStoryboardTable(props.node.body, props.refs).rows.length ? "storyboard" : ""}`} onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
           {parseStoryboardTable(props.node.body, props.refs).rows.length ? (
@@ -2019,7 +2044,7 @@ function NodeEditor({
   const [generationProgress, setGenerationProgress] = useState(0);
   const [generationMessage, setGenerationMessage] = useState("");
   const imageModels = models.filter((item) => item.type === "image");
-  const [imageModelId, setImageModelId] = useState(imageModels[0]?.id ?? "yijiarj-nano-banana-2");
+  const [imageModelId, setImageModelId] = useState(imageModels[0]?.id ?? "imgen-skill");
   const [imageRatio, setImageRatio] = useState(frameSettings.ratio);
   const [imageQuality, setImageQuality] = useState<GenerationSettings["quality"]>(frameSettings.quality);
   const [imageCount, setImageCount] = useState(frameSettings.count);
@@ -2614,7 +2639,7 @@ function BottomComposer(props: {
   return (
     <div className="rh-composer">
       <button type="button" className="rh-add" onClick={props.onCreateProject} title="新建项目画布"><Plus /><span>New</span></button>
-      <textarea value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} placeholder='@设计师 /生成海报 使用 $logo $product.hero，显示 "会员免费锅底"，主题 %高级感 -> 海报' aria-label="生成当前画布提示词" />
+      <textarea value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} placeholder='@imgen cat；只有写 $logo / $product 或连接前置节点时才会使用参考内容' aria-label="生成当前画布提示词" />
       {referencePreview.total > 0 && (
         <div className="rh-composer-refs">
           <strong>{referencePreview.images.length} 图 / {referencePreview.texts.length} 文本</strong>
@@ -2638,7 +2663,7 @@ function BottomComposer(props: {
         </div>
       )}
       <div className="rh-composer-row">
-        <select value={props.model?.id ?? "yijiarj-nano-banana-2"} onChange={(event) => props.onUpdateFrame({ modelId: event.target.value })}>
+        <select value={props.model?.id ?? "imgen-skill"} onChange={(event) => props.onUpdateFrame({ modelId: event.target.value })}>
           {props.models.filter((item) => item.type === "image").map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
         </select>
         <select value={settings.ratio} onChange={(event) => updateSetting("ratio", event.target.value)}><option>1:1</option><option>3:4</option><option>4:5</option><option>9:16</option><option>16:9</option></select>

@@ -23,7 +23,7 @@ npm run dev
 
 ### 图片生成配置
 
-图片生成走本地 skill 脚本 `scripts/generate_image.py`，由后端调用，不在前端直接请求图片 API。默认图片模型为 `yijiarj · nano_banana_2`，文本默认用当前账号已验证可用的 `gpt-5.4`，视频默认用当前账号已验证能创建任务的 `grok-imagine-1.0-video-super-720p`。`veo_3_1-fast` 保留为候选模型，但当前账号通道可能不可用。底部控制栏和节点编辑器都可以切换模型和参数。
+图片生成走本地 skill 脚本 `scripts/generate_image.py`，由后端调用，不在前端直接请求图片 API。默认图片角色为 `@imgen · image skill`，实际模型、网关和密钥由 `IMAGE_GEN_*` 或本地私有 `auth.json` 控制；文本默认用当前账号已验证可用的 `gpt-5.4`，视频默认用当前账号已验证能创建任务的 `grok-imagine-1.0-video-super-720p`。`yijiarj · nano_banana_2` 和 `veo_3_1-fast` 保留为候选模型，但当前账号通道可能不可用。底部控制栏和节点编辑器都可以切换模型和参数。
 
 推荐使用环境变量：
 

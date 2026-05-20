@@ -693,7 +693,7 @@ svg {
   color: #07110d;
   background: #a7f3d0;
   font-weight: 900;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .rh-upload-row input,

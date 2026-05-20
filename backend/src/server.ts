@@ -201,6 +201,7 @@ const templates = [
 ];
 
 const models = [
+  { id: "imgen-skill", provider: "otcbot", model: undefined, name: "@imgen · image skill", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认图片角色，统一走本地 scripts/generate_image.py；模型、网关和密钥由 IMAGE_GEN_* / auth.json 控制" },
   { id: "yijiarj-nano-banana-2", provider: "yijiarj", model: "nano_banana_2", name: "yijiarj · nano_banana_2", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认图片模型，经本地 skill 调用 yijiarj Gemini native image API，支持多图参考" },
   { id: "cliproxyapi-gpt-5-4", provider: "cliproxyapi", model: "gpt-5.4", name: "cliproxyapi · gpt-5.4", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
   { id: "cliproxyapi-gpt-5", provider: "cliproxyapi", model: "gpt-5", name: "cliproxyapi · gpt-5", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
@@ -958,11 +959,11 @@ function estimateCost(prompt: string, mode: CanvasFrame["mode"], templateCost?: 
 function defaultSettings(prompt: string, settings?: Partial<GenerationSettings>): GenerationSettings {
   return {
     ratio: prompt.includes("视频") ? "9:16" : "1:1",
-    count: 3,
+    count: 1,
     quality: "hd",
     strength: 70,
     duration: prompt.includes("视频") ? 15 : 0,
-    brandInject: true,
+    brandInject: false,
     ...settings
   };
 }
@@ -1365,6 +1366,19 @@ function ratioForImageSkill(ratio?: string) {
   return value && /^\d+:\d+$/.test(value) ? value : "1:1";
 }
 
+function fallbackImageDataUrl(label = "Image generation unavailable") {
+  const safeLabel = label.replace(/[<>&]/g, "").slice(0, 80) || "Image generation unavailable";
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">`,
+    `<rect width="1024" height="1024" fill="#10131d"/>`,
+    `<rect x="96" y="96" width="832" height="832" rx="48" fill="#181c27" stroke="#334155" stroke-width="4"/>`,
+    `<text x="512" y="480" text-anchor="middle" font-family="Arial, sans-serif" font-size="38" font-weight="700" fill="#e5e7eb">SparkCanvas</text>`,
+    `<text x="512" y="540" text-anchor="middle" font-family="Arial, sans-serif" font-size="26" fill="#94a3b8">${safeLabel}</text>`,
+    `</svg>`
+  ].join("");
+  return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+}
+
 async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string, settings?: Partial<GenerationSettings>) {
   const imageConfig = imageGenerationConfig(modelName);
   if (!imageConfig.apiKey || !imageConfig.baseUrl) return undefined;
@@ -1425,21 +1439,17 @@ async function fillFrameOutputs(frame: CanvasFrame) {
   const resolvedRefs = resolvePromptAssets(frame.prompt, brand).imageReferences;
   const refs = [
     ...resolvedRefs,
-    ...(frame.workflowNodes.find((node) => node.id === "input-image")?.refs ?? buildReferenceItems(brand))
+    ...(frame.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [])
   ].filter((reference, index, list) => list.findIndex((item) => item.id === reference.id) === index);
-  const fallbackImages = ["/brand-assets/generated/xmanx-storefront.png", "/brand-assets/generated/xmanx-product.png", "/brand-assets/generated/xmanx-logo.png"];
-  const prompt = [
-    frame.finalPrompt,
-    "Output: clean commercial product campaign image for xmanx.com.",
-    "Use black, white, and orange brand system. Keep composition usable for ecommerce and social campaign."
-  ].join("\n");
+  const fallbackImage = fallbackImageDataUrl("Skill unavailable");
+  const prompt = frame.finalPrompt || frame.prompt;
 
   for (const [index, output] of frame.outputs.entries()) {
     if (output.kind !== "image" || output.imageUrl) continue;
     try {
       const model = models.find((item) => item.id === frame.modelId) ?? models[0];
       const generated = await runImageGenerationSkill(prompt, refs, `xmanx-${frame.id}-${index + 1}`, model.model, frame.settings);
-      output.imageUrl = generated ?? fallbackImages[index % fallbackImages.length];
+      output.imageUrl = generated ?? fallbackImage;
       const outputNode = frame.workflowNodes.filter((node) => node.type === "output")[index];
       if (outputNode && output.imageUrl) {
         const ref: ReferenceItem = {
@@ -1453,7 +1463,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         outputNode.refs = [ref, ...(outputNode.refs ?? []).filter((item) => item.imageUrl !== ref.imageUrl)].slice(0, 12);
       }
     } catch (error) {
-      output.imageUrl = fallbackImages[index % fallbackImages.length];
+      output.imageUrl = fallbackImage;
       output.copy = `${output.copy} · image generation fallback: ${error instanceof Error ? error.message.slice(0, 90) : "unavailable"}`;
     }
   }
@@ -1555,7 +1565,7 @@ function createFrame(
 function createEmptyFrame(requestedBrandId?: string): CanvasFrame {
   const brand = findBrand(requestedBrandId);
   const model = models[0];
-  const settings = defaultSettings("", { ratio: "1:1", count: 1, quality: "hd", brandInject: true });
+  const settings = defaultSettings("", { ratio: "1:1", count: 1, quality: "hd", brandInject: false });
   return {
     id: nanoid(8),
     title: "未命名画布",
@@ -1573,7 +1583,7 @@ function createEmptyFrame(requestedBrandId?: string): CanvasFrame {
     settings,
     brandId: brand.id,
     brandName: brand.name,
-    brandInjected: true,
+    brandInjected: false,
     brandContext: "",
     finalPrompt: "",
     steps: [],
@@ -1929,7 +1939,7 @@ app.patch("/canvas/frames/:id", async (req, res) => {
     w: z.number().optional(),
     h: z.number().optional(),
     title: z.string().optional(),
-    prompt: z.string().min(1).optional(),
+    prompt: z.string().optional(),
     modelId: z.string().optional(),
     brandId: z.string().optional(),
     brandInject: z.boolean().optional(),
@@ -1981,7 +1991,8 @@ app.patch("/canvas/frames/:id", async (req, res) => {
   frame.brandInjected = frame.settings.brandInject;
   frame.brandContext = frame.brandInjected ? nextBrandContext : "";
   frame.finalPrompt = buildFinalPrompt(frame.prompt, nextBrandContext, frame.brandInjected, brand);
-  if (isEmptyAutoWorkflowFrame(frame)) {
+  const emptyManualCoreWorkflow = Boolean(manualWorkflowNodes?.length) && !frame.prompt.trim() && manualWorkflowNodes!.every((node) => autoCoreNodeIds.has(node.id));
+  if (emptyManualCoreWorkflow || (!manualWorkflowNodes && isEmptyAutoWorkflowFrame(frame))) {
     frame.workflowNodes = [];
     frame.outputs = [];
     frame.brandContext = "";
@@ -2029,18 +2040,18 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
   }
   const refs = [
     ...resolvePromptAssets(input.prompt?.trim() || node.body || frame.prompt, brand).imageReferences,
-    ...(frame.workflowNodes.find((item) => item.id === "input-image")?.refs ?? []),
+    ...(node.parentId ? (frame.workflowNodes.find((item) => item.id === node.parentId)?.refs ?? []) : []),
     ...(node.refs ?? [])
   ].filter((reference, index, list) => list.findIndex((item) => item.id === reference.id) === index);
+  const shouldInjectBrand = Boolean(input.settings?.brandInject);
   const prompt = buildFinalPrompt(
     input.prompt?.trim() || node.body || frame.prompt,
     frame.brandContext || buildBrandContext(brand),
-    frame.brandInjected,
+    shouldInjectBrand,
     brand
   );
   const outputName = `node-${frame.id}-${node.id}-${Date.now().toString(36)}`;
-  const fallbackImages = ["/brand-assets/generated/xmanx-storefront.png", "/brand-assets/generated/xmanx-product.png", "/brand-assets/generated/xmanx-logo.png"];
-  let imageUrl = fallbackImages[Math.abs(node.id.length) % fallbackImages.length];
+  let imageUrl = fallbackImageDataUrl("Skill unavailable");
   let generationNote = "";
   let generated = false;
 
