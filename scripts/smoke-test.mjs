@@ -94,8 +94,9 @@ try {
   const initial = await request("/workspace");
   assert(initial.brands.some((brand) => brand.id === "brand_xmanx" && brand.active), "XMANX should be the active default brand");
   assert(initial.templates.some((template) => template.id === "tpl_brandkit"), "brand kit template should exist");
-  assert(initial.models[0]?.id === "cliproxyapi-gpt-5-4", "default model should be cliproxyapi gpt-5.4");
-  assert(initial.models.some((model) => model.id === "cliproxyapi-gpt-5"), "model selector should expose supported switchable models");
+  assert(initial.models[0]?.id === "yijiarj-nano-banana-2", "default image model should be yijiarj nano_banana_2");
+  assert(initial.models.some((model) => model.id === "yijiarj-grok-video-720p"), "model selector should expose verified yijiarj video model");
+  assert(initial.models.some((model) => model.id === "cliproxyapi-gpt-5"), "model selector should keep legacy switchable models");
   assert(typeof initial.ai?.imageGeneration?.model === "string" && initial.ai.imageGeneration.model.length > 0, "workspace should expose sanitized AI skill status");
 
   const aiStatus = await request("/ai/status");
@@ -222,7 +223,7 @@ try {
     body: JSON.stringify({
       prompt: "参考 @model，画面中心写 #slogan，为 xmanx.com 黑橙色运动鞋生成首发海报",
       mode: "magic",
-      modelId: "cliproxyapi-gpt-5-4",
+      modelId: "yijiarj-nano-banana-2",
       brandId: brand.id,
       brandInject: true,
       settings: { ratio: "4:5", count: 2, quality: "hd", strength: 66, duration: 0, brandInject: true },
@@ -234,7 +235,7 @@ try {
 
   const completed = await waitForTask(generated.taskId);
   assert(completed.frame.progress === 100, "completed frame should reach 100%");
-  assert(completed.frame.modelName === "cliproxyapi · gpt-5.4", "selected model should be stored on the frame");
+  assert(completed.frame.modelName === "yijiarj · nano_banana_2", "selected model should be stored on the frame");
   assert(completed.frame.brandId === brand.id && completed.frame.brandInjected === true, "generated frame should store brand injection state");
   assert(completed.frame.brandContext.includes("XM Smoke IP"), "brand context should include IP details");
   assert(completed.frame.finalPrompt.includes("#brand_name XMANX Smoke") && completed.frame.finalPrompt.includes("【本次任务】"), "final prompt should include code-style organized brand context");
@@ -297,25 +298,25 @@ try {
 
   const textNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_text/generate-text`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "生成三镜头分镜表格", model: "cliproxyapi · gpt-5.4", translate: false, mode: "table" })
+    body: JSON.stringify({ prompt: "生成三镜头分镜表格", model: "gpt-5.4", translate: false, mode: "table" })
   });
   assert(textNode.text.includes("| 镜号 |") && textNode.node.type === "process", "text node should generate storyboard table");
 
   const scriptNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_script/generate-script`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "生成黑橙运动鞋短片脚本", model: "cliproxyapi · gpt-5.4", translate: true })
+    body: JSON.stringify({ prompt: "生成黑橙运动鞋短片脚本", model: "gpt-5.4", translate: true })
   });
   assert(scriptNode.script.includes("镜头 1") && scriptNode.node.type === "script", "script node should generate editable storyboard script");
 
   const videoNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_video/generate-video`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "保存文生视频配置", model: "Seedance 2.0 VIP", settings: { mode: "文生视频", ratio: "9:16 · 720P · 5s", duration: "5s", sound: true, translate: false } })
+    body: JSON.stringify({ prompt: "保存文生视频配置", model: "grok-imagine-1.0-video-super-720p", settings: { mode: "文生视频", ratio: "9:16 · 720P · 5s", duration: "5s", sound: true, translate: false } })
   });
   assert(videoNode.videoPlan.includes("视频类型: 文生视频") && videoNode.node.type === "video", "video node should save generation plan");
 
   const audioNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_audio/generate-audio`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "生成科技感节奏配乐", model: "cliproxyapi · gpt-5.4", settings: { mode: "配乐", duration: "15s", scene: "广告短视频", loop: false, translate: false } })
+    body: JSON.stringify({ prompt: "生成科技感节奏配乐", model: "gpt-5.4", settings: { mode: "配乐", duration: "15s", scene: "广告短视频", loop: false, translate: false } })
   });
   assert(audioNode.audioPlan.includes("音频类型: 配乐") && audioNode.node.type === "audio", "audio node should save generation plan");
 

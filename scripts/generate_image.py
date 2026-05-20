@@ -78,6 +78,11 @@ def find_image_b64(value: Any) -> str | None:
     if isinstance(value, dict):
         if value.get("type") == "image_generation_call" and isinstance(value.get("result"), str):
             return value["result"]
+        inline_data = value.get("inlineData") or value.get("inline_data")
+        if isinstance(inline_data, dict) and isinstance(inline_data.get("data"), str):
+            mime = str(inline_data.get("mimeType") or inline_data.get("mime_type") or "")
+            if not mime or mime.startswith("image/"):
+                return inline_data["data"]
         for item in value.values():
             found = find_image_b64(item)
             if found:
@@ -120,6 +125,223 @@ def build_input(prompt: str, input_images: list[str]) -> Any:
     return [{"role": "user", "content": content}]
 
 
+def model_for_gemini(model: str) -> str:
+    aliases = {
+        "nano_banana_2": "gemini-3.1-flash-image-preview",
+        "nano-banana-2": "gemini-3.1-flash-image-preview",
+    }
+    return aliases.get(model, model)
+
+
+def is_gemini_image_model(model: str) -> bool:
+    normalized = model.lower()
+    return normalized.startswith("gemini-")
+
+
+def is_openai_image_model(model: str) -> bool:
+    normalized = model.lower()
+    return "nano_banana" in normalized or "nano-banana" in normalized
+
+
+def gemini_base_url(base_url: str) -> str:
+    url = base_url.rstrip("/")
+    if url.endswith("/v1"):
+        return url[:-3]
+    if url.endswith("/v1/"):
+        return url[:-4]
+    return url
+
+
+def build_gemini_parts(prompt: str, input_images: list[str]) -> list[dict[str, Any]]:
+    parts: list[dict[str, Any]] = [{"text": prompt}]
+    for image_path in input_images:
+        file_path = Path(image_path)
+        if not file_path.exists():
+            fail(f"Input image not found: {image_path}")
+        mime = mimetypes.guess_type(file_path.name)[0] or "image/png"
+        parts.append({
+            "inlineData": {
+                "mimeType": mime,
+                "data": base64.b64encode(file_path.read_bytes()).decode("ascii"),
+            }
+        })
+    return parts
+
+
+def call_gemini_image(args: argparse.Namespace, base_url: str, api_key: str) -> int:
+    model = model_for_gemini(args.model)
+    url = f"{gemini_base_url(base_url)}/v1beta/models/{model}:generateContent"
+    payload = {
+        "contents": [{"role": "user", "parts": build_gemini_parts(args.prompt, args.input_image)}],
+        "generationConfig": {
+            "responseModalities": ["IMAGE"],
+            "imageConfig": {
+                "aspectRatio": args.aspect_ratio,
+                "imageSize": args.image_size,
+            },
+        },
+    }
+    last_raw = ""
+    for attempt in range(args.retries + 1):
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "SparkCanvas/0.1 nano-banana-image",
+                "version": "2026-05-20",
+                "originator": "sparkcanvas-xmanx",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                status = resp.status
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            if attempt < args.retries and ("rate" in body.lower() or exc.code in {429, 500, 502, 503, 504}):
+                time.sleep(retry_delay(body) + attempt * 0.5)
+                continue
+            fail(f"HTTP {exc.code}\n{body}")
+        except Exception as exc:
+            if attempt < args.retries:
+                time.sleep(1.0 + attempt * 0.5)
+                continue
+            fail(f"Request failed: {exc}")
+        if status < 200 or status >= 300:
+            fail(f"Unexpected HTTP status: {status}\n{raw}")
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            fail(f"Response was not valid JSON:\n{raw[:4000]}")
+        image_b64 = find_image_b64(parsed)
+        if image_b64:
+            out = Path(args.output)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(base64.b64decode(image_b64))
+            print(str(out))
+            return 0
+        last_raw = raw
+        if attempt < args.retries:
+            time.sleep(1.0 + attempt * 0.5)
+            continue
+        break
+    fail("No base64 image found in Gemini response.\n" + last_raw[:4000])
+    return 1
+
+
+def image_generation_size(aspect_ratio: str) -> str:
+    mapping = {
+        "1:1": "1024x1024",
+        "3:4": "1024x1365",
+        "4:5": "1024x1280",
+        "9:16": "1024x1792",
+        "16:9": "1792x1024",
+    }
+    return mapping.get(aspect_ratio, "1024x1024")
+
+
+def first_image_output(value: Any) -> tuple[str, str] | None:
+    if isinstance(value, dict):
+        for key in ("b64_json", "url"):
+            item = value.get(key)
+            if isinstance(item, str) and item:
+                if item.startswith("http://") or item.startswith("https://"):
+                    return ("url", item)
+                return ("b64", item)
+        for item in value.values():
+            found = first_image_output(item)
+            if found:
+                return found
+    if isinstance(value, list):
+        for item in value:
+            found = first_image_output(item)
+            if found:
+                return found
+    return None
+
+
+def write_image_output(output: tuple[str, str], output_path: str) -> None:
+    kind, value = output
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "url":
+        req = urllib.request.Request(value, headers={"User-Agent": "SparkCanvas/0.1 image-download"})
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            out.write_bytes(resp.read())
+    else:
+        out.write_bytes(base64.b64decode(value))
+
+
+def call_openai_image_generation(args: argparse.Namespace, base_url: str, api_key: str) -> int:
+    url = base_url.rstrip("/")
+    if not url.endswith("/images/generations"):
+        url = f"{url}/images/generations"
+    prompt = args.prompt
+    image_inputs = [image_to_data_url(image_path) for image_path in args.input_image]
+    if image_inputs:
+        prompt = "\n".join([args.prompt, "", "Use all attached reference images for brand identity, product shape, character consistency, color system, and composition constraints."])
+    payload = {
+        "model": args.model,
+        "prompt": prompt,
+        "n": 1,
+        "size": image_generation_size(args.aspect_ratio),
+    }
+    if image_inputs:
+        payload["image"] = image_inputs
+    last_raw = ""
+    for attempt in range(args.retries + 1):
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "SparkCanvas/0.1 images-generations",
+                "version": "2026-05-20",
+                "originator": "sparkcanvas-xmanx",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=240) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                status = resp.status
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            if attempt < args.retries and ("rate" in body.lower() or exc.code in {429, 500, 502, 503, 504}):
+                time.sleep(retry_delay(body) + attempt * 0.5)
+                continue
+            fail(f"HTTP {exc.code}\n{body}")
+        except Exception as exc:
+            if attempt < args.retries:
+                time.sleep(1.0 + attempt * 0.5)
+                continue
+            fail(f"Request failed: {exc}")
+        if status < 200 or status >= 300:
+            fail(f"Unexpected HTTP status: {status}\n{raw}")
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            fail(f"Response was not valid JSON:\n{raw[:4000]}")
+        output = first_image_output(parsed)
+        if output:
+            write_image_output(output, args.output)
+            print(str(Path(args.output)))
+            return 0
+        last_raw = raw
+        if attempt < args.retries:
+            time.sleep(1.0 + attempt * 0.5)
+            continue
+        break
+    fail("No image URL/base64 found in /images/generations response.\n" + last_raw[:4000])
+    return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate image through GPT + image_generation tool over /v1/responses.")
     parser.add_argument("--prompt", required=True)
@@ -128,6 +350,9 @@ def main() -> int:
     parser.add_argument("--format", default="png", choices=["png", "jpeg", "webp"])
     parser.add_argument("--input-image", action="append", default=[])
     parser.add_argument("--instructions", default="You are a helpful image generation assistant. Return an image using the image_generation tool.")
+    parser.add_argument("--aspect-ratio", default=env_first("IMAGE_GEN_ASPECT_RATIO") or "1:1")
+    parser.add_argument("--image-size", default=env_first("IMAGE_GEN_IMAGE_SIZE") or "2K")
+    parser.add_argument("--engine", default=env_first("IMAGE_GEN_ENGINE") or "auto", choices=["auto", "responses", "gemini", "images"])
     parser.add_argument("--stream", dest="stream", action="store_true")
     parser.add_argument("--no-stream", dest="stream", action="store_false")
     parser.set_defaults(stream=False)
@@ -136,18 +361,23 @@ def main() -> int:
     args = parser.parse_args()
 
     base_url = (
-        env_first("IMAGE_GEN_BASE_URL", "OTCBOT_BASE_URL", "CPA_BASE_URL", "OPENAI_BASE_URL")
-        or local_auth_value("IMAGE_GEN_BASE_URL", "OTCBOT_BASE_URL", "CPA_BASE_URL", "OPENAI_BASE_URL")
-        or "https://api.otcbot.com/v1"
+        env_first("IMAGE_GEN_BASE_URL", "YIJIARJ_BASE_URL", "OTCBOT_BASE_URL", "CPA_BASE_URL", "OPENAI_BASE_URL")
+        or local_auth_value("IMAGE_GEN_BASE_URL", "YIJIARJ_BASE_URL", "OTCBOT_BASE_URL", "CPA_BASE_URL", "OPENAI_BASE_URL")
+        or "https://api.yijiarj.cn/v1"
     )
     api_key = (
-        env_first("IMAGE_GEN_KEY", "OTCBOT_API_KEY", "CPA_API_KEY", "OPENAI_API_KEY")
-        or local_auth_value("IMAGE_GEN_KEY", "OTCBOT_API_KEY", "CPA_API_KEY", "OPENAI_API_KEY")
+        env_first("IMAGE_GEN_KEY", "YIJIARJ_API_KEY", "OTCBOT_API_KEY", "CPA_API_KEY", "OPENAI_API_KEY")
+        or local_auth_value("IMAGE_GEN_KEY", "YIJIARJ_API_KEY", "OTCBOT_API_KEY", "CPA_API_KEY", "OPENAI_API_KEY")
     )
     if not base_url:
         fail("Missing IMAGE_GEN_BASE_URL / OTCBOT_BASE_URL / CPA_BASE_URL / OPENAI_BASE_URL")
     if not api_key:
         fail("Missing IMAGE_GEN_KEY / OTCBOT_API_KEY / CPA_API_KEY / OPENAI_API_KEY")
+
+    if args.engine == "images" or (args.engine == "auto" and is_openai_image_model(args.model)):
+        return call_openai_image_generation(args, base_url, api_key)
+    if args.engine == "gemini" or (args.engine == "auto" and is_gemini_image_model(args.model)):
+        return call_gemini_image(args, base_url, api_key)
 
     url = base_url.rstrip("/")
     if not url.endswith("/responses"):

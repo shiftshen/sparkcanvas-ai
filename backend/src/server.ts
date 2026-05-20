@@ -169,7 +169,8 @@ const dataFile = process.env.SPARKCANVAS_DATA_FILE ?? path.join(dataDir, "sparkc
 const projectRoot = path.resolve(__dirname, "../..");
 const frontendPublicDir = path.join(projectRoot, "frontend", "public");
 const generatedDir = path.join(frontendPublicDir, "generated");
-const defaultImageGenBaseUrl = "https://api.otcbot.com/v1";
+const defaultAiBaseUrl = "https://api.yijiarj.cn/v1";
+const defaultImageGenBaseUrl = defaultAiBaseUrl;
 
 const templates = [
   { id: "tpl_amazon", title: "Amazon 主图", category: "电商", cost: 8, ratio: "1:1", intent: "white background product hero with logo-safe margin" },
@@ -180,8 +181,11 @@ const templates = [
 ];
 
 const models = [
-  { id: "cliproxyapi-gpt-5-4", provider: "cliproxyapi", model: "gpt-5.4", name: "cliproxyapi · gpt-5.4", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
-  { id: "cliproxyapi-gpt-5", provider: "cliproxyapi", model: "gpt-5", name: "cliproxyapi · gpt-5", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" }
+  { id: "yijiarj-nano-banana-2", provider: "yijiarj", model: "nano_banana_2", name: "yijiarj · nano_banana_2", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认图片模型，经本地 skill 调用 yijiarj Gemini native image API，支持多图参考" },
+  { id: "cliproxyapi-gpt-5-4", provider: "cliproxyapi", model: "gpt-5.4", name: "cliproxyapi · gpt-5.4", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
+  { id: "cliproxyapi-gpt-5", provider: "cliproxyapi", model: "gpt-5", name: "cliproxyapi · gpt-5", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
+  { id: "yijiarj-grok-video-720p", provider: "yijiarj", model: "grok-imagine-1.0-video-super-720p", name: "yijiarj · grok video 720p", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "当前可用视频模型，经 yijiarj /v1/videos 创建并轮询任务" },
+  { id: "yijiarj-veo-3-1-fast", provider: "yijiarj", model: "veo_3_1-fast", name: "yijiarj · veo_3_1-fast", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "候选视频模型，当前账号通道可能不可用" }
 ];
 
 const assetRoleSchema = z.object({
@@ -362,10 +366,6 @@ function createSeedDb(): Db {
   };
 
   db = seed;
-  seed.frames = [
-    createFrame("为 xmanx.com 生成黑橙首发商品主视觉，自动引用 Logo、IP、商品和模特素材", "magic", 20, 40, "success", undefined, undefined, "cliproxyapi-gpt-5-4", { ratio: "16:9", count: 3, quality: "hd" }, "brand_xmanx", true)
-  ];
-
   return seed;
 }
 
@@ -652,12 +652,6 @@ async function migrateDb() {
     && !frame.prompt.includes("夏季连衣裙")
   ));
   if (db.frames.length !== beforeFrameCount) changed = true;
-  if (!db.frames.length) {
-    db.frames = [
-      createFrame("为 xmanx.com 生成黑橙首发商品主视觉，自动引用 Logo、IP、商品和模特素材", "magic", 20, 40, "success", undefined, undefined, "cliproxyapi-gpt-5-4", { ratio: "16:9", count: 3, quality: "hd" }, "brand_xmanx", true)
-    ];
-    changed = true;
-  }
   const frameIds = new Set(db.frames.map((frame) => frame.id));
   const beforeTaskCount = db.tasks.length;
   db.tasks = db.tasks.filter((task) => frameIds.has(task.frameId));
@@ -958,15 +952,17 @@ function imageGenerationConfig(modelName?: string) {
       baseUrlSource: "disabled"
     };
   }
-  const localBaseUrl = localAuthWithSource("IMAGE_GEN_BASE_URL", "OTCBOT_BASE_URL", "CPA_BASE_URL", "OPENAI_BASE_URL");
-  const localApiKey = localAuthWithSource("IMAGE_GEN_KEY", "OTCBOT_API_KEY", "CPA_API_KEY", "OPENAI_API_KEY");
+  const localBaseUrl = localAuthWithSource("IMAGE_GEN_BASE_URL", "YIJIARJ_BASE_URL", "OTCBOT_BASE_URL", "CPA_BASE_URL", "OPENAI_BASE_URL");
+  const localApiKey = localAuthWithSource("IMAGE_GEN_KEY", "YIJIARJ_API_KEY", "OTCBOT_API_KEY", "CPA_API_KEY", "OPENAI_API_KEY");
   const baseUrl = process.env.IMAGE_GEN_BASE_URL
+    || process.env.YIJIARJ_BASE_URL
     || process.env.OTCBOT_BASE_URL
     || process.env.CPA_BASE_URL
     || process.env.OPENAI_BASE_URL
     || localBaseUrl.value
     || defaultImageGenBaseUrl;
   const apiKey = process.env.IMAGE_GEN_KEY
+    || process.env.YIJIARJ_API_KEY
     || process.env.OTCBOT_API_KEY
     || process.env.CPA_API_KEY
     || process.env.OPENAI_API_KEY
@@ -974,22 +970,195 @@ function imageGenerationConfig(modelName?: string) {
   return {
     baseUrl,
     apiKey,
-    model: modelName || process.env.IMAGE_GEN_MODEL || localAuthValue("IMAGE_GEN_MODEL") || "gpt-5.4",
+    model: modelName || process.env.IMAGE_GEN_MODEL || localAuthValue("IMAGE_GEN_MODEL") || "nano_banana_2",
     keySource: process.env.IMAGE_GEN_KEY ? "IMAGE_GEN_KEY"
-      : process.env.OTCBOT_API_KEY ? "OTCBOT_API_KEY"
-        : process.env.CPA_API_KEY ? "CPA_API_KEY"
-          : process.env.OPENAI_API_KEY ? "OPENAI_API_KEY"
-            : localApiKey.source,
+      : process.env.YIJIARJ_API_KEY ? "YIJIARJ_API_KEY"
+        : process.env.OTCBOT_API_KEY ? "OTCBOT_API_KEY"
+          : process.env.CPA_API_KEY ? "CPA_API_KEY"
+            : process.env.OPENAI_API_KEY ? "OPENAI_API_KEY"
+              : localApiKey.source,
     baseUrlSource: process.env.IMAGE_GEN_BASE_URL ? "IMAGE_GEN_BASE_URL"
-      : process.env.OTCBOT_BASE_URL ? "OTCBOT_BASE_URL"
-        : process.env.CPA_BASE_URL ? "CPA_BASE_URL"
-          : process.env.OPENAI_BASE_URL ? "OPENAI_BASE_URL"
-            : localBaseUrl.value ? localBaseUrl.source : "default"
+      : process.env.YIJIARJ_BASE_URL ? "YIJIARJ_BASE_URL"
+        : process.env.OTCBOT_BASE_URL ? "OTCBOT_BASE_URL"
+          : process.env.CPA_BASE_URL ? "CPA_BASE_URL"
+            : process.env.OPENAI_BASE_URL ? "OPENAI_BASE_URL"
+              : localBaseUrl.value ? localBaseUrl.source : "default"
   };
+}
+
+function serviceConfig(kind: "text" | "video") {
+  if (process.env.SPARKCANVAS_DISABLE_IMAGE_GEN === "1") {
+    return {
+      baseUrl: defaultAiBaseUrl,
+      apiKey: "",
+      model: kind === "text" ? "gpt-5.4" : "grok-imagine-1.0-video-super-720p"
+    };
+  }
+  const prefix = kind === "text" ? "TEXT_GEN" : "VIDEO_GEN";
+  const modelFallback = kind === "text" ? "gpt-5.4" : "grok-imagine-1.0-video-super-720p";
+  const baseUrl = process.env[`${prefix}_BASE_URL`]
+    || localAuthValue(`${prefix}_BASE_URL`)
+    || process.env.YIJIARJ_BASE_URL
+    || localAuthValue("YIJIARJ_BASE_URL")
+    || process.env.OPENAI_BASE_URL
+    || localAuthValue("OPENAI_BASE_URL")
+    || defaultAiBaseUrl;
+  const apiKey = process.env[`${prefix}_KEY`]
+    || localAuthValue(`${prefix}_KEY`)
+    || process.env.YIJIARJ_API_KEY
+    || localAuthValue("YIJIARJ_API_KEY")
+    || process.env.OPENAI_API_KEY
+    || localAuthValue("OPENAI_API_KEY");
+  const model = process.env[`${prefix}_MODEL`] || localAuthValue(`${prefix}_MODEL`) || modelFallback;
+  return { baseUrl: baseUrl.replace(/\/$/, ""), apiKey, model };
+}
+
+function requestHeaders(apiKey: string) {
+  return {
+    "Authorization": `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+    "User-Agent": "SparkCanvas/0.1 yijiarj-client",
+    "version": "2026-05-20",
+    "originator": "sparkcanvas-xmanx"
+  };
+}
+
+async function postJson(url: string, apiKey: string, body: unknown) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: requestHeaders(apiKey),
+    body: JSON.stringify(body)
+  });
+  const text = await response.text();
+  let data: unknown = text;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = text;
+  }
+  if (!response.ok) {
+    const message = typeof data === "string" ? data : JSON.stringify(data);
+    throw new Error(`HTTP ${response.status}: ${message.slice(0, 600)}`);
+  }
+  return data;
+}
+
+async function getJson(url: string, apiKey: string) {
+  const response = await fetch(url, { headers: requestHeaders(apiKey) });
+  const text = await response.text();
+  let data: unknown = text;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = text;
+  }
+  if (!response.ok) {
+    const message = typeof data === "string" ? data : JSON.stringify(data);
+    throw new Error(`HTTP ${response.status}: ${message.slice(0, 600)}`);
+  }
+  return data;
+}
+
+function readPath(value: unknown, pathExpression: string) {
+  const parts = pathExpression.split(".");
+  let current = value;
+  for (const part of parts) {
+    if (current == null) return undefined;
+    if (Array.isArray(current)) {
+      const index = Number(part);
+      current = Number.isInteger(index) ? current[index] : undefined;
+    } else if (typeof current === "object") {
+      current = (current as Record<string, unknown>)[part];
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+}
+
+async function runTextGeneration(prompt: string, modelName?: string, system = "你是品牌内容工作流助手，输出可直接进入画布节点的中文内容。") {
+  const config = serviceConfig("text");
+  if (!config.apiKey) return undefined;
+  const model = modelName || config.model;
+  const data = await postJson(`${config.baseUrl}/chat/completions`, config.apiKey, {
+    model,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: prompt }
+    ],
+    temperature: 0.7,
+    stream: false
+  });
+  const content = readPath(data, "choices.0.message.content");
+  if (typeof content === "string" && content.trim()) return content.trim();
+  throw new Error("文本模型未返回 choices[0].message.content");
+}
+
+function videoIdFromResponse(data: unknown) {
+  for (const pathExpression of ["id", "video_id", "data.id", "data.video_id", "task_id", "data.task_id"]) {
+    const value = readPath(data, pathExpression);
+    if (typeof value === "string" && value) return value;
+  }
+  return "";
+}
+
+function videoUrlFromResponse(data: unknown) {
+  for (const pathExpression of ["url", "video_url", "output", "data.url", "data.video_url", "data.output", "data.video.url", "result.video_url", "result.url"]) {
+    const value = readPath(data, pathExpression);
+    if (typeof value === "string" && /^https?:\/\//.test(value)) return value;
+    if (Array.isArray(value)) {
+      const first = value.find((item) => typeof item === "string" && /^https?:\/\//.test(item));
+      if (typeof first === "string") return first;
+    }
+  }
+  return "";
+}
+
+function videoStatusFromResponse(data: unknown) {
+  for (const pathExpression of ["status", "data.status", "state", "data.state", "task_status"]) {
+    const value = readPath(data, pathExpression);
+    if (typeof value === "string") return value.toLowerCase();
+  }
+  return "";
+}
+
+async function runVideoGeneration(prompt: string, modelName?: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean }) {
+  const config = serviceConfig("video");
+  if (!config.apiKey) return undefined;
+  const model = modelName || config.model;
+  const createPayload = {
+    model,
+    prompt,
+    aspect_ratio: settings?.ratio?.split("·")[0]?.trim() || "16:9",
+    duration: Number.parseInt(settings?.duration || "5", 10) || 5,
+    with_audio: settings?.sound !== false,
+    mode: settings?.mode,
+    translate: Boolean(settings?.translate)
+  };
+  const created = await postJson(`${config.baseUrl}/videos`, config.apiKey, createPayload);
+  const immediateUrl = videoUrlFromResponse(created);
+  if (immediateUrl) return { videoId: videoIdFromResponse(created), videoUrl: immediateUrl, raw: created };
+  const videoId = videoIdFromResponse(created);
+  if (!videoId) throw new Error(`视频模型未返回 video id: ${JSON.stringify(created).slice(0, 600)}`);
+
+  let last: unknown = created;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, attempt < 5 ? 2000 : 5000));
+    last = await getJson(`${config.baseUrl}/videos/${videoId}`, config.apiKey);
+    const url = videoUrlFromResponse(last);
+    if (url) return { videoId, videoUrl: url, raw: last };
+    const status = videoStatusFromResponse(last);
+    if (["failed", "error", "cancelled", "canceled"].includes(status)) {
+      throw new Error(`视频生成失败: ${JSON.stringify(last).slice(0, 600)}`);
+    }
+  }
+  return { videoId, videoUrl: "", raw: last };
 }
 
 function aiStatus() {
   const imageConfig = imageGenerationConfig();
+  const textConfig = serviceConfig("text");
+  const videoConfig = serviceConfig("video");
   return {
     imageGeneration: {
       configured: Boolean(imageConfig.apiKey && imageConfig.baseUrl),
@@ -998,8 +1167,20 @@ function aiStatus() {
       baseUrlSource: imageConfig.baseUrlSource,
       model: imageConfig.model,
       keySource: imageConfig.apiKey ? imageConfig.keySource : "missing",
-      provider: "cliproxyapi",
+      provider: imageConfig.model === "nano_banana_2" ? "yijiarj" : "cliproxyapi",
       skill: "scripts/generate_image.py"
+    },
+    textGeneration: {
+      configured: Boolean(textConfig.apiKey && textConfig.baseUrl),
+      baseUrl: textConfig.baseUrl,
+      model: textConfig.model,
+      provider: "yijiarj"
+    },
+    videoGeneration: {
+      configured: Boolean(videoConfig.apiKey && videoConfig.baseUrl),
+      baseUrl: videoConfig.baseUrl,
+      model: videoConfig.model,
+      provider: "yijiarj"
     }
   };
 }
@@ -1049,7 +1230,12 @@ async function imageSkillDiagnostics() {
   };
 }
 
-async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string) {
+function ratioForImageSkill(ratio?: string) {
+  const value = ratio?.split("·")[0]?.trim();
+  return value && /^\d+:\d+$/.test(value) ? value : "1:1";
+}
+
+async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string, settings?: Partial<GenerationSettings>) {
   const imageConfig = imageGenerationConfig(modelName);
   if (!imageConfig.apiKey || !imageConfig.baseUrl) return undefined;
 
@@ -1066,6 +1252,10 @@ async function runImageGenerationSkill(prompt: string, references: ReferenceItem
     "png",
     "--model",
     imageConfig.model,
+    "--aspect-ratio",
+    ratioForImageSkill(settings?.ratio),
+    "--image-size",
+    settings?.quality === "ultra" ? "4K" : "2K",
     "--retries",
     "4",
     "--session-id",
@@ -1118,7 +1308,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
     if (output.kind !== "image" || output.imageUrl) continue;
     try {
       const model = models.find((item) => item.id === frame.modelId) ?? models[0];
-      const generated = await runImageGenerationSkill(prompt, refs, `xmanx-${frame.id}-${index + 1}`, model.model);
+      const generated = await runImageGenerationSkill(prompt, refs, `xmanx-${frame.id}-${index + 1}`, model.model, frame.settings);
       output.imageUrl = generated ?? fallbackImages[index % fallbackImages.length];
       const outputNode = frame.workflowNodes.filter((node) => node.type === "output")[index];
       if (outputNode && output.imageUrl) {
@@ -1227,6 +1417,38 @@ function createFrame(
       gradient: gradients[index % gradients.length],
       copy: `${brand.logoText} / ${brand.market.split(" ")[0] ?? "brand"}`
     })),
+    createdAt: now(),
+    updatedAt: now()
+  };
+}
+
+function createEmptyFrame(requestedBrandId?: string): CanvasFrame {
+  const brand = findBrand(requestedBrandId);
+  const model = models[0];
+  const settings = defaultSettings("", { ratio: "1:1", count: 1, quality: "hd", brandInject: true });
+  return {
+    id: nanoid(8),
+    title: "未命名画布",
+    prompt: "",
+    mode: "magic",
+    status: "ready",
+    x: 120,
+    y: 120,
+    w: 980,
+    h: 360,
+    cost: 0,
+    progress: 0,
+    modelId: model.id,
+    modelName: model.name,
+    settings,
+    brandId: brand.id,
+    brandName: brand.name,
+    brandInjected: true,
+    brandContext: "",
+    finalPrompt: "",
+    steps: [],
+    workflowNodes: [],
+    outputs: [],
     createdAt: now(),
     updatedAt: now()
   };
@@ -1523,6 +1745,16 @@ app.get("/canvas/frames", (_req, res) => {
   res.json(db.frames);
 });
 
+app.post("/canvas/frames", async (req, res) => {
+  const input = z.object({
+    brandId: z.string().optional()
+  }).parse(req.body);
+  const frame = createEmptyFrame(input.brandId);
+  db.frames.unshift(frame);
+  await persistDb();
+  res.status(201).json(frame);
+});
+
 app.patch("/canvas/frames/:id", async (req, res) => {
   const frame = db.frames.find((item) => item.id === req.params.id);
   if (!frame) return res.status(404).json({ message: "Frame not found" });
@@ -1634,7 +1866,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
   let generated = false;
 
   try {
-    const generatedImageUrl = await runImageGenerationSkill(prompt, refs, outputName, selectedModel.model);
+    const generatedImageUrl = await runImageGenerationSkill(prompt, refs, outputName, selectedModel.model, frame.settings);
     if (generatedImageUrl) {
       imageUrl = generatedImageUrl;
       generated = true;
@@ -1700,7 +1932,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
     ? `English prompt: ${source}. Keep XMANX black-orange ecommerce visual language, concise commercial composition.`
     : source;
   const storyboardRefs = buildReferenceItems(brand, 4);
-  const generatedText = input.mode === "table"
+  const fallbackText = input.mode === "table"
     ? [
         "| 镜号 | 参考图 | 时长 | 画面描述 | 角色 | 角色描述 | 景别 | 角色动作 | 情绪 | 光影氛围 | 音效 | 分镜提示词 | 视频运动提示词 |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -1714,6 +1946,22 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
         `品牌约束: ${brand.name}; ${brand.visualStyle}`,
         "输出要求: 结构清晰，可直接作为下游图片、脚本或视频节点提示词。"
       ].join("\n");
+  let generatedText = fallbackText;
+  try {
+    const remote = await runTextGeneration(
+      [
+        `任务: ${input.mode === "table" ? "生成标准 Markdown 分镜故事版表格，表头必须包含 镜号、参考图、时长、画面描述、音效、分镜提示词、视频运动提示词。" : "生成可直接进入画布下游节点的文本故事或提示词。"}`,
+        `用户输入: ${translated}`,
+        `品牌: ${brand.name}`,
+        `品牌风格: ${brand.visualStyle}`,
+        `品牌语气: ${brand.tone}`
+      ].join("\n"),
+      input.model
+    );
+    if (remote) generatedText = remote;
+  } catch (error) {
+    generatedText = `${fallbackText}\n\n远程文本模型降级: ${error instanceof Error ? error.message.slice(0, 160) : "unavailable"}`;
+  }
 
   node.body = generatedText;
   node.title = node.title || "Text";
@@ -1723,7 +1971,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
   }
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame, node, text: generatedText, model: input.model ?? "GVLM 3.1" });
+  res.json({ frame, node, text: generatedText, model: input.model ?? serviceConfig("text").model });
 });
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) => {
@@ -1740,7 +1988,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
 
   const brand = findBrand(frame.brandId);
   const source = input.prompt.trim();
-  const script = [
+  const fallbackScript = [
     `分镜脚本: ${node.title || "Script"}`,
     "",
     `剧情目标: ${source}`,
@@ -1766,13 +2014,29 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
     "",
     input.translate ? "提示: 已按英文视频模型可读结构整理。" : "提示: 可直接连接视频节点继续生成。"
   ].join("\n");
+  let script = fallbackScript;
+  try {
+    const remote = await runTextGeneration(
+      [
+        "任务: 生成可执行的视频分镜脚本，分镜清晰，包含镜头、时长、画面、运动、音效、品牌收束。",
+        `剧情目标: ${source}`,
+        `品牌: ${brand.name}`,
+        `品牌风格: ${brand.visualStyle}`,
+        input.translate ? "同时整理为英文视频模型易读结构。" : ""
+      ].filter(Boolean).join("\n"),
+      input.model
+    );
+    if (remote) script = remote;
+  } catch (error) {
+    script = `${fallbackScript}\n\n远程文本模型降级: ${error instanceof Error ? error.message.slice(0, 160) : "unavailable"}`;
+  }
 
   node.type = "script";
   node.title = node.title || "Script";
   node.body = script;
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame, node, script, model: input.model ?? "GVLM 3.1" });
+  res.json({ frame, node, script, model: input.model ?? serviceConfig("text").model });
 });
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => {
@@ -1796,16 +2060,35 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   const brand = findBrand(frame.brandId);
   const settings = input.settings ?? {};
   const prompt = input.prompt.trim();
+  let generationLines: string[] = [];
+  try {
+    const result = await runVideoGeneration(
+      [
+        prompt,
+        `品牌约束: ${brand.name}; ${brand.visualStyle}`,
+        "输出要求: 商业广告视频，可用于后续合成节点。"
+      ].join("\n"),
+      input.model || serviceConfig("video").model,
+      settings
+    );
+    if (result?.videoUrl) {
+      generationLines = [`视频ID: ${result.videoId || "completed"}`, `视频URL: ${result.videoUrl}`, "执行状态: 已由 yijiarj 视频模型真实生成。"];
+    } else if (result?.videoId) {
+      generationLines = [`视频ID: ${result.videoId}`, "执行状态: 视频任务已创建但仍在生成，可用 /v1/videos/{video_id} 查询。"];
+    }
+  } catch (error) {
+    generationLines = [`执行状态: 视频生成请求失败，${error instanceof Error ? error.message.slice(0, 180) : "unavailable"}`];
+  }
   const videoPlan = [
     prompt,
     "",
     `视频类型: ${settings.mode ?? "文生视频"}`,
-    `模型: ${input.model ?? "Seedance 2.0 VIP"}`,
+    `模型: ${input.model ?? serviceConfig("video").model}`,
     `规格: ${settings.ratio ?? "16:9 · 720P · 5s"}`,
     `声音: ${settings.sound === false ? "关闭" : "开启"}`,
     `翻译: ${settings.translate ? "开启" : "关闭"}`,
     `品牌约束: ${brand.name}; ${brand.visualStyle}`,
-    "执行状态: 已保存视频生成配置，等待接入真实视频生成 skill。"
+    ...(generationLines.length ? generationLines : ["执行状态: 已保存视频生成配置，未配置视频 API Key。"])
   ].join("\n");
 
   node.type = "video";
@@ -1813,7 +2096,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   node.body = videoPlan;
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame, node, videoPlan, model: input.model ?? "Seedance 2.0 VIP" });
+  res.json({ frame, node, videoPlan, model: input.model ?? serviceConfig("video").model });
 });
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => {

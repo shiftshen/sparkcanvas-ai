@@ -205,6 +205,8 @@ type AiStatus = {
     provider: string;
     skill: string;
   };
+  textGeneration?: { configured: boolean; baseUrl: string; model: string; provider: string };
+  videoGeneration?: { configured: boolean; baseUrl: string; model: string; provider: string };
 };
 type AiDiagnostics = AiStatus & {
   runtime: {
@@ -290,14 +292,18 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-function normalizeWorkflowNodes(nodes: WorkflowNode[] = []): WorkflowNode[] {
-  const sourceNodes = nodes.filter((node) => node.id !== "model");
-  const defaults: WorkflowNode[] = [
+function defaultWorkflowNodes(): WorkflowNode[] {
+  return [
     { id: "input-image", type: "image", title: "Reference", body: "", preview: "#f97316", refs: [], x: 40, y: 210, w: 230, h: 238 },
     { id: "brand", type: "brand", title: "Brand", body: "", parentId: "input-image", preview: "#111827", x: 340, y: 210, w: 230, h: 238 },
     { id: "prompt", type: "prompt", title: "Prompt", body: "", parentId: "brand", preview: "#8b5cf6", x: 640, y: 210, w: 230, h: 238 },
     { id: "output", type: "output", title: "Output", body: "", parentId: "prompt", preview: "#22c55e", x: 960, y: 210, w: 260, h: 238 }
   ];
+}
+
+function normalizeWorkflowNodes(nodes: WorkflowNode[] = [], withDefaults = true): WorkflowNode[] {
+  const sourceNodes = nodes.filter((node) => node.id !== "model");
+  const defaults = withDefaults ? defaultWorkflowNodes() : [];
   const merged = defaults.map((node) => {
     const next = { ...node, ...(sourceNodes.find((item) => item.id === node.id) ?? {}) };
     return next.id === "output" && next.parentId === "model" ? { ...next, parentId: "prompt" } : next;
@@ -314,8 +320,8 @@ function normalizeWorkflowNodes(nodes: WorkflowNode[] = []): WorkflowNode[] {
   return [...merged, ...extras];
 }
 
-function displayNodes(nodes: WorkflowNode[]) {
-  const normalized = normalizeWorkflowNodes(nodes);
+function displayNodes(nodes: WorkflowNode[], withDefaults = true) {
+  const normalized = normalizeWorkflowNodes(nodes, withDefaults);
   const positioned = new Map<string, WorkflowNode>();
   nodeOrder.forEach((id, index) => {
     const node = normalized.find((item) => item.id === id);
@@ -683,7 +689,7 @@ function App() {
   const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics | null>(null);
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [panel, setPanel] = useState<PanelKey>(null);
-  const [prompt, setPrompt] = useState("为 xmanx.com 生成一张真实黑橙首发运动鞋首页主视觉，使用品牌 Logo、IP、商品和模特参考图");
+  const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [viewport, setViewport] = useState<Viewport>({ x: 76, y: 64, scale: 0.72 });
@@ -692,7 +698,7 @@ function App() {
   const [assetSelection, setAssetSelection] = useState<string[]>([]);
 
   const activeBrand = brands.find((brand) => brand.active) ?? brands[0];
-  const activeFrame = frames.find((frame) => frame.id === selectedFrameId) ?? frames[0];
+  const activeFrame = selectedFrameId ? frames.find((frame) => frame.id === selectedFrameId) : undefined;
   const model = models.find((item) => item.id === activeFrame?.modelId) ?? models[0];
   const activeBrandAssets = activeBrand ? assets.filter((asset) => asset.brandId === activeBrand.id) : [];
 
@@ -706,7 +712,7 @@ function App() {
     setFrames(workspace.frames);
     setTasks(workspace.tasks);
     setAiStatus(workspace.ai ?? null);
-    setSelectedFrameId((current) => current ?? workspace.frames[0]?.id ?? null);
+    setSelectedFrameId((current) => current && workspace.frames.some((frame) => frame.id === current) ? current : null);
     setLoading(false);
   }
 
@@ -742,7 +748,7 @@ function App() {
     try {
       const result = await api.get<AiDiagnostics>("/ai/diagnostics");
       setAiDiagnostics(result);
-      setAiStatus({ imageGeneration: result.imageGeneration });
+      setAiStatus(result);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Skill 检查失败");
     }
@@ -779,8 +785,11 @@ function App() {
   }
 
   async function createProject() {
-    const nextPrompt = prompt.trim() || "新建 XMANX 品牌图片生成流程";
-    await generate(nextPrompt, undefined, false);
+    if (!activeBrand) return;
+    const frame = await api.post<Frame>("/canvas/frames", { brandId: activeBrand.id });
+    setFrames((current) => [frame, ...current]);
+    setSelectedFrameId(frame.id);
+    setEditingNodeId(null);
     setPanel("projects");
   }
 
@@ -932,7 +941,7 @@ function App() {
           <button type="button" onClick={() => void generate()} disabled={!prompt.trim()}><Send />生成</button>
         </div>
         <div className="rh-top-meta">
-          <span>{model?.name ?? "cliproxyapi · gpt-5.4"}</span>
+          <span>{model?.name ?? "yijiarj · nano_banana_2"}</span>
           <em className={aiStatus?.imageGeneration.configured ? "ready" : "missing"}>
             {aiStatus?.imageGeneration.configured ? `Skill · ${aiStatus.imageGeneration.model}` : "Skill key missing"}
           </em>
@@ -1335,7 +1344,7 @@ function Canvas(props: {
   onGenerateAudioNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean }) => void | Promise<void>;
 }) {
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
-  const [nodes, setNodes] = useState<WorkflowNode[]>(() => normalizeWorkflowNodes(props.frame?.workflowNodes));
+  const [nodes, setNodes] = useState<WorkflowNode[]>(() => props.frame ? normalizeWorkflowNodes(props.frame.workflowNodes) : []);
   const [openEdge, setOpenEdge] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [nodeGeneration, setNodeGeneration] = useState<{ nodeId: string; progress: number } | null>(null);
@@ -1344,7 +1353,7 @@ function Canvas(props: {
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const dragRef = useRef<{ id: string; x: number; y: number; cx: number; cy: number } | null>(null);
   const edgeDragRef = useRef<{ id: string; offset: number; cy: number } | null>(null);
-  const visibleNodes = useMemo(() => displayNodes(nodes), [nodes]);
+  const visibleNodes = useMemo(() => displayNodes(nodes, Boolean(props.frame)), [nodes, props.frame]);
   const activeSelectedNode = visibleNodes.find((node) => node.id === selectedNode || node.id === props.editingNodeId);
 
   const lastFrameIdRef = useRef<string | undefined>(props.frame?.id);
@@ -1352,11 +1361,11 @@ function Canvas(props: {
     const nextFrameId = props.frame?.id;
     if (nextFrameId !== lastFrameIdRef.current) {
       lastFrameIdRef.current = nextFrameId;
-      setNodes(normalizeWorkflowNodes(props.frame?.workflowNodes));
+      setNodes(nextFrameId ? normalizeWorkflowNodes(props.frame?.workflowNodes) : []);
       return;
     }
     if (props.editingNodeId) return;
-    setNodes(normalizeWorkflowNodes(props.frame?.workflowNodes));
+    setNodes(nextFrameId ? normalizeWorkflowNodes(props.frame?.workflowNodes) : []);
   }, [props.frame?.id, props.frame?.workflowNodes, props.editingNodeId]);
 
   function commit(nextNodes = nodes) {
@@ -1364,6 +1373,7 @@ function Canvas(props: {
   }
 
   function addCanvasNode(type: WorkflowNode["type"], x: number, y: number, refs?: ReferenceItem[]) {
+    if (!props.frame) return undefined;
     const title = type === "reference" ? "Image" : type === "process" ? "Text" : type === "script" ? "Script" : type === "video" ? "Video" : type === "compose" ? "视频合成" : type === "audio" ? "Audio" : "Output";
     const node: WorkflowNode = {
       id: `node_${Date.now().toString(36)}`,
@@ -1378,7 +1388,7 @@ function Canvas(props: {
       w: type === "process" || type === "script" ? 360 : type === "compose" ? 300 : type === "output" || type === "video" ? 260 : 230,
       h: type === "process" || type === "script" ? 260 : type === "compose" ? 260 : 238
     };
-    const next = [...normalizeWorkflowNodes(nodes), node];
+    const next = [...normalizeWorkflowNodes(nodes, Boolean(props.frame)), node];
     setNodes(next);
     setSelectedNode(node.id);
     props.setEditingNodeId(node.id);
@@ -1402,6 +1412,7 @@ function Canvas(props: {
   }
 
   function addNode(anchorId: string, type: WorkflowNode["type"]) {
+    if (!props.frame) return;
     const anchor = visibleNodes.find((node) => node.id === anchorId);
     const title = type === "reference" ? "Image" : type === "process" ? "Text" : type === "script" ? "Script" : type === "video" ? "Video" : type === "compose" ? "视频合成" : type === "audio" ? "Audio" : "Output";
     const defaultBody = type === "compose" ? "空空如也，请连接视频节点后操作" : "";
@@ -1418,7 +1429,7 @@ function Canvas(props: {
       w: type === "process" || type === "script" ? 360 : type === "compose" ? 300 : type === "output" || type === "video" ? 260 : 230,
       h: type === "process" || type === "script" ? 260 : type === "compose" ? 260 : 238
     };
-    const current = normalizeWorkflowNodes(nodes);
+    const current = normalizeWorkflowNodes(nodes, Boolean(props.frame));
     const next = [...current, node];
     setNodes(next);
     setSelectedNode(node.id);
@@ -1516,7 +1527,7 @@ function Canvas(props: {
   }
 
   function organizeCanvas() {
-    const normalized = normalizeWorkflowNodes(nodes);
+    const normalized = normalizeWorkflowNodes(nodes, Boolean(props.frame));
     const next = normalized.map((node, index) => {
       const depth = node.id === "input-image" ? 0 : node.id === "brand" ? 1 : node.id === "prompt" ? 2 : node.id === "output" ? 3 : Math.max(1, normalized.findIndex((item) => item.id === node.parentId) + 1);
       const siblings = normalized.filter((item) => (item.parentId ?? "") === (node.parentId ?? "") && !coreNodeIds.includes(item.id));
@@ -1638,7 +1649,7 @@ function Canvas(props: {
         {visibleNodes.map((node) => (
           <NodeCard
             key={node.id}
-            node={node.type === "model" ? { ...node, body: props.model?.name ?? "cliproxyapi · gpt-5.4" } : node}
+            node={node.type === "model" ? { ...node, body: props.model?.name ?? "yijiarj · nano_banana_2" } : node}
             output={node.type === "output" ? props.frame?.outputs[outputNodes.findIndex((item) => item.id === node.id)] ?? props.frame?.outputs[0] : undefined}
             refs={node.id === "input-image" ? refs : node.refs ?? []}
             selected={selectedNode === node.id || props.editingNodeId === node.id}
@@ -1784,7 +1795,7 @@ function NodeCard(props: {
           </div>
         </div>
       ) : props.node.type === "model" ? (
-        <div className="rh-node-body compact"><Settings2 /><strong>{props.node.body || "cliproxyapi · gpt-5.4"}</strong></div>
+        <div className="rh-node-body compact"><Settings2 /><strong>{props.node.body || "yijiarj · nano_banana_2"}</strong></div>
       ) : props.node.type === "process" ? (
         <button type="button" className={`rh-text-tile ${parseStoryboardTable(props.node.body, props.refs).rows.length ? "storyboard" : ""}`} onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
           {parseStoryboardTable(props.node.body, props.refs).rows.length ? (
@@ -1901,23 +1912,23 @@ function NodeEditor({
   const [generationProgress, setGenerationProgress] = useState(0);
   const [generationMessage, setGenerationMessage] = useState("");
   const imageModels = models.filter((item) => item.type === "image");
-  const [imageModelId, setImageModelId] = useState(imageModels[0]?.id ?? "cliproxyapi-gpt-5-4");
+  const [imageModelId, setImageModelId] = useState(imageModels[0]?.id ?? "yijiarj-nano-banana-2");
   const [imageRatio, setImageRatio] = useState(frameSettings.ratio);
   const [imageQuality, setImageQuality] = useState<GenerationSettings["quality"]>(frameSettings.quality);
   const [imageCount, setImageCount] = useState(frameSettings.count);
   const [imageStrength, setImageStrength] = useState(frameSettings.strength);
-  const [textModel, setTextModel] = useState("GVLM 3.1");
+  const [textModel, setTextModel] = useState("gpt-5.4");
   const [translateText, setTranslateText] = useState(false);
   const [textMode, setTextMode] = useState("story");
-  const [scriptModel, setScriptModel] = useState("GVLM 3.1");
+  const [scriptModel, setScriptModel] = useState("gpt-5.4");
   const [translateScript, setTranslateScript] = useState(false);
   const [videoMode, setVideoMode] = useState("文生视频");
-  const [videoModel, setVideoModel] = useState("Seedance 2.0 VIP");
+  const [videoModel, setVideoModel] = useState("grok-imagine-1.0-video-super-720p");
   const [videoRatio, setVideoRatio] = useState("16:9 · 720P · 5s");
   const [videoSound, setVideoSound] = useState(true);
   const [translateVideo, setTranslateVideo] = useState(false);
   const [audioMode, setAudioMode] = useState("配乐");
-  const [audioModel, setAudioModel] = useState("cliproxyapi · gpt-5.4");
+  const [audioModel, setAudioModel] = useState("gpt-5.4");
   const [audioDuration, setAudioDuration] = useState("15s");
   const [audioScene, setAudioScene] = useState("广告短视频");
   const [audioLoop, setAudioLoop] = useState(false);
@@ -2200,8 +2211,8 @@ function NodeEditor({
         )}
         <div className="rh-text-editor-footer">
           <select value={textModel} onChange={(event) => setTextModel(event.target.value)}>
-            <option>GVLM 3.1</option>
-            <option>cliproxyapi · gpt-5.4</option>
+            <option>gpt-5.4</option>
+            <option>deepseek-ai/DeepSeek-V4-Flash</option>
             <option>Lib Nano Pro</option>
           </select>
           <span />
@@ -2287,8 +2298,8 @@ function NodeEditor({
         </div>
         <div className="rh-audio-editor-footer">
           <select value={audioModel} onChange={(event) => setAudioModel(event.target.value)}>
-            <option>cliproxyapi · gpt-5.4</option>
-            <option>cliproxyapi · gpt-5</option>
+            <option>gpt-5.4</option>
+            <option>deepseek-ai/DeepSeek-V4-Flash</option>
           </select>
           <select value={audioDuration} onChange={(event) => setAudioDuration(event.target.value)}>
             <option>5s</option><option>10s</option><option>15s</option><option>30s</option><option>60s</option>
@@ -2330,8 +2341,8 @@ function NodeEditor({
         />
         <div className="rh-script-editor-footer">
           <select value={scriptModel} onChange={(event) => setScriptModel(event.target.value)}>
-            <option>GVLM 3.1</option>
-            <option>cliproxyapi · gpt-5.4</option>
+            <option>gpt-5.4</option>
+            <option>deepseek-ai/DeepSeek-V4-Flash</option>
           </select>
           <span />
           <button type="button" className={translateScript ? "active" : ""} onClick={() => setTranslateScript((value) => !value)} title="翻译"><Languages /></button>
@@ -2393,8 +2404,8 @@ function NodeEditor({
         </div>
         <div className="rh-video-editor-footer">
           <select value={videoModel} onChange={(event) => setVideoModel(event.target.value)}>
-            <option>Seedance 2.0 VIP</option>
-            <option>cliproxyapi · gpt-5.4</option>
+            <option>grok-imagine-1.0-video-super-720p</option>
+            <option>veo_3_1-fast</option>
           </select>
           <select value={videoRatio} onChange={(event) => setVideoRatio(event.target.value)}>
             <option>16:9 · 720P · 5s</option>
@@ -2490,7 +2501,7 @@ function BottomComposer(props: {
         </div>
       )}
       <div className="rh-composer-row">
-        <select value={props.model?.id ?? "cliproxyapi-gpt-5-4"} onChange={(event) => props.onUpdateFrame({ modelId: event.target.value })}>
+        <select value={props.model?.id ?? "yijiarj-nano-banana-2"} onChange={(event) => props.onUpdateFrame({ modelId: event.target.value })}>
           {props.models.filter((item) => item.type === "image").map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
         </select>
         <select value={settings.ratio} onChange={(event) => updateSetting("ratio", event.target.value)}><option>1:1</option><option>3:4</option><option>4:5</option><option>9:16</option><option>16:9</option></select>

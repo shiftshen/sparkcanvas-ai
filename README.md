@@ -23,14 +23,16 @@ npm run dev
 
 ### 图片生成配置
 
-图片生成走本地 skill 脚本 `scripts/generate_image.py`，由后端调用，不在前端直接请求图片 API。默认模型为 `cliproxyapi · gpt-5.4`，底部控制栏和图片节点编辑器都可以切换模型和参数。
+图片生成走本地 skill 脚本 `scripts/generate_image.py`，由后端调用，不在前端直接请求图片 API。默认图片模型为 `yijiarj · nano_banana_2`，文本默认用当前账号已验证可用的 `gpt-5.4`，视频默认用当前账号已验证能创建任务的 `grok-imagine-1.0-video-super-720p`。`veo_3_1-fast` 保留为候选模型，但当前账号通道可能不可用。底部控制栏和节点编辑器都可以切换模型和参数。
 
 推荐使用环境变量：
 
 ```bash
-export IMAGE_GEN_BASE_URL='https://api.otcbot.com/v1'
-export IMAGE_GEN_KEY='sk-your-key'
-export IMAGE_GEN_MODEL='gpt-5.4'
+export YIJIARJ_BASE_URL='https://api.yijiarj.cn/v1'
+export YIJIARJ_API_KEY='sk-your-key'
+export IMAGE_GEN_MODEL='nano_banana_2'
+export VIDEO_GEN_MODEL='grok-imagine-1.0-video-super-720p'
+export TEXT_GEN_MODEL='gpt-5.4'
 npm run dev
 ```
 
