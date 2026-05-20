@@ -3697,6 +3697,11 @@ svg {
     bottom: 92px;
   }
 
+  .rh-drawer.brand,
+  .rh-drawer.assets {
+    width: min(760px, calc(100vw - 96px));
+  }
+
   .rh-canvas-hint {
     display: none;
   }
