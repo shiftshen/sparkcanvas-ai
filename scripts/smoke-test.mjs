@@ -59,12 +59,19 @@ async function waitForServer() {
 
 async function waitForTask(taskId) {
   const started = Date.now();
+  let last = null;
   while (Date.now() - started < 8000) {
     const result = await request(`/tasks/${taskId}`);
+    last = result;
     if (result.task.status === "completed" && result.frame.status === "success") return result;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`Task ${taskId} did not complete`);
+  throw new Error(`Task ${taskId} did not complete: ${JSON.stringify({
+    taskStatus: last?.task?.status,
+    taskProgress: last?.task?.progress,
+    frameStatus: last?.frame?.status,
+    frameProgress: last?.frame?.progress
+  })}`);
 }
 
 function assert(condition, message) {
@@ -350,10 +357,17 @@ try {
     })
   });
   const multiOutputCompleted = await waitForTask(multiOutputGenerated.taskId);
+  assert(multiOutputCompleted.task.progress === 100 && multiOutputCompleted.frame.progress === 100, "multi-output workflow should finish at 100%, not stay at 96%");
   assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "document" && output.title.includes("PDF")), "CAL -> pdf should create a document output");
   assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "video" && output.title.includes("MP4")), "CAL -> mp4 should create a video output");
+  assert(multiOutputCompleted.frame.outputs.every((output) => output.imageUrl && (output.copy.includes("预览") || output.kind === "image")), "every workflow output should have a visible preview or explicit preview note");
   assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id.startsWith("doc-pdf") && node.type === "process"), "CAL -> pdf should create an editable document/text node");
   assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id.startsWith("video-mp4") && node.type === "video"), "CAL -> mp4 should create a video generation node");
+  assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id === "visual-draft" && node.refs?.some((ref) => ref.imageUrl)), "multi-output workflow should place a visible visual draft on the canvas");
+  assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id === "visual-draft" && node.body.startsWith("CAL: @imgen")), "visual draft should expose the executable CAL line to users");
+  assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id === "output-pdf" && node.refs?.some((ref) => ref.imageUrl)), "PDF output node should show a preview reference");
+  assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id === "output-mp4" && node.refs?.some((ref) => ref.imageUrl)), "MP4 output node should show a preview reference");
+  assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "video" && /MP4|视频/.test(output.copy)), "MP4 output should record video execution status");
   assert(multiOutputCompleted.frame.steps.some((step) => step.includes("PDF") && step.includes("MP4")), "workflow steps should mention requested PDF and MP4 outputs");
 
   const generated = await request("/generate", {

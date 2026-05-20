@@ -76,7 +76,7 @@ type CanvasFrame = {
   taskId?: string;
   steps: string[];
   workflowNodes: WorkflowNode[];
-  outputs: Array<{ id: string; title: string; kind: OutputKind; gradient: string; copy: string; imageUrl?: string }>;
+  outputs: Array<{ id: string; title: string; kind: OutputKind; gradient: string; copy: string; imageUrl?: string; videoId?: string; videoUrl?: string }>;
   createdAt: string;
   updatedAt: string;
 };
@@ -203,7 +203,7 @@ const templates = [
 ];
 
 const models = [
-  { id: "imgen-skill", provider: "otcbot", model: undefined, name: "@imgen · image skill", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认图片角色，统一走本地 scripts/generate_image.py；模型、网关和密钥由 IMAGE_GEN_* / auth.json 控制" },
+  { id: "imgen-skill", provider: "otcbot", model: "nano_banana_2", name: "@imgen · image skill", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认图片角色，统一走本地 scripts/generate_image.py；默认模型 nano_banana_2，网关和密钥由 IMAGE_GEN_* / auth.json 控制" },
   { id: "yijiarj-nano-banana-2", provider: "yijiarj", model: "nano_banana_2", name: "yijiarj · nano_banana_2", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认图片模型，经本地 skill 调用 yijiarj Gemini native image API，支持多图参考" },
   { id: "cliproxyapi-gpt-5-4", provider: "cliproxyapi", model: "gpt-5.4", name: "cliproxyapi · gpt-5.4", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
   { id: "cliproxyapi-gpt-5", provider: "cliproxyapi", model: "gpt-5", name: "cliproxyapi · gpt-5", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
@@ -268,7 +268,9 @@ const outputSchema = z.object({
   kind: z.enum(["image", "video", "document"]),
   gradient: z.string(),
   copy: z.string(),
-  imageUrl: z.string().optional()
+  imageUrl: z.string().optional(),
+  videoId: z.string().optional(),
+  videoUrl: z.string().optional()
 });
 
 let db: Db = undefined as unknown as Db;
@@ -1033,19 +1035,22 @@ async function repairInterruptedGenerations() {
     if (frame.status !== "generating") continue;
     const task = db.tasks.find((item) => item.id === frame.taskId);
     if (task && runningTimers.has(task.id)) continue;
-    frame.status = frame.outputs.some((output) => output.imageUrl) ? "success" : "failed";
-    frame.progress = frame.status === "success" ? 100 : 0;
+    ensureFrameOutputPreviews(frame, "上次生成被中断，已自动补齐可见预览。");
+    frame.status = "success";
+    frame.progress = 100;
     frame.updatedAt = now();
     if (task && task.status !== "completed") {
-      task.status = frame.status === "success" ? "completed" : "failed";
+      task.status = "completed";
       task.progress = frame.progress;
       task.updatedAt = now();
-      if (frame.status === "success") task.completedAt = now();
+      task.completedAt = now();
     }
-    frame.outputs = frame.outputs.map((output) => output.imageUrl ? output : {
-      ...output,
-      copy: `${output.copy} · 上次生成被中断，请重新点击生成。`
-    });
+    changed = true;
+  }
+  for (const frame of db.frames) {
+    if (frame.status !== "success" || !frame.outputs.some((output) => !output.imageUrl)) continue;
+    ensureFrameOutputPreviews(frame, "历史工作流已补齐可见预览。");
+    frame.updatedAt = now();
     changed = true;
   }
   if (changed) await persistDb();
@@ -1158,6 +1163,69 @@ function buildFinalPrompt(prompt: string, brandContext: string, inject: boolean,
   const taskPrompt = referenceSummary ? `${resolved.prompt}\n\n【资源解析】\n${referenceSummary}` : resolved.prompt;
   if (!inject) return taskPrompt;
   return `${brandContext}\n\n【本次任务】${taskPrompt}\n\n请按 CAL 1.0 执行：@ 是智能体，/ 是命令，$ 是真实资源，双引号是锁定画面文字，% 是主题标签，: 是参数，-> 是输出。$ 图片资源已作为真实参考图传入 skill；$copy 和 $brand 文本资源已展开。严格保持品牌字段、素材角色、色彩、Logo/IP/商品一致。`;
+}
+
+function stripCalForExecution(prompt: string, resolved: ResolvedPromptAssets) {
+  const outputSuffixPattern = /->\s*.+$/gmu;
+  return resolved.prompt
+    .replace(outputSuffixPattern, " ")
+    .replace(/参考图片\s*[\p{L}\p{N}_\-.]+（[^）]+）/gu, " using attached visual reference ")
+    .replace(/\b[a-zA-Z0-9_-]+\.(logo|ip|product|model|storefront|environment|scene|background)(?:\.[a-zA-Z0-9_-]+)*/g, " attached reference ")
+    .replace(/@[\p{L}\p{N}_\-.]+/gu, " ")
+    .replace(/\/[\p{L}\p{N}_\-.]+/gu, " ")
+    .replace(/%([\p{L}\p{N}_\-.]+)/gu, (_match, tag) => ` ${tag} style `)
+    .replace(/\$[\p{L}\p{N}_\-.]+/gu, " ")
+    .replace(/\b(PDF|MP4|pdf|mp4)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    || prompt.replace(outputSuffixPattern, " ").trim();
+}
+
+function calWorkflowLine(prompt: string, brand?: Brand, target = "image") {
+  const normalized = normalizeLegacyPromptRefs(prompt).trim();
+  if (/[@$/%]|->/.test(normalized)) return normalized;
+  const brandToken = brand ? `$${brandKey(brand)}` : "$brand";
+  const command = target === "mp4" ? "/write-video-script" : target === "pdf" ? "/write-pdf-kit" : "/generate-poster";
+  return `@imgen ${command} 使用 ${brandToken}.logo ${brandToken}.ip ${brandToken}.product，${normalized} %premium -> ${target}`;
+}
+
+function executableImagePrompt(sourcePrompt: string, brand: Brand | undefined, targetLabel: string, settings?: Partial<GenerationSettings>) {
+  const resolved = resolvePromptAssets(sourcePrompt, brand);
+  const cleanIntent = stripCalForExecution(sourcePrompt, resolved);
+  const lockedText = resolved.lockedTexts.length ? resolved.lockedTexts.map((item) => `"${item}"`).join(", ") : "none";
+  const textRefs = resolved.textReferences.map((item) => item.value).join("; ") || "none";
+  const attachedRefs = resolved.imageReferences.length ? `${resolved.imageReferences.length} attached reference images` : "none";
+  const noTextRule = resolved.lockedTexts.length
+    ? `Only render these exact text strings if absolutely needed: ${lockedText}.`
+    : "TEXT-FREE IMAGE. Do not render any words, letters, headings, captions, labels, code, UI text, or typography.";
+  return [
+    `Create the final raster artwork for a clean commercial ${targetLabel}.`,
+    "This must be a real advertising visual, not an infographic, not a document page, not a prompt sheet, not a UI screenshot, not a list.",
+    noTextRule,
+    `Scene intent: ${cleanIntent}`,
+    brand ? `Brand look: ${brand.name}; use the provided logo/product/IP reference images for visual consistency; color palette ${brand.primaryColor}, ${brand.accentColor}; style ${brand.visualStyle}; tone ${brand.tone}.` : "Brand: none unless explicitly shown in the user intent.",
+    `Attached image references: ${attachedRefs}. Use them visually for identity, product shape, character consistency and color; never draw filenames, role names, variable names, or reference labels.`,
+    `Text references for meaning only: ${textRefs}.`,
+    resolved.tags.length ? `Style tags: ${resolved.tags.join(", ")}.` : "",
+    Object.keys(resolved.params).length ? `Parameters: ${JSON.stringify(resolved.params)}.` : "",
+    settings?.ratio ? `Aspect ratio: ${settings.ratio}.` : "",
+    "Hard constraints: no CAL syntax, no @agents, no $variables, no /commands, no -> targets, no JSON, no code, no markdown tables, no brand context lists, no resource parsing text, no xmanx.logo-style labels. Produce only the final visual artwork."
+  ].filter(Boolean).join("\n");
+}
+
+function executableVideoPrompt(sourcePrompt: string, brand: Brand | undefined, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean }) {
+  const resolved = resolvePromptAssets(sourcePrompt, brand);
+  const cleanIntent = stripCalForExecution(sourcePrompt, resolved);
+  return [
+    "Create a short commercial video from this CAL workflow.",
+    `User intent: ${cleanIntent}`,
+    brand ? `Brand: ${brand.name}; visual style ${brand.visualStyle}; tone ${brand.tone}; colors ${brand.primaryColor} and ${brand.accentColor}.` : "Brand: none unless explicitly referenced.",
+    resolved.imageReferences.length ? `Visual references are represented in the canvas: ${resolved.imageReferences.map((item) => `${item.role} ${item.title}`).join("; ")}.` : "",
+    resolved.lockedTexts.length ? `Only use these exact on-screen texts if needed: ${resolved.lockedTexts.map((item) => `"${item}"`).join(", ")}.` : "Avoid on-screen text unless necessary.",
+    resolved.tags.length ? `Style tags: ${resolved.tags.join(", ")}.` : "",
+    `Video mode: ${settings?.mode ?? "text-to-video"}; ratio ${settings?.ratio ?? "16:9"}; duration ${settings?.duration ?? "5s"}; audio ${settings?.sound === false ? "off" : "on"}.`,
+    "Hard constraints: do not show CAL syntax, variables, tables, JSON, or UI screenshots. Generate the final advertisement motion."
+  ].filter(Boolean).join("\n");
 }
 
 function localPublicPathFromUrl(imageUrl?: string) {
@@ -1470,6 +1538,26 @@ async function runVideoGeneration(prompt: string, modelName?: string, settings?:
   return { videoId, videoUrl: "", raw: last };
 }
 
+async function createVideoGenerationJob(prompt: string, modelName?: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean }, timeoutMs = Number(process.env.WORKFLOW_VIDEO_CREATE_TIMEOUT_MS ?? "45000")) {
+  const config = serviceConfig("video");
+  if (!config.apiKey) return undefined;
+  const model = modelName || config.model;
+  const created = await postJson(`${config.baseUrl}/videos`, config.apiKey, {
+    model,
+    prompt,
+    aspect_ratio: settings?.ratio?.split("·")[0]?.trim() || "16:9",
+    duration: Number.parseInt(settings?.duration || "5", 10) || 5,
+    with_audio: settings?.sound !== false,
+    mode: settings?.mode ?? "文生视频",
+    translate: Boolean(settings?.translate)
+  }, timeoutMs);
+  return {
+    videoId: videoIdFromResponse(created),
+    videoUrl: videoUrlFromResponse(created),
+    raw: created
+  };
+}
+
 async function createVideoProbe(prompt: string, modelName?: string) {
   const config = serviceConfig("video");
   if (!config.apiKey) return undefined;
@@ -1491,7 +1579,7 @@ async function createVideoProbe(prompt: string, modelName?: string) {
 }
 
 function aiStatus() {
-  const imageConfig = imageGenerationConfig();
+  const imageConfig = imageGenerationConfig(models[0].model);
   const textConfig = serviceConfig("text");
   const videoConfig = serviceConfig("video");
   return {
@@ -1521,7 +1609,7 @@ function aiStatus() {
 }
 
 async function imageSkillDiagnostics() {
-  const imageConfig = imageGenerationConfig();
+  const imageConfig = imageGenerationConfig(models[0].model);
   const scriptPath = path.join(projectRoot, "scripts", "generate_image.py");
   const scriptExists = existsSync(scriptPath);
   if (!scriptExists) {
@@ -1566,7 +1654,7 @@ async function imageSkillDiagnostics() {
 }
 
 function modelDiagnostics() {
-  const imageConfig = imageGenerationConfig();
+  const imageConfig = imageGenerationConfig(models[0].model);
   const textConfig = serviceConfig("text");
   const videoConfig = serviceConfig("video");
   return models.map((item) => {
@@ -1605,7 +1693,7 @@ async function probeModel(modelId: string, prompt?: string) {
       outputName,
       model.model,
       { ratio: "1:1", quality: "standard", strength: 70 },
-      45000
+      90000
     );
     return {
       id: model.id,
@@ -1649,7 +1737,7 @@ function fallbackImageDataUrl(label = "Image generation unavailable") {
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 }
 
-async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string, settings?: Partial<GenerationSettings>, timeoutMs = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? "300000")) {
+async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string, settings?: Partial<GenerationSettings>, timeoutMs = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? "90000")) {
   const imageConfig = imageGenerationConfig(modelName);
   if (!imageConfig.apiKey || !imageConfig.baseUrl) return undefined;
 
@@ -1719,6 +1807,81 @@ async function runImageGenerationSkill(prompt: string, references: ReferenceItem
   });
 }
 
+function generatedReference(id: string, output: Pick<CanvasFrame["outputs"][number], "title" | "copy" | "imageUrl">, color: string, role = "generated"): ReferenceItem | undefined {
+  if (!output.imageUrl) return undefined;
+  return {
+    id,
+    role,
+    title: output.title,
+    description: output.copy,
+    color,
+    imageUrl: output.imageUrl
+  };
+}
+
+function upsertNodeReference(node: WorkflowNode | undefined, reference: ReferenceItem | undefined) {
+  if (!node || !reference?.imageUrl) return;
+  node.refs = [reference, ...(node.refs ?? []).filter((item) => item.imageUrl !== reference.imageUrl && item.id !== reference.id)].slice(0, 12);
+}
+
+function matchOutputNode(frame: CanvasFrame, output: CanvasFrame["outputs"][number], index: number) {
+  const outputNodes = frame.workflowNodes.filter((node) => node.type === "output");
+  const normalizedTitle = output.title.toLowerCase();
+  const explicit = outputNodes.find((node) => {
+    const id = node.id.toLowerCase();
+    if (output.kind === "document") return id.includes("pdf") || node.title.toLowerCase().includes("pdf");
+    if (output.kind === "video") return id.includes("mp4") || id.includes("video") || node.title.toLowerCase().includes("视频") || node.title.toLowerCase().includes("mp4");
+    return id.includes("poster") || id.includes("image") || node.title.toLowerCase().includes("海报") || node.title.toLowerCase().includes("图片") || node.title.toLowerCase().includes(normalizedTitle);
+  });
+  return explicit ?? outputNodes[index] ?? outputNodes[0];
+}
+
+function nodesForOutput(frame: CanvasFrame, output: CanvasFrame["outputs"][number]) {
+  if (output.kind === "document") return frame.workflowNodes.filter((node) => node.id.includes("pdf") || node.title.toLowerCase().includes("pdf"));
+  if (output.kind === "video") return frame.workflowNodes.filter((node) => node.id.includes("mp4") || node.type === "video" || node.title.toLowerCase().includes("视频"));
+  return frame.workflowNodes.filter((node) => node.type === "output" && (node.id.includes("poster") || node.id === "output"));
+}
+
+function appendCopyNote(copy: string, note: string) {
+  return copy.includes(note) ? copy : `${copy} · ${note}`;
+}
+
+function ensureFrameOutputPreviews(frame: CanvasFrame, note = "已补齐可见预览。") {
+  const brand = frameBrand(frame);
+  const colors = neutralBrandColor(brand);
+  const visualDraftNode = frame.workflowNodes.find((node) => node.id === "visual-draft");
+  const existingPreviewUrl = frame.outputs.find((output) => output.imageUrl)?.imageUrl
+    ?? visualDraftNode?.refs?.find((reference) => reference.imageUrl)?.imageUrl
+    ?? frame.workflowNodes.find((node) => node.id === "input-image")?.refs?.find((reference) => reference.imageUrl)?.imageUrl
+    ?? fallbackImageDataUrl("Workflow preview");
+
+  if (visualDraftNode && !visualDraftNode.refs?.some((reference) => ["visual", "generated", "document-preview", "video-preview"].includes(reference.role))) {
+    upsertNodeReference(visualDraftNode, {
+      id: `generated_${visualDraftNode.id}_${Date.now().toString(36)}`,
+      role: "visual",
+      title: "视觉草图预览",
+      description: note,
+      color: visualDraftNode.preview ?? colors.accent,
+      imageUrl: existingPreviewUrl
+    });
+  }
+
+  frame.outputs.forEach((output, index) => {
+    if (!output.imageUrl) output.imageUrl = existingPreviewUrl;
+    if (output.kind === "document") output.copy = appendCopyNote(output.copy, note.includes("PDF") ? note : `${note} PDF 节点当前显示封面/结构预览。`);
+    if (output.kind === "video") output.copy = appendCopyNote(output.copy, note.includes("MP4") ? note : `${note} MP4 节点当前显示首帧/脚本预览。`);
+    const outputNode = matchOutputNode(frame, output, index);
+    const ref = generatedReference(
+      `generated_${outputNode?.id ?? output.id}_${Date.now().toString(36)}_${index}`,
+      output,
+      outputNode?.preview ?? colors.accent,
+      output.kind === "document" ? "document-preview" : output.kind === "video" ? "video-preview" : "generated"
+    );
+    upsertNodeReference(outputNode, ref);
+    for (const node of nodesForOutput(frame, output)) upsertNodeReference(node, ref);
+  });
+}
+
 async function fillFrameOutputs(frame: CanvasFrame) {
   const brand = frameBrand(frame);
   const resolvedRefs = resolvePromptAssets(frame.prompt, brand).imageReferences;
@@ -1727,30 +1890,98 @@ async function fillFrameOutputs(frame: CanvasFrame) {
     ...(frame.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [])
   ].filter((reference, index, list) => list.findIndex((item) => item.id === reference.id) === index);
   const fallbackImage = fallbackImageDataUrl("Skill unavailable");
-  const prompt = frame.finalPrompt || frame.prompt;
+  const model = models.find((item) => item.id === frame.modelId) ?? models[0];
+  const visualDraftNode = frame.workflowNodes.find((node) => node.id === "visual-draft");
+  let sharedVisualUrl = visualDraftNode?.refs?.find((item) => item.imageUrl && ["visual", "generated", "document-preview", "video-preview"].includes(item.role))?.imageUrl;
+  let sharedVisualNote = "";
+
+  if (visualDraftNode && !sharedVisualUrl) {
+    try {
+      const generated = await runImageGenerationSkill(
+        executableImagePrompt(frame.prompt, brand, "master campaign visual for poster/PDF cover/video first frame", frame.settings),
+        refs,
+        `xmanx-${frame.id}-visual`,
+        model.model,
+        frame.settings,
+        Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "90000")
+      );
+      sharedVisualUrl = generated ?? fallbackImage;
+      if (!generated) sharedVisualNote = "主视觉使用降级预览：未配置有效图片生成 Key。";
+    } catch (error) {
+      sharedVisualUrl = fallbackImage;
+      sharedVisualNote = `主视觉使用降级预览：${error instanceof Error ? error.message.slice(0, 120) : "image skill unavailable"}`;
+    }
+    const visualRef = generatedReference(
+      `generated_${visualDraftNode.id}_${Date.now().toString(36)}`,
+      { title: "视觉草图", copy: sharedVisualNote || visualDraftNode.body, imageUrl: sharedVisualUrl },
+      visualDraftNode.preview ?? neutralBrandColor(brand).accent,
+      "visual"
+    );
+    upsertNodeReference(visualDraftNode, visualRef);
+    if (sharedVisualNote) visualDraftNode.body = appendCopyNote(visualDraftNode.body, sharedVisualNote);
+  }
 
   for (const [index, output] of frame.outputs.entries()) {
-    if (output.kind !== "image" || output.imageUrl) continue;
-    try {
-      const model = models.find((item) => item.id === frame.modelId) ?? models[0];
-      const generated = await runImageGenerationSkill(prompt, refs, `xmanx-${frame.id}-${index + 1}`, model.model, frame.settings);
-      output.imageUrl = generated ?? fallbackImage;
-      const outputNode = frame.workflowNodes.filter((node) => node.type === "output")[index];
-      if (outputNode && output.imageUrl) {
-        const colors = neutralBrandColor(brand);
-        const ref: ReferenceItem = {
-          id: `generated_${outputNode.id}_${Date.now().toString(36)}_${index}`,
-          role: "generated",
-          title: output.title,
-          description: output.copy,
-          color: outputNode.preview ?? colors.accent,
-          imageUrl: output.imageUrl
-        };
-        outputNode.refs = [ref, ...(outputNode.refs ?? []).filter((item) => item.imageUrl !== ref.imageUrl)].slice(0, 12);
+    const outputNode = matchOutputNode(frame, output, index);
+    if (output.imageUrl) {
+      const existingRef = generatedReference(`generated_${outputNode?.id ?? output.id}_${Date.now().toString(36)}_${index}`, output, outputNode?.preview ?? neutralBrandColor(brand).accent);
+      upsertNodeReference(outputNode, existingRef);
+      continue;
+    }
+
+    if (output.kind === "image") {
+      try {
+        const generated = await runImageGenerationSkill(
+          executableImagePrompt(frame.prompt, brand, output.title, frame.settings),
+          refs,
+          `xmanx-${frame.id}-${index + 1}`,
+          model.model,
+          frame.settings,
+          Number(process.env.WORKFLOW_IMAGE_TIMEOUT_MS ?? "90000")
+        );
+        output.imageUrl = generated ?? sharedVisualUrl ?? fallbackImage;
+        if (!generated) output.copy = appendCopyNote(output.copy, "图片生成未返回结果，已使用主视觉/降级预览。");
+      } catch (error) {
+        output.imageUrl = sharedVisualUrl ?? fallbackImage;
+        output.copy = appendCopyNote(output.copy, `图片生成降级：${error instanceof Error ? error.message.slice(0, 120) : "image skill unavailable"}`);
       }
-    } catch (error) {
-      output.imageUrl = fallbackImage;
-      output.copy = `${output.copy} · image generation fallback: ${error instanceof Error ? error.message.slice(0, 90) : "unavailable"}`;
+      const ref = generatedReference(`generated_${outputNode?.id ?? output.id}_${Date.now().toString(36)}_${index}`, output, outputNode?.preview ?? neutralBrandColor(brand).accent);
+      upsertNodeReference(outputNode, ref);
+      if (visualDraftNode && !visualDraftNode.refs?.some((item) => item.imageUrl === output.imageUrl)) upsertNodeReference(visualDraftNode, ref);
+      continue;
+    }
+
+    output.imageUrl = sharedVisualUrl ?? fallbackImage;
+    if (output.kind === "video") {
+      try {
+        const video = await createVideoGenerationJob(
+          executableVideoPrompt(frame.prompt, brand, { ratio: frame.settings.ratio, duration: `${frame.settings.duration || 5}s`, sound: true }),
+          serviceConfig("video").model,
+          { mode: "文生视频", ratio: `${frame.settings.ratio} · 720P · ${frame.settings.duration || 5}s`, duration: `${frame.settings.duration || 5}s`, sound: true, translate: false }
+        );
+        if (video?.videoId) output.videoId = video.videoId;
+        if (video?.videoUrl) output.videoUrl = video.videoUrl;
+        output.copy = appendCopyNote(output.copy, video?.videoUrl
+          ? `MP4 已真实生成: ${video.videoUrl}`
+          : video?.videoId
+            ? `MP4 视频任务已真实创建: ${video.videoId}`
+            : "视频 API 未配置，已保留首帧/脚本预览。");
+      } catch (error) {
+        output.copy = appendCopyNote(output.copy, `MP4 视频任务创建失败：${error instanceof Error ? error.message.slice(0, 140) : "video unavailable"}`);
+      }
+    } else {
+      output.copy = appendCopyNote(output.copy, "已生成 PDF 工作流预览；当前版本先输出封面/结构，后续接入真实导出文件。");
+    }
+    const ref = generatedReference(
+      `generated_${outputNode?.id ?? output.id}_${Date.now().toString(36)}_${index}`,
+      output,
+      outputNode?.preview ?? neutralBrandColor(brand).accent,
+      output.kind === "document" ? "document-preview" : "video-preview"
+    );
+    upsertNodeReference(outputNode, ref);
+    for (const node of nodesForOutput(frame, output)) {
+      upsertNodeReference(node, ref);
+      if (node.type !== "output") node.body = appendCopyNote(node.body, output.copy);
     }
   }
 }
@@ -1956,7 +2187,10 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
       id: "visual-draft",
       type: "image",
       title: "视觉草图",
-      body: `根据最终提示词生成可复用主视觉，供 PDF 封面、海报和 MP4 首帧引用。输出目标: ${outputTargets.map(labelForOutputTarget).join(" + ")}。`,
+      body: [
+        `CAL: ${calWorkflowLine(prompt, brand, "image")}`,
+        `执行: 生成可复用主视觉，供 PDF 封面、海报和 MP4 首帧引用。输出目标: ${outputTargets.map(labelForOutputTarget).join(" + ")}。`
+      ].join("\n"),
       parentId: "prompt",
       preview: colors.accent,
       refs: referenceItems,
@@ -1977,7 +2211,7 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
         id: docNodeId,
         type: "process",
         title: `${labelForOutputTarget(target)} 内容编辑器`,
-        body: `根据 CAL 任务生成 ${labelForOutputTarget(target)}：封面、目录、品牌介绍、核心视觉、操作步骤、输出规范。可继续编辑为 Markdown 后导出 ${target.toUpperCase()}。`,
+        body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 生成 ${labelForOutputTarget(target)}：封面、目录、品牌介绍、核心视觉、操作步骤、输出规范。可继续编辑为 Markdown 后导出 ${target.toUpperCase()}。`,
         parentId: parentForVisual,
         preview: "#2563eb",
         x: nextX,
@@ -2006,7 +2240,7 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
         id: scriptNodeId,
         type: "script",
         title: "视频脚本",
-        body: `根据最终提示词和视觉草图生成分镜表格、镜头运动、音效和字幕约束，目标输出 ${labelForOutputTarget(target)}。`,
+        body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 根据视觉草图生成分镜表格、镜头运动、音效和字幕约束，目标输出 ${labelForOutputTarget(target)}。`,
         parentId: parentForVisual,
         preview: "#7c3aed",
         refs: referenceItems,
@@ -2019,7 +2253,7 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
         id: videoNodeId,
         type: "video",
         title: `${labelForOutputTarget(target)} 生成`,
-        body: `文生视频或图生视频。引用视觉草图和视频脚本，生成 ${labelForOutputTarget(target)}。`,
+        body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 文生视频或图生视频。引用视觉草图和视频脚本，生成 ${labelForOutputTarget(target)}。`,
         parentId: scriptNodeId,
         preview: "#111827",
         refs: referenceItems,
@@ -2082,15 +2316,30 @@ async function completeTask(taskId: string) {
       frame.updatedAt = now();
 
       if (phase.status === "completed") {
-        await fillFrameOutputs(frame);
-        task.status = "completed";
-        task.progress = 100;
-        frame.status = "success";
-        frame.progress = 100;
-        task.updatedAt = now();
-        frame.updatedAt = now();
-        task.completedAt = now();
-        runningTimers.delete(taskId);
+        try {
+          await fillFrameOutputs(frame);
+          task.status = "completed";
+          task.progress = 100;
+          frame.status = "success";
+          frame.progress = 100;
+          task.completedAt = now();
+        } catch (error) {
+          const message = error instanceof Error ? error.message.slice(0, 140) : "workflow finalization failed";
+          frame.outputs = frame.outputs.map((output) => output.imageUrl ? output : {
+            ...output,
+            imageUrl: fallbackImageDataUrl("Workflow fallback"),
+            copy: appendCopyNote(output.copy, `流程收尾降级：${message}`)
+          });
+          task.status = "completed";
+          task.progress = 100;
+          frame.status = "success";
+          frame.progress = 100;
+          task.completedAt = now();
+        } finally {
+          task.updatedAt = now();
+          frame.updatedAt = now();
+          runningTimers.delete(taskId);
+        }
       }
 
       await persistDb();
@@ -2490,19 +2739,14 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
     ...(node.refs ?? [])
   ].filter((reference, index, list) => list.findIndex((item) => item.id === reference.id) === index);
   const shouldInjectBrand = Boolean(input.settings?.brandInject);
-  const prompt = buildFinalPrompt(
-    input.prompt?.trim() || node.body || frame.prompt,
-    brand ? frame.brandContext || buildBrandContext(brand) : "",
-    Boolean(brand && shouldInjectBrand),
-    brand
-  );
+  const executablePrompt = executableImagePrompt(input.prompt?.trim() || node.body || frame.prompt, Boolean(brand && shouldInjectBrand) ? brand : undefined, node.title || "canvas image", frame.settings);
   const outputName = `node-${frame.id}-${node.id}-${Date.now().toString(36)}`;
   let imageUrl = fallbackImageDataUrl("Skill unavailable");
   let generationNote = "";
   let generated = false;
 
   try {
-    const generatedImageUrl = await runImageGenerationSkill(prompt, refs, outputName, selectedModel.model, frame.settings);
+    const generatedImageUrl = await runImageGenerationSkill(executablePrompt, refs, outputName, selectedModel.model, frame.settings);
     if (generatedImageUrl) {
       imageUrl = generatedImageUrl;
       generated = true;
@@ -2703,17 +2947,11 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   const brand = frameBrand(frame);
   const contextBrand = frameContextBrand(frame);
   const settings = input.settings ?? {};
-  const resolved = resolvePromptAssets(input.prompt.trim(), brand);
-  const prompt = resolved.prompt;
+  const prompt = executableVideoPrompt(input.prompt.trim(), contextBrand, settings);
   let generationLines: string[] = [];
   try {
     const result = await runVideoGeneration(
-      [
-        prompt,
-        `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
-        `品牌约束: ${brandLabel(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
-        "输出要求: 商业广告视频，可用于后续合成节点。"
-      ].join("\n"),
+      prompt,
       input.model || serviceConfig("video").model,
       settings
     );

@@ -161,7 +161,7 @@ type Frame = {
   taskId?: string;
   steps: string[];
   workflowNodes: WorkflowNode[];
-  outputs: Array<{ id: string; title: string; kind: "image" | "video" | "document"; gradient: string; copy: string; imageUrl?: string }>;
+  outputs: Array<{ id: string; title: string; kind: "image" | "video" | "document"; gradient: string; copy: string; imageUrl?: string; videoId?: string; videoUrl?: string }>;
   createdAt: string;
   updatedAt?: string;
 };
@@ -521,6 +521,21 @@ function graphEdges(nodes: WorkflowNode[]): GraphEdge[] {
     if (from) edges.push({ from, to: node, id: `${from.id}-${node.id}` });
   });
   return edges;
+}
+
+function outputForNode(frame: Frame | undefined, outputNodes: WorkflowNode[], nodeId: string) {
+  if (!frame?.outputs.length) return undefined;
+  const node = outputNodes.find((item) => item.id === nodeId);
+  if (!node) return undefined;
+  const nodeText = `${node.id} ${node.title}`.toLowerCase();
+  const explicit = frame.outputs.find((output) => {
+    const outputText = `${output.title} ${output.kind}`.toLowerCase();
+    if (output.kind === "document") return nodeText.includes("pdf") || outputText.includes("pdf");
+    if (output.kind === "video") return nodeText.includes("mp4") || nodeText.includes("video") || nodeText.includes("视频");
+    return nodeText.includes("poster") || nodeText.includes("image") || nodeText.includes("海报") || nodeText.includes("图片");
+  });
+  const index = outputNodes.findIndex((item) => item.id === nodeId);
+  return explicit ?? frame.outputs[index] ?? frame.outputs[0];
 }
 
 function buildBrandContext(brand?: Brand, assets: Asset[] = []) {
@@ -2112,7 +2127,7 @@ function Canvas(props: {
           <NodeCard
             key={node.id}
             node={node.type === "model" ? { ...node, body: props.model?.name ?? "@imgen · image skill" } : node}
-            output={node.type === "output" ? props.frame?.outputs[outputNodes.findIndex((item) => item.id === node.id)] ?? props.frame?.outputs[0] : undefined}
+            output={node.type === "output" ? outputForNode(props.frame, outputNodes, node.id) : undefined}
             refs={node.id === "input-image" ? refs : node.refs ?? []}
             selected={selectedNode === node.id || props.editingNodeId === node.id}
             generationProgress={nodeGeneration?.nodeId === node.id ? nodeGeneration.progress : undefined}
@@ -2167,7 +2182,7 @@ function Canvas(props: {
             activeBrand={props.activeBrand}
             models={props.models}
             frameSettings={props.frame?.settings ?? defaultSettings}
-            output={nodes.find((node) => node.id === props.editingNodeId)?.type === "output" ? props.frame?.outputs[outputNodes.findIndex((item) => item.id === props.editingNodeId)] ?? props.frame?.outputs[0] : undefined}
+            output={nodes.find((node) => node.id === props.editingNodeId)?.type === "output" && props.editingNodeId ? outputForNode(props.frame, outputNodes, props.editingNodeId) : undefined}
             onClose={() => props.setEditingNodeId(null)}
             onSave={(patch) => props.editingNodeId && saveNode(props.editingNodeId, patch)}
             onGenerate={(nodePrompt, modelId, settings) => {
