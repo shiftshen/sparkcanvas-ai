@@ -1505,6 +1505,18 @@ function videoKeyframeCount(durationSeconds: number) {
   return Math.min(5, Number(process.env.VIDEO_MAX_KEYFRAMES ?? "5"));
 }
 
+function videoSegmentDurations(durationSeconds: number, maxSegmentSeconds = Number(process.env.VIDEO_MAX_SEGMENT_SECONDS ?? "10")) {
+  const safeMax = Math.max(1, Math.min(10, maxSegmentSeconds || 10));
+  const segments: number[] = [];
+  let remaining = Math.max(1, durationSeconds);
+  while (remaining > 0) {
+    const next = Math.min(safeMax, remaining);
+    segments.push(next);
+    remaining -= next;
+  }
+  return segments;
+}
+
 function visualDraftTargetLabel(frame: CanvasFrame) {
   const kinds = new Set(frame.outputs.map((output) => output.kind));
   if (kinds.size === 1 && kinds.has("video")) return "video first-frame key visual, single cinematic frame, not a poster";
@@ -1590,6 +1602,40 @@ async function videoInputImageDataUrl(imageUrl?: string) {
   const mime = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : ext === ".webp" ? "image/webp" : "image/png";
   const bytes = await readFile(filePath);
   return `data:${mime};base64,${bytes.toString("base64")}`;
+}
+
+function localGeneratedVideoPath(videoUrl?: string) {
+  if (!videoUrl?.startsWith("/generated/")) return undefined;
+  const filePath = path.join(generatedDir, videoUrl.replace(/^\/generated\//, ""));
+  return existsSync(filePath) ? filePath : undefined;
+}
+
+async function concatLocalVideos(videoUrls: string[], outputName: string) {
+  const localPaths = videoUrls.map(localGeneratedVideoPath);
+  if (localPaths.some((item) => !item)) return "";
+  const ffmpegPath = process.env.FFMPEG_PATH || "/opt/homebrew/bin/ffmpeg";
+  if (!existsSync(ffmpegPath)) return "";
+  await mkdir(generatedDir, { recursive: true });
+  const listPath = path.join(generatedDir, `${outputName}-concat.txt`);
+  const outputPath = path.join(generatedDir, `${outputName}.mp4`);
+  const listBody = localPaths.map((filePath) => `file '${String(filePath).replace(/'/g, "'\\''")}'`).join("\n");
+  await writeFile(listPath, listBody);
+  const ok = await new Promise<boolean>((resolve) => {
+    const child = spawn(ffmpegPath, ["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", outputPath], { stdio: "ignore" });
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      resolve(false);
+    }, 60000);
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0 && existsSync(outputPath));
+    });
+  });
+  return ok ? `/generated/${outputName}.mp4` : "";
 }
 
 function localPublicPathFromUrl(imageUrl?: string) {
@@ -2572,6 +2618,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
     output.imageUrl = sharedVisualUrl ?? fallbackImage;
     if (output.kind === "video") {
       const durationSeconds = videoDurationSeconds({ duration: `${frame.settings.duration || 5}s` });
+      const segmentDurations = videoSegmentDurations(durationSeconds);
       const keyframeCount = videoKeyframeCount(durationSeconds);
       const videoRefs = [
         ...refs,
@@ -2619,27 +2666,48 @@ async function fillFrameOutputs(frame: CanvasFrame) {
       if (keyframeRefs.length) {
         output.copy = appendCopyNote(output.copy, `已按 ${durationSeconds}s 视频生成 ${keyframeRefs.length} 张关键帧；首帧用于图生视频，其余关键帧用于分段/剪辑一致性。`);
       }
-      if (durationSeconds > 20) {
-        output.copy = appendCopyNote(output.copy, "长视频建议按关键帧拆成多段图生视频，再进入视频合成节点剪辑。");
+      if (segmentDurations.length > 1) {
+        output.copy = appendCopyNote(output.copy, `已按模型单段上限拆为 ${segmentDurations.length} 段视频任务：${segmentDurations.map((seconds, segmentIndex) => `S${segmentIndex + 1} ${seconds}s`).join(" / ")}。每段独立生成首帧和配音提示，避免长视频单段漂移。`);
       }
       const videoPromptRefs = [...videoRefs, ...keyframeRefs]
         .filter((reference, referenceIndex, list) => reference.imageUrl && list.findIndex((item) => item.id === reference.id || item.imageUrl === reference.imageUrl) === referenceIndex);
       try {
-        const video = await createVideoGenerationJob(
-          executableVideoPrompt(frame.prompt, brand, videoSettings, videoPromptRefs),
-          serviceConfig("video").model,
-          videoSettings,
-          Number(process.env.WORKFLOW_VIDEO_CREATE_TIMEOUT_MS ?? "45000"),
-          { firstFrameUrl }
-        );
-        if (video?.videoId) output.videoId = video.videoId;
-        if (video?.videoUrl) output.videoUrl = video.videoUrl;
-        if (video?.fallbackReason) output.copy = appendCopyNote(output.copy, video.fallbackReason);
-        if (video?.usedFirstFrame) output.copy = appendCopyNote(output.copy, `已提交图片 skill 首帧约束视频模型，首帧使用 ${videoRefs.filter((reference) => reference.role !== "first-frame").length} 张品牌参考图生成。`);
-        output.copy = appendCopyNote(output.copy, video?.videoUrl
-          ? `MP4 文件已生成: ${video.videoUrl}`
-          : video?.videoId
-            ? `MP4 视频任务已创建但未返回文件: ${video.videoId}`
+        const segmentResults = [];
+        for (const [segmentIndex, segmentSeconds] of segmentDurations.entries()) {
+          const segmentFirstFrame = keyframeRefs[segmentIndex]?.imageUrl ?? firstFrameUrl;
+          const segmentSettings = {
+            ...videoSettings,
+            duration: `${segmentSeconds}s`,
+            mode: "图生视频"
+          };
+          const segmentPrompt = [
+            executableVideoPrompt(frame.prompt, brand, segmentSettings, videoPromptRefs),
+            `Segment ${segmentIndex + 1}/${segmentDurations.length}: generate only this ${segmentSeconds}s section.`,
+            `Audio/voice rule: make this segment self-contained, but keep music bed, voice tone, loudness and language consistent with other segments. Do not restart the whole story; continue the same campaign timeline.`
+          ].join("\n");
+          const video = await createVideoGenerationJob(
+            segmentPrompt,
+            serviceConfig("video").model,
+            segmentSettings,
+            Number(process.env.WORKFLOW_VIDEO_CREATE_TIMEOUT_MS ?? "45000"),
+            { firstFrameUrl: segmentFirstFrame }
+          );
+          segmentResults.push(video);
+        }
+        const videoIds = segmentResults.map((video) => video?.videoId).filter(Boolean) as string[];
+        const videoUrls = segmentResults.map((video) => video?.videoUrl).filter(Boolean) as string[];
+        const fallbackReasons = segmentResults.map((video) => video?.fallbackReason).filter(Boolean) as string[];
+        if (videoIds.length) output.videoId = videoIds.join(",");
+        if (videoUrls.length === 1 && segmentDurations.length === 1) output.videoUrl = videoUrls[0];
+        if (fallbackReasons.length) output.copy = appendCopyNote(output.copy, fallbackReasons[0]);
+        if (segmentResults.some((video) => video?.usedFirstFrame)) output.copy = appendCopyNote(output.copy, `已提交图片 skill 首帧/关键帧约束视频模型，使用 ${videoPromptRefs.filter((reference) => reference.role !== "first-frame").length} 张品牌参考图生成。`);
+        if (videoUrls.length === segmentDurations.length && segmentDurations.length > 1) {
+          output.copy = appendCopyNote(output.copy, "所有分段视频已返回 URL，下一步进入视频合成节点生成最终 MP4。");
+        }
+        output.copy = appendCopyNote(output.copy, videoUrls.length === 1 && segmentDurations.length === 1
+          ? `MP4 文件已生成: ${videoUrls[0]}`
+          : videoIds.length
+            ? `MP4 分段任务已创建: ${videoIds.join(" / ")}`
             : "视频 API 未配置，已保留首帧/脚本预览。");
       } catch (error) {
         output.copy = appendCopyNote(output.copy, `MP4 视频任务创建失败：${error instanceof Error ? error.message.slice(0, 140) : "video unavailable"}`);
@@ -2916,8 +2984,11 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
       continue;
     }
     if (kind === "video") {
+      const durationSeconds = videoDurationSeconds(settings);
+      const segmentDurations = videoSegmentDurations(durationSeconds);
       const scriptNodeId = `script-${target}-${index}`;
       const videoNodeId = `video-${target}-${index}`;
+      const composeNodeId = `compose-${target}-${index}`;
       nodes.push({
         id: scriptNodeId,
         type: "script",
@@ -2931,27 +3002,60 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
         w: 360,
         h: 260
       });
-      nodes.push({
-        id: videoNodeId,
-        type: "video",
-        title: `${labelForOutputTarget(target)} 生成`,
-        body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 先用图片 skill 生成/锁定视频首帧，再把首帧提交给视频模型做图生视频；如果模型不接受首帧，必须在输出状态中明确降级。`,
-        parentId: scriptNodeId,
-        preview: "#111827",
-        refs: referenceItems,
-        x: nextX + 420,
-        y: 400,
-        w: 260,
-        h: 260
-      });
+      let parentForVideoOutput = videoNodeId;
+      if (segmentDurations.length > 1) {
+        segmentDurations.forEach((seconds, segmentIndex) => {
+          nodes.push({
+            id: `${videoNodeId}-seg-${segmentIndex + 1}`,
+            type: "video",
+            title: `视频片段 ${segmentIndex + 1}/${segmentDurations.length}`,
+            body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 第 ${segmentIndex + 1} 段图生视频，时长 ${seconds}s。每段单独使用关键帧、旁白/配音提示和同一品牌约束，最后进入合成节点。`,
+            parentId: segmentIndex === 0 ? scriptNodeId : `${videoNodeId}-seg-${segmentIndex}`,
+            preview: "#111827",
+            refs: referenceItems,
+            x: nextX + 420 + segmentIndex * 285,
+            y: 400,
+            w: 260,
+            h: 260
+          });
+        });
+        nodes.push({
+          id: composeNodeId,
+          type: "compose",
+          title: "视频合成剪辑",
+          body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 合并 ${segmentDurations.length} 个视频片段，统一音乐床、旁白音色、音量、字幕语言、转场节奏和品牌收尾；避免看出两个不配套的视频。`,
+          parentId: `${videoNodeId}-seg-${segmentDurations.length}`,
+          preview: "#0f766e",
+          refs: referenceItems,
+          x: nextX + 420 + segmentDurations.length * 285,
+          y: 400,
+          w: 300,
+          h: 260
+        });
+        parentForVideoOutput = composeNodeId;
+      } else {
+        nodes.push({
+          id: videoNodeId,
+          type: "video",
+          title: `${labelForOutputTarget(target)} 生成`,
+          body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 先用图片 skill 生成/锁定视频首帧，再把首帧提交给视频模型做图生视频；如果模型不接受首帧，必须在输出状态中明确降级。`,
+          parentId: scriptNodeId,
+          preview: "#111827",
+          refs: referenceItems,
+          x: nextX + 420,
+          y: 400,
+          w: 260,
+          h: 260
+        });
+      }
       nodes.push({
         id: `output-${target}`,
         type: "output",
         title: `${labelForOutputTarget(target)} 输出`,
-        body: `最终交付 ${labelForOutputTarget(target)}。来源: ${videoNodeId}。`,
-        parentId: videoNodeId,
+        body: `最终交付 ${labelForOutputTarget(target)}。来源: ${parentForVideoOutput}。`,
+        parentId: parentForVideoOutput,
         preview: "#0f172a",
-        x: nextX + 730,
+        x: segmentDurations.length > 1 ? nextX + 760 + segmentDurations.length * 285 : nextX + 730,
         y: 400,
         w: 250,
         h: 260
@@ -3957,6 +4061,69 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
   frame.updatedAt = now();
   await persistDb();
   res.json({ frame, node, audioPlan, model: input.model ?? "cliproxyapi · gpt-5.4" });
+});
+
+app.post("/canvas/frames/:id/nodes/:nodeId/generate-compose", async (req, res) => {
+  const frame = db.frames.find((item) => item.id === req.params.id);
+  if (!frame) return res.status(404).json({ message: "Frame not found" });
+  const node = frame.workflowNodes.find((item) => item.id === req.params.nodeId);
+  if (!node) return res.status(404).json({ message: "Node not found" });
+
+  const input = z.object({
+    prompt: z.string().min(1),
+    settings: z.object({
+      duration: z.string().optional(),
+      ratio: z.string().optional(),
+      contentLanguage: contentLanguageSchema.optional(),
+      transition: z.string().optional(),
+      audioMode: z.string().optional()
+    }).optional()
+  }).parse(req.body);
+
+  const brand = frameContextBrand(frame);
+  const settings = input.settings ?? {};
+  const durationSeconds = videoDurationSeconds({ duration: settings.duration ?? `${frame.settings.duration || 20}s` });
+  const segmentDurations = videoSegmentDurations(durationSeconds);
+  const videoNodes = frame.workflowNodes.filter((item) => item.type === "video" || /seg|片段|video|mp4/i.test(`${item.id} ${item.title}`));
+  const videoOutputs = frame.outputs.filter((output) => output.kind === "video");
+  const segmentUrls = [
+    ...videoOutputs.flatMap((output) => output.videoUrl ? [output.videoUrl] : []),
+    ...videoNodes.flatMap((item) => (item.refs ?? []).map((reference) => reference.imageUrl ?? "").filter((url) => /\.mp4($|\?)/i.test(url)))
+  ].filter((url, index, list) => url && list.indexOf(url) === index);
+  const mergedUrl = segmentUrls.length > 1 ? await concatLocalVideos(segmentUrls, `xmanx-${frame.id}-${node.id}-merged`) : "";
+  const refs = [
+    ...videoNodes.flatMap((item) => item.refs ?? []),
+    ...(frame.workflowNodes.find((item) => item.id === "input-image")?.refs ?? [])
+  ].filter((reference, index, list) => reference.imageUrl && list.findIndex((item) => item.id === reference.id || item.imageUrl === reference.imageUrl) === index).slice(0, 12);
+
+  const composePlan = [
+    input.prompt.trim(),
+    "",
+    `合成目标: ${durationSeconds}s ${settings.ratio ?? frame.settings.ratio} 最终 MP4`,
+    `分段策略: ${segmentDurations.length} 段 · ${segmentDurations.map((seconds, index) => `S${index + 1} ${seconds}s`).join(" / ")}`,
+    `片段状态: ${segmentUrls.length ? `${segmentUrls.length} 个片段已有 videoUrl` : "暂无可合并 videoUrl，等待各视频片段生成完成"}`,
+    `剪辑规则: ${settings.transition ?? "短交叉淡入淡出 + 节奏点硬切"}；保持同一品牌空间、同一 IP/模特、同一 Logo 安全边距。`,
+    `配音规则: 每段单独生成旁白/音效提示，但统一语言、音色、响度、BGM 音色和节奏；不要让用户听出两个不配套的视频。`,
+    `语言: ${contentLanguageLabel(settings.contentLanguage ?? frame.settings.contentLanguage)}`,
+    `品牌约束: ${brandLabel(brand)}; ${brandTone(brand)}; ${brandVisualStyle(brand)}`,
+    refs.length ? `视觉引用: ${refs.map((reference) => `${reference.role}:${reference.title}`).join(" / ")}` : "视觉引用: 无",
+    mergedUrl ? `执行状态: 已用 ffmpeg 合成本地片段 ${mergedUrl}` : segmentUrls.length > 1 ? "执行状态: 片段存在但不是本地可合并文件，等待远端合成服务或下载后合成。" : "执行状态: 已保存合成计划，等待视频片段全部生成。"
+  ].filter(Boolean).join("\n");
+
+  node.type = "compose";
+  node.title = node.title || "视频合成剪辑";
+  node.body = composePlan;
+  node.refs = refs;
+  const targetOutput = frame.outputs.find((output) => output.kind === "video");
+  if (targetOutput) {
+    if (mergedUrl) targetOutput.videoUrl = mergedUrl;
+    targetOutput.copy = appendCopyNote(targetOutput.copy, mergedUrl
+      ? `最终 MP4 已合成: ${mergedUrl}`
+      : `视频合成计划已生成：${segmentDurations.length} 段，等待片段 videoUrl 后合成。`);
+  }
+  frame.updatedAt = now();
+  await persistDb();
+  res.json({ frame, node, composePlan, mergedUrl, segments: segmentDurations });
 });
 
 app.get("/tasks/:id", (req, res) => {

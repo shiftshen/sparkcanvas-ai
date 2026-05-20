@@ -682,6 +682,12 @@ try {
   assert(videoNode.videoPlan.includes("视频类型: 文生视频") && videoNode.node.type === "video", "video node should save generation plan");
   assert(videoNode.videoPlan.includes("Storyboard plan") && videoNode.videoPlan.includes("关键帧") && videoNode.videoPlan.includes("引用素材"), "video node should create a duration-aware storyboard and keyframe plan with reference controls");
 
+  const composeNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_compose/generate-compose`, {
+    method: "POST",
+    body: JSON.stringify({ prompt: "合成 20 秒品牌短视频，统一每段旁白和转场", settings: { duration: "20s", ratio: "9:16 · 720P", contentLanguage: "zh-en", transition: "节奏点硬切 + 轻淡入淡出", audioMode: "分段旁白统一混音" } })
+  });
+  assert(composeNode.composePlan.includes("分段策略") && composeNode.composePlan.includes("配音规则") && composeNode.segments.length === 2, "compose node should create a multi-segment edit plan with per-segment voice/audio rules");
+
   const audioNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_audio/generate-audio`, {
     method: "POST",
     body: JSON.stringify({ prompt: "生成科技感节奏配乐", model: "gpt-5.4", settings: { mode: "配乐", duration: "15s", scene: "广告短视频", loop: false, translate: false } })
@@ -713,7 +719,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "dapot-brand-profile", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "dapot-brand-profile", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "compose", "audio", "generate", "task", "canvas", "export"],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));

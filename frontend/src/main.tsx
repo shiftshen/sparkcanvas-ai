@@ -260,6 +260,7 @@ type TextGenerateResponse = { frame: Frame; node: WorkflowNode; text: string; mo
 type ScriptGenerateResponse = { frame: Frame; node: WorkflowNode; script: string; model: string };
 type VideoGenerateResponse = { frame: Frame; node: WorkflowNode; videoPlan: string; model: string; videoId?: string; videoUrl?: string };
 type AudioGenerateResponse = { frame: Frame; node: WorkflowNode; audioPlan: string; model: string };
+type ComposeGenerateResponse = { frame: Frame; node: WorkflowNode; composePlan: string; mergedUrl?: string; segments: number[] };
 type TransformTextResponse = { text: string; action: "translate" | "optimize"; model: string };
 
 const coreNodeIds = ["input-image", "brand", "prompt", "output"];
@@ -1657,6 +1658,19 @@ function App() {
     }
   }
 
+  async function generateNodeCompose(nodeId: string, nodePrompt: string, settings: { duration: string; ratio: string; contentLanguage: ContentLanguage; transition: string; audioMode: string }) {
+    if (!activeFrame) return;
+    setError("");
+    try {
+      const result = await api.post<ComposeGenerateResponse>(`/canvas/frames/${activeFrame.id}/nodes/${nodeId}/generate-compose`, { prompt: nodePrompt, settings });
+      setFrames((current) => current.map((frame) => frame.id === result.frame.id ? result.frame : frame));
+      return result;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "视频合成计划失败");
+      throw caught;
+    }
+  }
+
   if (loading) return <div className="rh-loading"><Loader2 className="spin" /> SparkCanvas</div>;
   if (siteMode || !user) return <LoginScreen locale={locale} setLocale={setLocale} error={error} onLogin={enterWorkspace} />;
 
@@ -1752,6 +1766,7 @@ function App() {
         onGenerateScriptNode={(nodeId, nodePrompt, modelId, translate, contentLanguage) => generateNodeScript(nodeId, nodePrompt, modelId, translate, contentLanguage)}
         onGenerateVideoNode={(nodeId, nodePrompt, modelId, settings) => generateNodeVideo(nodeId, nodePrompt, modelId, settings)}
         onGenerateAudioNode={(nodeId, nodePrompt, modelId, settings) => generateNodeAudio(nodeId, nodePrompt, modelId, settings)}
+        onGenerateComposeNode={(nodeId, nodePrompt, settings) => generateNodeCompose(nodeId, nodePrompt, settings)}
         onUpload={(file, type, options) => createAsset(file, type, options)}
         onRunWorkflow={() => void runCurrentWorkflow()}
       />
@@ -2306,6 +2321,7 @@ function Canvas(props: {
   onGenerateScriptNode: (nodeId: string, nodePrompt: string, modelId: string, translate: boolean, contentLanguage?: ContentLanguage) => ScriptGenerateResponse | void | Promise<ScriptGenerateResponse | void>;
   onGenerateVideoNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean; contentLanguage: ContentLanguage }) => VideoGenerateResponse | void | Promise<VideoGenerateResponse | void>;
   onGenerateAudioNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean; contentLanguage: ContentLanguage }) => AudioGenerateResponse | void | Promise<AudioGenerateResponse | void>;
+  onGenerateComposeNode: (nodeId: string, nodePrompt: string, settings: { duration: string; ratio: string; contentLanguage: ContentLanguage; transition: string; audioMode: string }) => ComposeGenerateResponse | void | Promise<ComposeGenerateResponse | void>;
   onUpload: (file: File, type: Asset["type"], options?: AssetUploadOptions) => Promise<Asset | undefined>;
   onRunWorkflow: () => void;
 }) {
@@ -2834,6 +2850,10 @@ function Canvas(props: {
               if (!props.editingNodeId) return;
               return props.onGenerateAudioNode(props.editingNodeId, nodePrompt, modelId, settings);
             }}
+            onGenerateCompose={(nodePrompt, settings) => {
+              if (!props.editingNodeId) return;
+              return props.onGenerateComposeNode(props.editingNodeId, nodePrompt, settings);
+            }}
             onUpload={(file, type, options) => props.onUpload(file, type, options)}
             onPreview={(target) => props.setPreview({ ...target, nodeId: props.editingNodeId ?? undefined })}
           />
@@ -3012,6 +3032,7 @@ function NodeEditor({
   onGenerateScript,
   onGenerateVideo,
   onGenerateAudio,
+  onGenerateCompose,
   onUpload,
   onGenerationProgress,
   onPreview
@@ -3031,6 +3052,7 @@ function NodeEditor({
   onGenerateScript: (prompt: string, modelId: string, translate: boolean, contentLanguage?: ContentLanguage) => ScriptGenerateResponse | void | Promise<ScriptGenerateResponse | void>;
   onGenerateVideo: (prompt: string, modelId: string, settings: { mode: string; ratio: string; duration: string; sound: boolean; translate: boolean; contentLanguage: ContentLanguage }) => VideoGenerateResponse | void | Promise<VideoGenerateResponse | void>;
   onGenerateAudio: (prompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean; contentLanguage: ContentLanguage }) => AudioGenerateResponse | void | Promise<AudioGenerateResponse | void>;
+  onGenerateCompose: (prompt: string, settings: { duration: string; ratio: string; contentLanguage: ContentLanguage; transition: string; audioMode: string }) => ComposeGenerateResponse | void | Promise<ComposeGenerateResponse | void>;
   onUpload: (file: File, type: Asset["type"], options?: AssetUploadOptions) => Promise<Asset | undefined>;
   onGenerationProgress: (progress: number | null) => void;
   onPreview: (target: PreviewTarget) => void;
@@ -3053,6 +3075,7 @@ function NodeEditor({
   const [videoMode, setVideoMode] = useState("文生视频");
   const [videoModel, setVideoModel] = useState("grok-imagine-1.0-video-super-720p");
   const [videoRatio, setVideoRatio] = useState("16:9 · 720P · 5s");
+  const [videoDuration, setVideoDuration] = useState("5s");
   const [videoSound, setVideoSound] = useState(true);
   const [translateVideo, setTranslateVideo] = useState(false);
   const [audioMode, setAudioMode] = useState("配乐");
@@ -3440,12 +3463,34 @@ function NodeEditor({
   }
 
   if (draft.type === "compose") {
+    async function handleComposeGenerate() {
+      const currentDraft = draft;
+      if (!currentDraft) return;
+      setGenerating(true);
+      onSave({ title: currentDraft.title, body: currentDraft.body });
+      try {
+        const result = await Promise.resolve(onGenerateCompose(currentDraft.body || currentDraft.title || "合成当前画布视频片段", {
+          duration: videoDuration === "5s" ? "20s" : videoDuration,
+          ratio: videoRatio,
+          contentLanguage,
+          transition: "短交叉淡入淡出 + 节奏点硬切",
+          audioMode: "分段旁白统一混音"
+        }));
+        if (result?.node) {
+          setDraft(result.node);
+          onSave({ title: result.node.title, body: result.node.body, refs: result.node.refs });
+        }
+      } finally {
+        setGenerating(false);
+      }
+    }
+
     return (
       <aside className="rh-node-editor rh-utility-editor" onPointerDown={(event) => event.stopPropagation()}>
         <div className="rh-node-editor-head">
           <div>
             <strong>视频合成</strong>
-            <small>选择多个视频后由 AI 合成，当前先保存配置</small>
+            <small>长视频按 10 秒内片段拆分，统一配音、转场和最终 MP4 状态</small>
           </div>
           <button type="button" onClick={onClose}><X /></button>
         </div>
@@ -3457,6 +3502,16 @@ function NodeEditor({
         />
         {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
         <div className="rh-editor-actions">
+          <select value={videoDuration === "5s" ? "20s" : videoDuration} onChange={(event) => setVideoDuration(event.target.value)} title="最终时长">
+            <option>20s</option><option>30s</option><option>45s</option><option>60s</option>
+          </select>
+          <select value={videoRatio} onChange={(event) => setVideoRatio(event.target.value)} title="画面比例">
+            <option>16:9 · 720P</option><option>9:16 · 720P</option><option>1:1 · 720P</option>
+          </select>
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="旁白/字幕语言">
+            {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
+          </select>
+          <button type="button" onClick={() => void handleComposeGenerate()} disabled={generating}>{generating ? <Loader2 className="spin" /> : <Scissors />}生成合成计划</button>
           <button type="button" onClick={() => { onSave({ title: draft.title, body: draft.body }); onClose(); }}>保存</button>
         </div>
       </aside>
@@ -3601,7 +3656,7 @@ function NodeEditor({
         const result = await Promise.resolve(onGenerateVideo(prompt, videoModel, {
           mode: videoMode,
           ratio: videoRatio,
-          duration: "5s",
+          duration: videoDuration,
           sound: videoSound,
           translate: translateVideo,
           contentLanguage
@@ -3653,6 +3708,9 @@ function NodeEditor({
             <option>16:9 · 720P · 5s</option>
             <option>9:16 · 720P · 5s</option>
             <option>1:1 · 720P · 5s</option>
+          </select>
+          <select value={videoDuration} onChange={(event) => setVideoDuration(event.target.value)} title="最终时长">
+            <option>5s</option><option>10s</option><option>15s</option><option>20s</option><option>30s</option><option>45s</option><option>60s</option>
           </select>
           <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="字幕/旁白语言">
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
