@@ -3031,6 +3031,7 @@ function BottomComposer(props: {
   onUpdateFrame: (patch: Partial<Pick<Frame, "settings" | "modelId">> & { brandId?: string | null; brandInject?: boolean }) => void;
 }) {
   const settings = props.frame?.settings ?? defaultSettings;
+  const composerExample = "@imgen /生成海报 使用 $logo $ip $product，为 xmanx 生成 5.1 活动投放海报、PDF 教材和 MP4 短视频 -> poster, pdf, mp4";
   function updateSetting<K extends keyof GenerationSettings>(key: K, value: GenerationSettings[K]) {
     props.onUpdateFrame({ settings: { ...settings, [key]: value } });
   }
@@ -3052,7 +3053,7 @@ function BottomComposer(props: {
   return (
     <div className="rh-composer">
       <button type="button" className="rh-add" onClick={props.onCreateProject} title="新建项目画布"><Plus /><span>New</span></button>
-      <textarea value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} placeholder='@imgen cat；只有写 $logo / $product 或连接前置节点时才会使用参考内容' aria-label="生成当前画布提示词" />
+      <textarea value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} placeholder={composerExample} aria-label="生成当前画布提示词" />
       {referencePreview.total > 0 && (
         <div className="rh-composer-refs">
           <strong>{referencePreview.images.length} 图 / {referencePreview.texts.length} 文本</strong>
