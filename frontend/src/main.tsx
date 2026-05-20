@@ -232,6 +232,7 @@ type Locale = "zh" | "en" | "th";
 type Viewport = { x: number; y: number; scale: number };
 type PreviewTarget = { title: string; subtitle?: string; imageUrl?: string; color?: string; nodeId?: string };
 type NodeGenerateResponse = { frame: Frame; node: WorkflowNode; imageUrl: string; generated?: boolean; message?: string };
+type WorkflowGenerateResponse = { taskId: string; task: GenerationTask; frame: Frame; credits: number };
 type TextGenerateResponse = { frame: Frame; node: WorkflowNode; text: string; model: string };
 type ScriptGenerateResponse = { frame: Frame; node: WorkflowNode; script: string; model: string };
 type VideoGenerateResponse = { frame: Frame; node: WorkflowNode; videoPlan: string; model: string };
@@ -572,6 +573,29 @@ function currentBrandKey(brand?: Brand) {
   return normalizeBrandKey(brand.market.split(/\s+/)[0] ?? "") || normalizeBrandKey(brand.name) || brand.id;
 }
 
+function brandReferenceKeys(brand: Brand) {
+  return Array.from(new Set([
+    currentBrandKey(brand),
+    normalizeBrandKey(brand.name),
+    normalizeBrandKey(brand.market.split(/\s+/)[0] ?? ""),
+    normalizeBrandKey(brand.id.replace(/^brand_/, "")),
+    brand.id
+  ].filter(Boolean)));
+}
+
+function inferBrandForPrompt(prompt: string, brands: Brand[]) {
+  const normalized = normalizeBrandKey(prompt.replace(/\$[\p{L}0-9_-]+(?:\.[\p{L}0-9_-]+)+/gu, " "));
+  return [...brands].sort((a, b) => Number(b.active) - Number(a.active)).find((brand) => brandReferenceKeys(brand).some((key) => key && normalized.includes(key)));
+}
+
+function promptRequestsWholeBrand(prompt: string, brand?: Brand) {
+  if (!brand) return false;
+  const explicitPackage = brandReferenceKeys(brand).some((key) => new RegExp(`\\$${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`, "i").test(prompt));
+  const withoutQualifiedRefs = normalizeBrandKey(prompt.replace(/\$[\p{L}0-9_-]+(?:\.[\p{L}0-9_-]+)+/gu, " "));
+  const naturalMention = brandReferenceKeys(brand).some((key) => key && withoutQualifiedRefs.includes(key));
+  return explicitPackage || naturalMention;
+}
+
 function normalizeRoleText(asset: Pick<Asset, "title" | "meta" | "type">) {
   return `${asset.title} ${asset.meta} ${asset.type}`.toLowerCase();
 }
@@ -588,7 +612,31 @@ function assetRole(asset: Pick<Asset, "title" | "meta" | "type">): BrandAssetRol
 }
 
 function buildMentionItems(brand?: Brand, assets: Asset[] = []): MentionItem[] {
-  if (!brand) return [];
+  if (!brand) {
+    const neutral = "#f97316";
+    const agents: MentionItem[] = [{ id: "agent_imgen", token: "@imgen", group: "agent", kind: "agent", role: "imgen", title: "imgen", description: "图片生成 Skill：无品牌项目也可直接生成，只有显式 $ 引用才会传参考图", color: "#111827" }];
+    const commands: MentionItem[] = ["/生成海报", "/生成主图", "/写文案", "/翻译", "/润色", "/写视频脚本", "/生成视频"].map((token) => ({
+      id: `command_${token}`,
+      token,
+      group: "command" as const,
+      kind: "command" as const,
+      role: token.replace("/", ""),
+      title: token.replace("/", ""),
+      description: "CAL 命令，用于生成结构化工作流",
+      color: neutral
+    }));
+    const tags: MentionItem[] = ["%高级感", "%新品上市", "%Facebook广告", "%TikTok视频", "%电商主图", "%真实摄影"].map((token) => ({
+      id: `tag_${token}`,
+      token,
+      group: "tag" as const,
+      kind: "tag" as const,
+      role: "tag",
+      title: token.replace("%", ""),
+      description: "主题标签，用于风格、平台和模板推荐",
+      color: neutral
+    }));
+    return [...agents, ...commands, ...tags];
+  }
   const key = currentBrandKey(brand);
   const hasText = (value?: string) => Boolean(value?.trim());
   const agents: MentionItem[] = [
@@ -936,7 +984,7 @@ function App() {
   const activeBrand = brands.find((brand) => brand.active) ?? brands[0];
   const activeFrame = selectedFrameId ? frames.find((frame) => frame.id === selectedFrameId) : frames[0];
   const frameBrand = activeFrame?.brandId ? brands.find((brand) => brand.id === activeFrame.brandId) : undefined;
-  const projectBrand = frameBrand ?? (activeFrame?.brandId === "" ? undefined : activeBrand);
+  const projectBrand = activeFrame ? frameBrand : activeBrand;
   const model = models.find((item) => item.id === activeFrame?.modelId) ?? models[0];
   const activeBrandAssets = projectBrand ? assets.filter((asset) => asset.brandId === projectBrand.id) : [];
   const t = i18n[locale];
@@ -1032,33 +1080,32 @@ function App() {
     };
   }
 
-  async function generate(input = prompt, template?: Template, reuseCurrentWorkflow = true) {
+  async function generate(input = prompt, template?: Template) {
     if (!input.trim() || !model) return;
     setError("");
-    const nodePrompt = template ? template.intent : input;
-    const targetFrame = activeFrame ?? await api.post<Frame>("/canvas/frames", { brandId: projectBrand?.id ?? null });
-    if (!activeFrame) {
-      setFrames((current) => [targetFrame, ...current]);
-      setSelectedFrameId(targetFrame.id);
-    }
-    const settings = { ...(targetFrame.settings ?? defaultSettings), brandInject: false };
-    const currentNodes = reuseCurrentWorkflow ? normalizeWorkflowNodes(targetFrame.workflowNodes, shouldUseDefaultWorkflow(targetFrame.workflowNodes)) : [];
-    const node = canvasImageNode(nodePrompt, { ...targetFrame, workflowNodes: currentNodes });
-    const frameWithNode = await updateFrame(targetFrame.id, {
-      modelId: model.id,
-      settings,
-      brandInject: false,
-      workflowNodes: [...currentNodes, node]
-    });
-    setSelectedFrameId(frameWithNode.id);
+    const naturalBrand = inferBrandForPrompt(input, brands);
+    const selectedProjectBrand = activeFrame?.brandId ? frameBrand : undefined;
+    const generationBrand = naturalBrand ?? selectedProjectBrand;
+    const shouldInjectBrand = Boolean(generationBrand && (promptRequestsWholeBrand(input, generationBrand) || activeFrame?.settings?.brandInject));
+    const settings = {
+      ...(activeFrame?.settings ?? defaultSettings),
+      brandInject: shouldInjectBrand
+    };
     try {
-      const result = await api.post<NodeGenerateResponse>(`/canvas/frames/${frameWithNode.id}/nodes/${node.id}/generate`, {
-        prompt: nodePrompt,
+      const result = await api.post<WorkflowGenerateResponse>("/generate", {
+        prompt: input,
+        mode: "magic",
+        templateId: template?.id,
         modelId: model.id,
+        brandId: generationBrand?.id ?? null,
+        brandInject: shouldInjectBrand,
         settings
       });
-      setFrames((current) => current.map((frame) => frame.id === result.frame.id ? result.frame : frame));
-      if (result.generated === false) setError(result.message ?? "图片生成已降级，请检查图片生成 Skill。");
+      setFrames((current) => [result.frame, ...current.filter((frame) => frame.id !== result.frame.id)]);
+      setTasks((current) => [result.task, ...current.filter((task) => task.id !== result.task.id)]);
+      setSelectedFrameId(result.frame.id);
+      setPrompt("");
+      setUser((current) => current ? { ...current, credits: result.credits } : current);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "图片生成失败");
       throw caught;

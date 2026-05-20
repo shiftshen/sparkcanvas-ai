@@ -302,6 +302,42 @@ try {
   assert(/品牌约束:\s*无品牌/.test(plainAudioGenerated.audioPlan), `unbranded audio nodes should stay unbranded: ${plainAudioGenerated.audioPlan}`);
   assert(!plainAudioGenerated.audioPlan.includes("XMANX") && !plainAudioGenerated.audioPlan.includes("xmanx.com"), "unbranded audio nodes should not inject XMANX unless referenced");
 
+  const promptOnlyGenerated = await request("/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "@imgen /生成海报 马 -> 图片",
+      mode: "magic",
+      modelId: "imgen-skill",
+      brandId: null,
+      brandInject: false,
+      settings: { ratio: "1:1", count: 1, quality: "hd", strength: 70, duration: 0, brandInject: false },
+      x: 180,
+      y: 180
+    })
+  });
+  const promptOnlyCompleted = await waitForTask(promptOnlyGenerated.taskId);
+  const promptOnlyRefs = promptOnlyCompleted.frame.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [];
+  assert(promptOnlyCompleted.frame.brandId === "" && promptOnlyCompleted.frame.brandInjected === false, "plain one-line generation should remain unbranded");
+  assert(promptOnlyRefs.length === 0, "plain one-line generation should not attach XMANX refs when no brand is selected or mentioned");
+  assert(!promptOnlyCompleted.frame.finalPrompt.includes("XMANX") && !promptOnlyCompleted.frame.finalPrompt.includes("xmanx.com"), "plain one-line final prompt should not contain hidden XMANX context");
+
+  const inferredBrandGenerated = await request("/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "为 xmanx 生成一个 5.1 促销海报",
+      mode: "magic",
+      modelId: "imgen-skill",
+      settings: { ratio: "4:5", count: 1, quality: "hd", strength: 70, duration: 0 },
+      x: 260,
+      y: 200
+    })
+  });
+  const inferredBrandCompleted = await waitForTask(inferredBrandGenerated.taskId);
+  const inferredRefs = inferredBrandCompleted.frame.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [];
+  assert(inferredBrandCompleted.frame.brandId === brand.id && inferredBrandCompleted.frame.brandInjected === true, "natural language one-line generation should infer and inject XMANX");
+  assert(inferredRefs.length >= 3 && inferredRefs.every((ref) => ref.imageUrl), "inferred brand workflow should place concrete brand images on canvas");
+  assert(inferredBrandCompleted.frame.workflowNodes.some((node) => node.id === "prompt" && node.body.includes("5.1")), "one-line generation should create a full workflow prompt node");
+
   const generated = await request("/generate", {
     method: "POST",
     body: JSON.stringify({
@@ -411,6 +447,8 @@ try {
   assert(moved.x === 480 && moved.y === 260, "frame position should persist");
   assert(moved.brandId === brand.id, `frame should keep selected brand after updates: ${moved.brandId} !== ${brand.id}`);
   assert(moved.brandInjected === false && moved.brandContext === "", "brand injection toggle should hide full brand context");
+  const movedInputRefs = moved.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [];
+  assert(movedInputRefs.length > 0 && movedInputRefs.every((ref) => ["logo", "model"].includes(ref.role)), "brand-off workflow should keep only explicit CAL references, not the whole hidden brand package");
   assert(moved.finalPrompt.includes("AI launch kit for xmanx.com") && !moved.finalPrompt.includes("$copy.brand_name XMANX Smoke"), `resource references should still resolve without full brand context injection: ${moved.finalPrompt}`);
 
   const after = await request("/workspace");

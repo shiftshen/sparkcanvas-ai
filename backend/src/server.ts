@@ -383,11 +383,11 @@ function createSeedDb(): Db {
     },
     brands,
     assets: [
-      createAsset("XMANX Logo 透明底", "logo", "brand_xmanx", "#111827", "XM · transparent", "/brand-assets/generated/xmanx-logo.png"),
-      createAsset("黑橙首发运动鞋", "product", "brand_xmanx", "#f97316", "product · launch hero", "/brand-assets/generated/xmanx-product.png"),
-      createAsset("XM Navigator IP", "model", "brand_xmanx", "#f97316", "IP · brand assistant", "/brand-assets/generated/xmanx-ip.png"),
-      createAsset("固定 AI 模特", "model", "brand_xmanx", "#111827", "model · urban sport", "/brand-assets/generated/xmanx-model.png"),
-      createAsset("xmanx.com 店铺视觉", "upload", "brand_xmanx", "#f8fafc", "storefront · campaign landing", "/brand-assets/generated/xmanx-storefront.png")
+      createAsset("XMANX Logo 透明底", "logo", "brand_xmanx", "#111827", "XM · transparent", "/brand-assets/optimized/xmanx-logo.jpg"),
+      createAsset("黑橙首发运动鞋", "product", "brand_xmanx", "#f97316", "product · launch hero", "/brand-assets/optimized/xmanx-product.jpg"),
+      createAsset("XM Navigator IP", "model", "brand_xmanx", "#f97316", "IP · brand assistant", "/brand-assets/optimized/xmanx-ip.jpg"),
+      createAsset("固定 AI 模特", "model", "brand_xmanx", "#111827", "model · urban sport", "/brand-assets/optimized/xmanx-model.jpg"),
+      createAsset("xmanx.com 店铺视觉", "upload", "brand_xmanx", "#f8fafc", "storefront · campaign landing", "/brand-assets/optimized/xmanx-storefront.jpg")
     ],
     frames: [],
     tasks: []
@@ -429,6 +429,32 @@ function brandKey(brand: Brand) {
 function findBrandByKey(key: string) {
   const normalized = normalizeKey(key);
   return db.brands.find((brand) => brandKey(brand) === normalized || normalizeKey(brand.name) === normalized || brand.id === key);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function brandReferenceKeys(brand: Brand) {
+  return Array.from(new Set([
+    brandKey(brand),
+    normalizeKey(brand.name),
+    normalizeKey(brand.market.split(/\s+/)[0] ?? ""),
+    normalizeKey(brand.id.replace(/^brand_/, "")),
+    brand.id
+  ].filter(Boolean)));
+}
+
+function inferBrandFromPrompt(prompt: string) {
+  const normalized = normalizeKey(prompt.replace(/\$[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+/gu, " "));
+  return [...db.brands].sort((a, b) => Number(b.active) - Number(a.active)).find((brand) => brandReferenceKeys(brand).some((key) => key && normalized.includes(key)));
+}
+
+function promptRequestsWholeBrand(prompt: string, brand: Brand) {
+  const explicitPackage = brandReferenceKeys(brand).some((key) => new RegExp(`\\$${escapeRegExp(key)}(?![\\w.-])`, "i").test(prompt));
+  const withoutQualifiedRefs = normalizeKey(prompt.replace(/\$[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+/gu, " "));
+  const naturalMention = brandReferenceKeys(brand).some((key) => key && withoutQualifiedRefs.includes(key));
+  return explicitPackage || naturalMention;
 }
 
 const promptRefAlias: Record<string, string> = {
@@ -1060,8 +1086,7 @@ function buildBrandContext(brand: Brand) {
 
 function buildFinalPrompt(prompt: string, brandContext: string, inject: boolean, brand?: Brand) {
   prompt = normalizeLegacyPromptRefs(prompt);
-  const emptyAst: CalAst = { version: "cal/1.0", agents: [], commands: [], resources: [], lockedTexts: [], tags: [], params: {}, outputs: [], pipelineSteps: 1, warnings: [] };
-  const resolved = brand ? resolvePromptAssets(prompt, brand) : { prompt, imageReferences: [], textReferences: [], lockedTexts: [], tags: [], params: {}, outputs: [], agents: [], commands: [], ast: emptyAst, warnings: [] };
+  const resolved = resolvePromptAssets(prompt, brand);
   const referenceSummary = [
     resolved.agents.length ? `执行者: ${resolved.agents.map((item) => `@${item}`).join(", ")}` : "",
     resolved.commands.length ? `命令: ${resolved.commands.map((item) => `/${item}`).join(", ")}` : "",
@@ -1084,9 +1109,31 @@ function localPublicPathFromUrl(imageUrl?: string) {
   return existsSync(candidate) ? candidate : undefined;
 }
 
+async function compactReferenceImage(sourcePath: string, outputName: string, index: number) {
+  if (!/\.(png|jpe?g|webp)$/i.test(sourcePath)) return sourcePath;
+  await mkdir(generatedDir, { recursive: true });
+  const compactPath = path.join(generatedDir, `${outputName}-ref-${index + 1}-compact.jpg`);
+  const ok = await new Promise<boolean>((resolve) => {
+    const child = spawn("sips", ["-Z", "768", "-s", "format", "jpeg", sourcePath, "--out", compactPath], { stdio: "ignore" });
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      resolve(false);
+    }, 10000);
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0 && existsSync(compactPath));
+    });
+  });
+  return ok ? compactPath : sourcePath;
+}
+
 async function materializeReferenceImage(reference: ReferenceItem, outputName: string, index: number) {
   const publicPath = localPublicPathFromUrl(reference.imageUrl);
-  if (publicPath) return publicPath;
+  if (publicPath) return compactReferenceImage(publicPath, outputName, index);
   const match = reference.imageUrl?.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
   if (!match) return undefined;
   const extMap: Record<string, string> = {
@@ -1100,7 +1147,7 @@ async function materializeReferenceImage(reference: ReferenceItem, outputName: s
   const ext = extMap[match[1].toLowerCase()] ?? "png";
   const filePath = path.join(generatedDir, `${outputName}-ref-${index + 1}.${ext}`);
   await writeFile(filePath, Buffer.from(match[2], "base64"));
-  return filePath;
+  return compactReferenceImage(filePath, outputName, index);
 }
 
 function localAuthValue(...names: string[]) {
@@ -1545,7 +1592,7 @@ function fallbackImageDataUrl(label = "Image generation unavailable") {
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 }
 
-async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string, settings?: Partial<GenerationSettings>, timeoutMs = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? "120000")) {
+async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string, settings?: Partial<GenerationSettings>, timeoutMs = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? "300000")) {
   const imageConfig = imageGenerationConfig(modelName);
   if (!imageConfig.apiKey || !imageConfig.baseUrl) return undefined;
 
@@ -1687,23 +1734,25 @@ function createFrame(
   templateCost?: number,
   requestedModelId?: string,
   requestedSettings?: Partial<GenerationSettings>,
-  requestedBrandId?: string,
+  requestedBrandId?: string | null,
   requestedBrandInject?: boolean,
   requestedBrandContext?: string,
   requestedWorkflowNodes?: WorkflowNode[],
   requestedOutputs?: CanvasFrame["outputs"]
 ): CanvasFrame {
-  const brand = findBrand(requestedBrandId);
+  const brand = requestedBrandId === null ? undefined : requestedBrandId ? db.brands.find((item) => item.id === requestedBrandId) : inferBrandFromPrompt(prompt);
   const model = models.find((item) => item.id === requestedModelId) ?? models[0];
   const settings = defaultSettings(prompt, requestedSettings);
-  settings.brandInject = requestedBrandInject ?? settings.brandInject ?? brand.autoInject;
-  const brandContext = requestedBrandContext?.trim() || buildBrandContext(brand);
+  const explicitSettingsBrandInject = typeof requestedSettings?.brandInject === "boolean";
+  settings.brandInject = Boolean(brand && (requestedBrandInject ?? (explicitSettingsBrandInject ? settings.brandInject : promptRequestsWholeBrand(prompt, brand))));
+  const brandContext = brand ? requestedBrandContext?.trim() || buildBrandContext(brand) : "";
   const finalPrompt = buildFinalPrompt(prompt, brandContext, settings.brandInject, brand);
   const title = prompt.length > 24 ? `${prompt.slice(0, 24)}...` : prompt;
   const qualityMultiplier = settings.quality === "ultra" ? 1.6 : settings.quality === "hd" ? 1.2 : 1;
   const cost = Math.ceil(estimateCost(prompt, mode, templateCost) * model.costMultiplier * qualityMultiplier * Math.max(1, settings.count / 3));
+  const colors = neutralBrandColor(brand);
   const gradients = [
-    `linear-gradient(135deg, ${brand.accentColor}, #f8fafc 58%, ${brand.primaryColor})`,
+    `linear-gradient(135deg, ${colors.accent}, #f8fafc 58%, ${colors.primary})`,
     "linear-gradient(135deg, #f59e0b, #fff7ed 54%, #0f172a)",
     "linear-gradient(135deg, #14b8a6, #ecfeff 58%, #312e81)",
     "linear-gradient(135deg, #ef4444, #fff1f2 58%, #1f2937)"
@@ -1724,8 +1773,8 @@ function createFrame(
     modelId: model.id,
     modelName: model.name,
     settings,
-    brandId: brand.id,
-    brandName: brand.name,
+    brandId: brand?.id ?? "",
+    brandName: brand?.name ?? "无品牌",
     brandInjected: settings.brandInject,
     brandContext: settings.brandInject ? brandContext : "",
     finalPrompt,
@@ -1737,15 +1786,15 @@ function createFrame(
       title: index === 0 ? "主视觉" : index === 1 ? "变体 A" : "变体 B",
       kind: prompt.includes("视频") && index === 0 ? "video" : "image",
       gradient: gradients[index % gradients.length],
-      copy: `${brand.logoText} / ${brand.market.split(" ")[0] ?? "brand"}`
+      copy: brand ? `${brand.logoText} / ${brand.market.split(" ")[0] ?? "brand"}` : "无品牌 / prompt-only"
     })),
     createdAt: now(),
     updatedAt: now()
   };
 }
 
-function createEmptyFrame(requestedBrandId?: string): CanvasFrame {
-  const brand = findBrand(requestedBrandId);
+function createEmptyFrame(requestedBrandId?: string | null): CanvasFrame {
+  const brand = requestedBrandId ? db.brands.find((item) => item.id === requestedBrandId) : undefined;
   const model = models[0];
   const settings = defaultSettings("", { ratio: "1:1", count: 1, quality: "hd", brandInject: false });
   return {
@@ -1763,8 +1812,8 @@ function createEmptyFrame(requestedBrandId?: string): CanvasFrame {
     modelId: model.id,
     modelName: model.name,
     settings,
-    brandId: brand.id,
-    brandName: brand.name,
+    brandId: brand?.id ?? "",
+    brandName: brand?.name ?? "无品牌",
     brandInjected: false,
     brandContext: "",
     finalPrompt: "",
@@ -1776,27 +1825,28 @@ function createEmptyFrame(requestedBrandId?: string): CanvasFrame {
   };
 }
 
-function buildWorkflow(prompt: string, brand: Brand, brandInject = true) {
+function buildWorkflow(prompt: string, brand?: Brand, brandInject = true) {
   return [
     "Intent Router 解析自然语言目标",
-    brandInject ? `Brand Agent 注入 ${brand.name} 的 Logo、IP、素材角色、色彩、语气与禁用项` : "Brand Agent 跳过品牌上下文注入，仅使用本次提示词",
+    brand && brandInject ? `Brand Agent 注入 ${brand.name} 的 Logo、IP、素材角色、色彩、语气与禁用项` : "Brand Agent 跳过品牌上下文注入，仅使用本次提示词和显式 $ 引用",
     prompt.includes("视频") ? "编排图像关键帧与竖屏视频脚本" : "生成主视觉、背景与商品构图",
     "质量检查、资产入库并写回画布历史"
   ];
 }
 
-function buildWorkflowNodes(prompt: string, brand: Brand, model: (typeof models)[number], settings: GenerationSettings, brandContext = buildBrandContext(brand), brandInjected = settings.brandInject) {
+function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (typeof models)[number], settings: GenerationSettings, brandContext = brand ? buildBrandContext(brand) : "", brandInjected = settings.brandInject) {
   const promptRefs = resolvePromptAssets(prompt, brand).imageReferences;
-  const referenceItems = [...promptRefs, ...buildReferenceItems(brand)]
+  const colors = neutralBrandColor(brand);
+  const referenceItems = [...promptRefs, ...(brand && brandInjected ? buildReferenceItems(brand) : [])]
     .filter((reference, index, list) => list.findIndex((item) => item.id === reference.id) === index)
     .slice(0, 12);
   return [
     {
       id: "input-image",
       type: "image" as const,
-      title: "多图参考",
-      body: referenceItems.map((asset) => `${asset.role}: ${asset.title}`).join(" / "),
-      preview: brand.accentColor,
+      title: referenceItems.length ? "多图参考" : "空参考位",
+      body: referenceItems.length ? referenceItems.map((asset) => `${asset.role}: ${asset.title}`).join(" / ") : "未引用图片。输入 $logo / $ip / $xmanx.product 或连接前置节点后再生成。",
+      preview: colors.accent,
       refs: referenceItems,
       x: 0,
       y: 190,
@@ -1806,8 +1856,8 @@ function buildWorkflowNodes(prompt: string, brand: Brand, model: (typeof models)
     {
       id: "brand",
       type: "brand" as const,
-      title: "品牌上下文",
-      body: brandContext,
+      title: brand && brandInjected ? "品牌上下文" : "资源上下文",
+      body: brand && brandInjected ? brandContext : "品牌注入关闭。仅解析提示词中的显式 $ 资源引用，不自动附加项目品牌包。",
       parentId: "input-image",
       x: 245,
       y: 190,
@@ -1829,7 +1879,7 @@ function buildWorkflowNodes(prompt: string, brand: Brand, model: (typeof models)
       id: "output",
       type: "output" as const,
       title: "输出图",
-      body: "3 张品牌一致的可用结果",
+      body: `${settings.count} 张${brandInjected ? "品牌一致的" : ""}可用结果 · ${model.name}`,
       parentId: "prompt",
       x: 820,
       y: 190,
@@ -2226,6 +2276,15 @@ app.patch("/canvas/frames/:id", async (req, res) => {
   frame.workflowNodes = manualWorkflowNodes ?? frame.workflowNodes;
   frame.outputs = manualOutputs ?? frame.outputs;
   frame.steps = buildWorkflow(frame.prompt, brand, frame.brandInjected);
+  if (!manualWorkflowNodes && frame.prompt.trim() && frame.workflowNodes.some((node) => autoCoreNodeIds.has(node.id))) {
+    const rebuiltNodes = buildWorkflowNodes(frame.prompt, hasFrameBrand ? brand : undefined, model, frame.settings, frame.brandContext, frame.brandInjected);
+    frame.workflowNodes = rebuiltNodes.map((node) => {
+      const current = frame.workflowNodes.find((item) => item.id === node.id);
+      if (!current) return node;
+      if (!frame.brandInjected && (node.id === "input-image" || node.id === "brand" || node.id === "prompt")) return node;
+      return { ...node, title: current.title, body: current.body, preview: current.preview ?? node.preview, x: current.x ?? node.x, y: current.y ?? node.y, w: current.w ?? node.w, h: current.h ?? node.h };
+    });
+  }
 
   await persistDb();
   res.json(frame);
@@ -2574,7 +2633,7 @@ app.post("/generate", async (req, res) => {
     mode: z.enum(["magic", "template"]).default("magic"),
     templateId: z.string().optional(),
     modelId: z.string().optional(),
-    brandId: z.string().optional(),
+    brandId: z.string().nullable().optional(),
     brandInject: z.boolean().optional(),
     brandContext: z.string().optional(),
     workflowNodes: z.array(workflowNodeSchema).optional(),
