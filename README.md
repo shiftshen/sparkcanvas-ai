@@ -78,12 +78,14 @@ docker compose -f config/docker-compose.yml up -d
 
 - `/docs/`：包含所有的核心设计文档。
   - `SparkCanvas_Product_Design.md`：产品核心理念与交互设计。
-  - `SparkCanvas_Completeness_Validation.md`：功能完整性与用户体验验证报告。
+  - `Acceptance_Checklist.md`：当前上线验收清单，以品牌资产、CAL、画布工作流和真实输出闭环为准。
+  - `Product_QA_Matrix_2026-05-21.md`：产品、UX、前端、后端、AI 工作流和 QA 的统一验收矩阵。
+  - `SparkCanvas_Completeness_Validation.md`：早期功能完整性与用户体验验证报告，部分内容已过时，以验收清单为准。
   - `SparkCanvas_Architecture.md`：整体系统架构设计。
-  - `SparkCanvas_Frontend.md`：前端 React/tldraw 技术方案。
-  - `SparkCanvas_Backend.md`：后端 NestJS/Agent 技术方案。
-  - `SparkCanvas_Database.md`：PostgreSQL 数据库表结构设计。
-  - `SparkCanvas_Deployment_Plan.md`：Docker/K8s 部署方案与开发计划。
+  - `SparkCanvas_Frontend.md`：前端 React + Vite 工作台技术方案。
+  - `SparkCanvas_Backend.md`：后端 Express + 本地 JSON 持久化 + AI skill 调用方案。
+  - `SparkCanvas_Database.md`：后续数据库结构设计草案。
+  - `SparkCanvas_Deployment_Plan.md`：Docker/Nginx 部署方案与开发计划。
   - `AI_Workflow_Canvas_Project_Analysis.md`：前期对 aif.sengeai.com 的分析。
   - `AI_Studio_Optimization_Design.md`：前期对 marketing.xmanx.com 的分析。
 - `/frontend/`：前端代码。
