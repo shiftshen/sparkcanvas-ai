@@ -2905,6 +2905,13 @@ svg {
   background: #f9fafb;
 }
 
+.rh-video-preview img {
+  max-width: 100%;
+  max-height: 108px;
+  object-fit: contain;
+  border-radius: 7px;
+}
+
 .rh-video-preview span {
   color: #d1d5db;
   font-weight: 900;
@@ -3127,6 +3134,10 @@ svg {
   background: rgba(2, 6, 23, 0.76);
   font-size: 12px;
   font-weight: 900;
+}
+
+.rh-editor-image.compact-preview {
+  height: 150px;
 }
 
 .rh-editor-image.generating {

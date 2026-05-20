@@ -1269,6 +1269,29 @@ function optimizeWorkflowPrompt(input: string, brand: Brand | undefined, target:
   return `${withOrientation.replace(/\s+/g, " ").trim()} -> ${outputTargets.join(", ")}`;
 }
 
+function optimizeNodePrompt(input: string, brand: Brand | undefined, nodeType: WorkflowNode["type"], target: WorkflowOutputTarget, orientation: WorkflowOrientation) {
+  const normalized = normalizeLegacyPromptRefs(input).replace(/->\s*.+$/gmu, "").trim();
+  const refs = availableCalRefs(brand);
+  const base = normalized || "根据当前画布目标生成可编辑内容";
+  const orientationTag = tagForOrientation(orientation);
+  if (nodeType === "video") {
+    return `@imgen /generate-video ${refs ? `使用 ${refs}` : ""} ${base} 生成 ${orientation === "portrait" ? "竖屏" : orientation === "square" ? "方形" : "横屏"} 5s 品牌短视频，镜头包含开场钩子、主体展示、品牌收尾 ${orientationTag} -> mp4`.replace(/\s+/g, " ").trim();
+  }
+  if (nodeType === "script") {
+    return `/write-video-script ${refs ? `使用 ${refs}` : ""} ${base} 输出分镜表格：镜号 | 画面 | 运镜 | 时长 | 音效 | 字幕，便于后续生成 MP4。`.replace(/\s+/g, " ").trim();
+  }
+  if (nodeType === "process" || nodeType === "prompt" || nodeType === "brand") {
+    return `/write-copy ${refs ? `使用 ${refs}` : ""} ${base} 输出可编辑 Markdown：标题、卖点、正文、CTA，不要输出表格。`.replace(/\s+/g, " ").trim();
+  }
+  if (nodeType === "audio") {
+    return `/write-audio ${refs ? `使用 ${refs}` : ""} ${base} 输出音频提示词：情绪、节奏、乐器、段落、结尾记忆点。`.replace(/\s+/g, " ").trim();
+  }
+  if (nodeType === "compose") {
+    return `/compose-video ${base} 按 开场钩子 -> 产品证明 -> 优惠 CTA 合成，转场干净，输出 MP4。`;
+  }
+  return optimizeWorkflowPrompt(base, brand, target, orientation);
+}
+
 function executableImagePrompt(sourcePrompt: string, brand: Brand | undefined, targetLabel: string, settings?: Partial<GenerationSettings>) {
   const resolved = resolvePromptAssets(sourcePrompt, brand);
   const cleanIntent = stripCalForExecution(sourcePrompt, resolved);
@@ -1583,6 +1606,33 @@ function videoStatusFromResponse(data: unknown) {
     if (typeof value === "string") return value.toLowerCase();
   }
   return "";
+}
+
+async function refreshPendingVideoOutputs(limit = 2) {
+  const config = serviceConfig("video");
+  if (!config.apiKey) return;
+  const pending = db.frames.flatMap((frame) => frame.outputs
+    .filter((output) => output.kind === "video" && output.videoId && !output.videoUrl)
+    .map((output) => ({ frame, output }))).slice(0, limit);
+  const results = await Promise.all(pending.map(async ({ output }) => {
+    try {
+      const data = await getJson(`${config.baseUrl}/videos/${output.videoId}`, config.apiKey, 3000);
+      const url = videoUrlFromResponse(data);
+      const status = videoStatusFromResponse(data);
+      if (url) {
+        output.videoUrl = url;
+        output.copy = appendCopyNote(output.copy, `MP4 文件已生成: ${url}`);
+        return true;
+      } else if (status) {
+        output.copy = appendCopyNote(output.copy, `视频任务状态: ${status}`);
+        return true;
+      }
+    } catch {
+      // Workspace loading must not fail just because a remote video status check is unavailable.
+    }
+    return false;
+  }));
+  if (results.some(Boolean)) await persistDb();
 }
 
 async function runVideoGeneration(prompt: string, modelName?: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean }) {
@@ -2051,9 +2101,9 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         if (video?.videoId) output.videoId = video.videoId;
         if (video?.videoUrl) output.videoUrl = video.videoUrl;
         output.copy = appendCopyNote(output.copy, video?.videoUrl
-          ? `MP4 已真实生成: ${video.videoUrl}`
+          ? `MP4 文件已生成: ${video.videoUrl}`
           : video?.videoId
-            ? `MP4 视频任务已真实创建: ${video.videoId}`
+            ? `MP4 视频任务已创建但未返回文件: ${video.videoId}`
             : "视频 API 未配置，已保留首帧/脚本预览。");
       } catch (error) {
         output.copy = appendCopyNote(output.copy, `MP4 视频任务创建失败：${error instanceof Error ? error.message.slice(0, 140) : "video unavailable"}`);
@@ -2487,6 +2537,7 @@ app.get("/me", (_req, res) => {
 
 app.get("/workspace", async (_req, res) => {
   await repairInterruptedGenerations();
+  await refreshPendingVideoOutputs();
   res.json({ user: db.user, brands: db.brands, assets: db.assets, templates, models, frames: db.frames, tasks: db.tasks, ai: aiStatus() });
 });
 
@@ -2640,12 +2691,15 @@ app.post("/ai/transform-text", async (req, res) => {
     brandId: z.string().optional(),
     model: z.string().optional(),
     outputTarget: z.enum(["jpg", "png", "poster", "pdf", "mp4", "kit"]).default("jpg"),
-    orientation: z.enum(["square", "portrait", "landscape"]).default("landscape")
+    orientation: z.enum(["square", "portrait", "landscape"]).default("landscape"),
+    nodeType: z.enum(["image", "brand", "prompt", "model", "output", "reference", "process", "script", "video", "compose", "audio"]).optional()
   }).parse(req.body);
   const brand = findBrand(input.brandId);
   const resolved = resolvePromptAssets(input.text, brand);
   if (input.action === "optimize") {
-    const text = optimizeWorkflowPrompt(input.text, brand, input.outputTarget, input.orientation);
+    const text = input.nodeType
+      ? optimizeNodePrompt(input.text, brand, input.nodeType, input.outputTarget, input.orientation)
+      : optimizeWorkflowPrompt(input.text, brand, input.outputTarget, input.orientation);
     return res.json({ text, action: input.action, model: "cal-optimizer", resolved: resolvePromptAssets(text, brand) });
   }
   const instruction = input.action === "translate"
@@ -3050,8 +3104,11 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   const brand = frameBrand(frame);
   const contextBrand = frameContextBrand(frame);
   const settings = input.settings ?? {};
-  const prompt = executableVideoPrompt(input.prompt.trim(), contextBrand, settings);
+  const sourcePrompt = node.type === "output" ? `${frame.prompt}\n${input.prompt.trim()}`.trim() : input.prompt.trim();
+  const prompt = executableVideoPrompt(sourcePrompt, contextBrand, settings);
   let generationLines: string[] = [];
+  let videoId = "";
+  let videoUrl = "";
   try {
     const result = await runVideoGeneration(
       prompt,
@@ -3059,8 +3116,11 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
       settings
     );
     if (result?.videoUrl) {
+      videoId = result.videoId || "";
+      videoUrl = result.videoUrl;
       generationLines = [`视频ID: ${result.videoId || "completed"}`, `视频URL: ${result.videoUrl}`, "执行状态: 已由 yijiarj 视频模型真实生成。"];
     } else if (result?.videoId) {
+      videoId = result.videoId;
       generationLines = [`视频ID: ${result.videoId}`, "执行状态: 视频任务已创建但仍在生成，可用 /v1/videos/{video_id} 查询。"];
     }
   } catch (error) {
@@ -3078,12 +3138,24 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
     ...(generationLines.length ? generationLines : ["执行状态: 已保存视频生成配置，未配置视频 API Key。"])
   ].join("\n");
 
-  node.type = "video";
+  if (node.type !== "output") node.type = "video";
   node.title = node.title || "Video";
   node.body = videoPlan;
+  if (node.type === "output") {
+    const outputNodes = frame.workflowNodes.filter((item) => item.type === "output");
+    const outputIndex = outputNodes.findIndex((item) => item.id === node.id);
+    const targetOutput = outputIndex >= 0 ? frame.outputs[outputIndex] : frame.outputs.find((item) => item.kind === "video");
+    if (targetOutput) {
+      if (videoId) targetOutput.videoId = videoId;
+      if (videoUrl) targetOutput.videoUrl = videoUrl;
+      targetOutput.copy = appendCopyNote(targetOutput.copy, generationLines.join(" ") || "执行状态: 已保存视频生成配置，未配置视频 API Key。");
+      const ref = generatedReference(`generated_${node.id}_${Date.now().toString(36)}`, targetOutput, node.preview ?? "#0f172a", "video-preview");
+      upsertNodeReference(node, ref);
+    }
+  }
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame, node, videoPlan, model: input.model ?? serviceConfig("video").model });
+  res.json({ frame, node, videoPlan, model: input.model ?? serviceConfig("video").model, videoId, videoUrl });
 });
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => {

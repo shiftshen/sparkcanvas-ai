@@ -418,6 +418,12 @@ try {
   assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id === "output-mp4" && node.refs?.some((ref) => ref.imageUrl)), "MP4 output node should show a preview reference");
   assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "video" && /MP4|视频/.test(output.copy)), "MP4 output should record video execution status");
   assert(multiOutputCompleted.frame.steps.some((step) => step.includes("PDF") && step.includes("MP4")), "workflow steps should mention requested PDF and MP4 outputs");
+  const mp4OutputNode = await request(`/canvas/frames/${multiOutputCompleted.frame.id}/nodes/output-mp4/generate-video`, {
+    method: "POST",
+    body: JSON.stringify({ prompt: "刷新 MP4 输出任务", model: "grok-imagine-1.0-video-super-720p", settings: { mode: "图生视频", ratio: "16:9 · 720P · 5s", duration: "5s", sound: true, translate: false } })
+  });
+  assert(mp4OutputNode.node.id === "output-mp4" && mp4OutputNode.node.type === "output", "MP4 output node generation should keep the node as an output node");
+  assert(mp4OutputNode.frame.outputs.some((output) => output.kind === "video" && /执行状态|视频任务|MP4/.test(output.copy)), "MP4 output node should update the video output status instead of calling image generation");
 
   const generated = await request("/generate", {
     method: "POST",
@@ -543,7 +549,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "brand", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "legacy-reference-alias", "model", "parameters", "workflow-nodes", "output-presets", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "brand", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "legacy-reference-alias", "model", "parameters", "workflow-nodes", "output-presets", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));

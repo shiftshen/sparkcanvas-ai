@@ -251,7 +251,7 @@ type NodeGenerateResponse = { frame: Frame; node: WorkflowNode; imageUrl: string
 type WorkflowGenerateResponse = { taskId: string; task: GenerationTask; frame: Frame; credits: number };
 type TextGenerateResponse = { frame: Frame; node: WorkflowNode; text: string; model: string };
 type ScriptGenerateResponse = { frame: Frame; node: WorkflowNode; script: string; model: string };
-type VideoGenerateResponse = { frame: Frame; node: WorkflowNode; videoPlan: string; model: string };
+type VideoGenerateResponse = { frame: Frame; node: WorkflowNode; videoPlan: string; model: string; videoId?: string; videoUrl?: string };
 type AudioGenerateResponse = { frame: Frame; node: WorkflowNode; audioPlan: string; model: string };
 type TransformTextResponse = { text: string; action: "translate" | "optimize"; model: string };
 
@@ -973,6 +973,25 @@ function displayMentionToken(item: MentionItem, symbol: string) {
   return item.token;
 }
 
+function promptTemplateForNode(type: WorkflowNode["type"], outputKind?: Frame["outputs"][number]["kind"]) {
+  if (type === "video" || outputKind === "video") {
+    return "@imgen /generate-video 使用 $product $logo，生成 16:9 横屏 5s 品牌短视频。镜头: 产品特写 -> 使用场景 -> 品牌收尾。风格 %premium -> mp4";
+  }
+  if (type === "script") {
+    return "/write-video-script 使用 $product $ip，输出 5 镜头分镜表格：镜号 | 画面 | 运镜 | 时长 | 音效 | 字幕。风格 %真实摄影";
+  }
+  if (type === "process" || outputKind === "document") {
+    return "/write-copy 使用 $copy.brand_name $copy.slogan，生成可编辑 Markdown：标题、卖点、三段正文、CTA。不要输出表格。";
+  }
+  if (type === "audio") {
+    return "/write-audio 使用 $copy.slogan，生成 15s 广告配乐提示词：情绪、节奏、乐器、起承转合、结尾品牌记忆点。";
+  }
+  if (type === "compose") {
+    return "/compose-video 选择多个视频片段，按 开场钩子 -> 产品证明 -> 优惠 CTA 合成，转场干净，输出 9:16 MP4。";
+  }
+  return "@imgen /generate-poster 使用 $logo $product $ip，生成 Meta Feed 4:5 商业海报。主体清晰、无乱码文字、保留 logo 安全边距。风格 %premium -> jpg";
+}
+
 function StoryboardBoard({ body, refs, compact = false }: { body: string; refs: ReferenceItem[]; compact?: boolean }) {
   const table = parseStoryboardTable(body, refs);
   if (!table.rows.length) return null;
@@ -1003,19 +1022,31 @@ function StoryboardBoard({ body, refs, compact = false }: { body: string; refs: 
   );
 }
 
-function imageFilename(title = "xmanx-image", url = "") {
-  const ext = url.includes("image/jpeg") || url.endsWith(".jpg") || url.endsWith(".jpeg") ? "jpg" : url.includes("image/webp") || url.endsWith(".webp") ? "webp" : "png";
-  return `${title.replace(/[\\/:*?"<>|#%&{}$!`'@+=]/g, "-").replace(/\s+/g, "-").slice(0, 80) || "xmanx-image"}.${ext}`;
+function safeDownloadName(title = "sparkcanvas-asset") {
+  return title.replace(/[\\/:*?"<>|#%&{}$!`'@+=]/g, "-").replace(/\s+/g, "-").slice(0, 80) || "sparkcanvas-asset";
 }
 
-function downloadImage(url: string | undefined, title: string) {
+function fileExtension(url = "", fallback = "png") {
+  const cleanUrl = url.split("?")[0].toLowerCase();
+  if (url.includes("image/jpeg") || cleanUrl.endsWith(".jpg") || cleanUrl.endsWith(".jpeg")) return "jpg";
+  if (url.includes("image/webp") || cleanUrl.endsWith(".webp")) return "webp";
+  if (url.includes("video/mp4") || cleanUrl.endsWith(".mp4") || cleanUrl.includes("/videos/")) return "mp4";
+  if (url.includes("application/pdf") || cleanUrl.endsWith(".pdf")) return "pdf";
+  return fallback;
+}
+
+function downloadFile(url: string | undefined, title: string, fallbackExt = "png") {
   if (!url) return;
   const link = document.createElement("a");
   link.href = url;
-  link.download = imageFilename(title, url);
+  link.download = `${safeDownloadName(title)}.${fileExtension(url, fallbackExt)}`;
   document.body.appendChild(link);
   link.click();
   link.remove();
+}
+
+function downloadImage(url: string | undefined, title: string) {
+  downloadFile(url, title, "png");
 }
 
 function readFileAsDataUrl(file: File) {
@@ -2253,6 +2284,7 @@ function Canvas(props: {
             activeBrand={props.activeBrand}
             models={props.models}
             frameSettings={props.frame?.settings ?? defaultSettings}
+            framePrompt={props.frame?.prompt ?? ""}
             output={nodes.find((node) => node.id === props.editingNodeId)?.type === "output" && props.editingNodeId ? outputForNode(props.frame, outputNodes, props.editingNodeId) : undefined}
             onClose={() => props.setEditingNodeId(null)}
             onSave={(patch) => props.editingNodeId && saveNode(props.editingNodeId, patch)}
@@ -2445,6 +2477,7 @@ function NodeEditor({
   activeBrand,
   models,
   frameSettings,
+  framePrompt,
   output,
   onClose,
   onSave,
@@ -2461,6 +2494,7 @@ function NodeEditor({
   activeBrand?: Brand;
   models: ModelOption[];
   frameSettings: GenerationSettings;
+  framePrompt: string;
   output?: Frame["outputs"][number];
   onClose: () => void;
   onSave: (patch: Partial<WorkflowNode>) => void;
@@ -2516,7 +2550,10 @@ function NodeEditor({
     ...(output?.imageUrl ? [{ id: `output_${output.id}`, title: output.title, imageUrl: output.imageUrl }] : []),
     ...imageRefs
   ].filter((item, index, list) => item.imageUrl && list.findIndex((candidate) => candidate.imageUrl === item.imageUrl) === index);
-  const canGenerateImage = draft.type === "image" || draft.type === "reference" || draft.type === "output";
+  const isVideoOutput = draft.type === "output" && output?.kind === "video";
+  const isDocumentOutput = draft.type === "output" && output?.kind === "document";
+  const canGenerateImage = draft.type === "image" || draft.type === "reference" || (draft.type === "output" && !isVideoOutput && !isDocumentOutput);
+  const promptPlaceholder = promptTemplateForNode(draft.type, output?.kind);
   const mentionItems = buildMentionItems(activeBrand, assets);
   const activeDraftQuery = activeReferenceQuery(draft.body);
   const filteredDraftMentionItems = filterMentionItems(mentionItems, draft.body);
@@ -2675,7 +2712,10 @@ function NodeEditor({
         text: currentDraft.body,
         action,
         brandId: activeBrand?.id,
-        model: textModel
+        model: textModel,
+        outputTarget: draft.type === "video" || isVideoOutput ? "mp4" : isDocumentOutput ? "pdf" : "jpg",
+        orientation: videoRatio.startsWith("9:16") ? "portrait" : videoRatio.startsWith("1:1") ? "square" : "landscape",
+        nodeType: isVideoOutput ? "video" : isDocumentOutput ? "process" : draft.type
       });
       const nextDraft = { ...currentDraft, body: result.text };
       setDraft(nextDraft);
@@ -2704,7 +2744,7 @@ function NodeEditor({
           value={draft.body}
           onChange={(event) => setDraft({ ...draft, body: event.target.value })}
           onBlur={() => onSave({ body: draft.body })}
-          placeholder='@设计师 /生成海报 使用 $logo $product.hero，显示 "会员免费锅底"，主题 %高级感'
+          placeholder={promptPlaceholder}
         />
         {activeDraftQuery && (
           <MentionPopover items={filteredDraftMentionItems} onPick={appendMention} />
@@ -2774,7 +2814,7 @@ function NodeEditor({
         <textarea
           value={draft.body}
           onChange={(event) => setDraft({ ...draft, body: event.target.value })}
-          placeholder={draft.type === "brand" ? "整理 Logo、IP、产品、模特、语气、禁用项等品牌上下文。" : "输入最终提示词。"}
+          placeholder={draft.type === "brand" ? "整理 Logo、IP、产品、模特、语气、禁用项等品牌上下文。" : promptPlaceholder}
         />
         {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
         <div className="rh-editor-actions">
@@ -2828,7 +2868,7 @@ function NodeEditor({
             value={draft.body}
             onChange={(event) => setDraft({ ...draft, body: event.target.value })}
             onBlur={() => onSave({ body: draft.body })}
-            placeholder="写下你想讲的故事、文案、角色设定、图片反推提示词或文本生成要求。格式由指令决定，不需要先选择。"
+            placeholder={promptPlaceholder}
           />
           {generating && (
             <div className="rh-text-generation-focus">
@@ -2870,7 +2910,7 @@ function NodeEditor({
           value={draft.body}
           onChange={(event) => setDraft({ ...draft, body: event.target.value })}
           onBlur={() => onSave({ title: draft.title, body: draft.body })}
-          placeholder={draft.type === "compose" ? "选择多个视频节点后，描述剪辑顺序、转场、节奏和输出规格" : "描述旁白、音效、配乐风格或音频参考"}
+          placeholder={promptPlaceholder}
         />
         {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
         <div className="rh-editor-actions">
@@ -2922,7 +2962,7 @@ function NodeEditor({
           value={draft.body}
           onChange={(event) => setDraft({ ...draft, body: event.target.value })}
           onBlur={() => onSave({ body: draft.body })}
-          placeholder='描述配乐、音效或旁白。可用 $logo / $ip 引用图片资源，用 $copy.slogan 引用品牌文案'
+          placeholder={promptPlaceholder}
         />
         {activeDraftQuery && (
           <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />
@@ -2981,7 +3021,7 @@ function NodeEditor({
           value={draft.body}
           onChange={(event) => setDraft({ ...draft, body: event.target.value })}
           onBlur={() => onSave({ title: draft.title, body: draft.body })}
-          placeholder='@视频导演 /写视频脚本 使用 $product.hero $ip，主题 %真实摄影'
+          placeholder={promptPlaceholder}
         />
         {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
         <div className="rh-script-editor-footer">
@@ -3000,14 +3040,15 @@ function NodeEditor({
     );
   }
 
-  if (draft.type === "video") {
+  if (draft.type === "video" || isVideoOutput) {
     async function handleVideoGenerate() {
       const currentDraft = draft;
       if (!currentDraft) return;
       setGenerating(true);
       onSave({ title: currentDraft.title, body: currentDraft.body });
       try {
-        const result = await Promise.resolve(onGenerateVideo(currentDraft.body || currentDraft.title, videoModel, {
+        const prompt = isVideoOutput ? `${framePrompt}\n\n${currentDraft.body || currentDraft.title}`.trim() : currentDraft.body || currentDraft.title;
+        const result = await Promise.resolve(onGenerateVideo(prompt, videoModel, {
           mode: videoMode,
           ratio: videoRatio,
           duration: "5s",
@@ -3043,14 +3084,14 @@ function NodeEditor({
           value={draft.body}
           onChange={(event) => setDraft({ ...draft, body: event.target.value })}
           onBlur={() => onSave({ body: draft.body })}
-          placeholder='@视频导演 /生成视频 使用 $product.hero $logo，主题 %TikTok视频'
+          placeholder={promptPlaceholder}
         />
         {activeDraftQuery && (
           <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />
         )}
         <div className="rh-video-preview">
-          <Play />
-          <span>{draft.body ? "视频生成配置已就绪" : "空视频节点"}</span>
+          {output?.imageUrl ? <img src={output.imageUrl} alt={draft.title} /> : <Play />}
+          <span>{output?.videoUrl ? "MP4 文件已生成，可下载" : output?.videoId ? `视频任务已创建: ${output.videoId}` : draft.body ? "视频生成配置已就绪，尚未得到 MP4 文件" : "空视频节点"}</span>
         </div>
         <div className="rh-video-editor-footer">
           <select value={videoModel} onChange={(event) => setVideoModel(event.target.value)}>
@@ -3069,7 +3110,28 @@ function NodeEditor({
           <button type="button" title="参数"><SlidersHorizontal /></button>
           <button type="button">1个</button>
           <small>♦ 135</small>
-          <button type="button" className="submit" title="生成视频配置" aria-label="生成视频配置" onClick={() => void handleVideoGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
+          {output?.videoUrl && <button type="button" onClick={() => downloadFile(output.videoUrl, draft.title, "mp4")}><ArrowDownToLine />下载MP4</button>}
+          <button type="button" className="submit" title={isVideoOutput ? "创建或刷新视频任务" : "生成视频配置"} aria-label="生成视频配置" onClick={() => void handleVideoGenerate()} disabled={generating || !(draft.body || framePrompt).trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
+        </div>
+      </aside>
+    );
+  }
+
+  if (isDocumentOutput) {
+    return (
+      <aside className="rh-node-editor rh-context-editor prompt" onPointerDown={(event) => event.stopPropagation()}>
+        <div className="rh-node-editor-head">
+          <div>
+            <strong>{draft.title}</strong>
+            <small>PDF 当前是封面/结构预览，尚未导出真实 PDF 文件。</small>
+          </div>
+          <button type="button" onClick={onClose}><X /></button>
+        </div>
+        {output?.imageUrl && <button type="button" className="rh-editor-image compact-preview" onClick={() => onPreview({ title: draft.title, subtitle: output.copy, imageUrl: output.imageUrl, color: draft.preview, nodeId: draft.id })} style={{ backgroundImage: `url(${output.imageUrl})` }}><span>PDF 封面预览</span></button>}
+        <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} onBlur={() => onSave({ body: draft.body })} placeholder={promptPlaceholder} />
+        <div className="rh-editor-actions">
+          <button type="button" onClick={() => { onSave({ title: draft.title, body: draft.body }); onClose(); }}>保存结构</button>
+          <button type="button" disabled>PDF 导出待接入</button>
         </div>
       </aside>
     );
@@ -3090,7 +3152,7 @@ function NodeEditor({
       </label>
       <label>
         生成 / 处理提示词
-        <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} onBlur={() => onSave({ body: draft.body })} placeholder="描述这个节点要生成或处理的内容，可以用 $ 引用资源。" />
+        <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} onBlur={() => onSave({ body: draft.body })} placeholder={promptPlaceholder} />
         {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
       </label>
       <div className="rh-editor-actions">
