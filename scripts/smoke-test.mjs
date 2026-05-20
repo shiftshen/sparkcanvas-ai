@@ -460,6 +460,22 @@ try {
   assert(mp4OutputNode.frame.outputs.some((output) => output.kind === "video" && /执行状态|视频任务|MP4/.test(output.copy)), "MP4 output node should update the video output status instead of calling image generation");
   assert(mp4OutputNode.videoPlan.includes("Video language: Chinese + Thai") && mp4OutputNode.videoPlan.includes("语言: Chinese + Thai"), "video generation prompt should carry content language");
 
+  const beforeRerunWorkspace = await request("/workspace");
+  const beforeRerunFrameCount = beforeRerunWorkspace.frames.length;
+  const rerun = await request(`/canvas/frames/${multiOutputCompleted.frame.id}/run`, {
+    method: "POST",
+    body: JSON.stringify({
+      modelId: "imgen-skill",
+      settings: { ratio: "16:9", count: 1, quality: "hd", strength: 72, duration: 8, contentLanguage: "zh-th" }
+    })
+  });
+  assert(rerun.frame.id === multiOutputCompleted.frame.id && rerun.task.frameId === multiOutputCompleted.frame.id, "current workflow rerun should keep the existing canvas frame id");
+  const rerunCompleted = await waitForTask(rerun.taskId);
+  const afterRerunWorkspace = await request("/workspace");
+  assert(afterRerunWorkspace.frames.length === beforeRerunFrameCount, "current workflow rerun must not create a new project/canvas");
+  assert(rerunCompleted.frame.outputs.some((output) => output.kind === "document" && output.fileUrl?.startsWith("/generated/") && output.fileUrl.endsWith(".pdf")), "rerun PDF output should remain a real downloadable PDF");
+  assert(rerunCompleted.frame.workflowNodes.some((node) => node.id === "output-pdf" && node.refs?.some((ref) => ref.role === "document-preview" && ref.imageUrl)), "rerun PDF node should keep a document-preview image ref");
+
   const generated = await request("/generate", {
     method: "POST",
     body: JSON.stringify({
@@ -491,7 +507,7 @@ try {
 
   const editedWorkflowNodes = completed.frame.workflowNodes.map((node) => (
     node.id === "input-image"
-      ? { ...node, title: "可编辑参考图", body: "可编辑参考图：Logo / IP / 模特 / 批量商品素材", preview: "#22c55e", x: 88, y: 188, refs: [...node.refs, { id: "ref_smoke_model", role: "model", title: "Smoke 模特参考", description: "用于测试多图参考编辑", color: "#22c55e", imageUrl: "data:image/svg+xml;base64,PHN2Zy8+" }] }
+      ? { ...node, title: "可编辑参考图", body: "可编辑参考图：Logo / IP / 模特 / 批量商品素材", preview: "#22c55e", x: 88, y: 188, w: 286, h: 248, edgeOffsetY: 37, refs: [...node.refs, { id: "ref_smoke_model", role: "model", title: "Smoke 模特参考", description: "用于测试多图参考编辑", color: "#22c55e", imageUrl: "data:image/svg+xml;base64,PHN2Zy8+" }] }
       : node.id === "brand"
         ? { ...node, body: `${completed.frame.brandContext}\n项目微调：本批图片强调绿色上线活动。` }
         : node
@@ -531,6 +547,8 @@ try {
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").refs.some((reference) => reference.id === "ref_smoke_model"), "multi image reference edits should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").refs.some((reference) => reference.id === "ref_smoke_model" && reference.imageUrl?.startsWith("data:image")), "uploaded reference image data should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").x === 88, "node drag positions should persist");
+  assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").w === 286 && savedWorkflow.workflowNodes.find((node) => node.id === "input-image").h === 248, "node resize dimensions should persist");
+  assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").edgeOffsetY === 37, "line drag offsets should persist");
   assert(savedWorkflow.workflowNodes.some((node) => node.id === "node_smoke_reference" && node.type === "reference"), "inserted workflow nodes should persist");
   for (const type of ["process", "script", "video", "compose", "audio"]) {
     assert(savedWorkflow.workflowNodes.some((node) => node.type === type), `${type} node should persist`);
@@ -585,7 +603,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "audio", "generate", "task", "canvas", "export"],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));

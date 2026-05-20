@@ -1379,7 +1379,25 @@ function App() {
       setError("请输入一句 CAL 指令，或先选择一个已有工作流。");
       return;
     }
-    await generate(sourcePrompt, undefined, workflowControlsFromFrame(activeFrame, sourcePrompt));
+    if (!activeFrame) {
+      await generate(sourcePrompt, undefined, workflowControlsFromFrame(undefined, sourcePrompt));
+      return;
+    }
+    setError("");
+    try {
+      const result = await api.post<WorkflowGenerateResponse>(`/canvas/frames/${activeFrame.id}/run`, {
+        modelId: model?.id,
+        settings: activeFrame.settings
+      });
+      setFrames((current) => current.map((frame) => frame.id === result.frame.id ? result.frame : frame));
+      setTasks((current) => [result.task, ...current.filter((task) => task.id !== result.task.id)]);
+      setSelectedFrameId(result.frame.id);
+      setPrompt("");
+      setUser((current) => current ? { ...current, credits: result.credits } : current);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "工作流运行失败");
+      throw caught;
+    }
   }
 
   async function createProject(options?: { title?: string; brandId?: string | null }) {
@@ -1655,7 +1673,11 @@ function App() {
           aiDiagnostics={aiDiagnostics}
           credits={user.credits}
           locale={locale}
-          onGenerate={(controls, promptOverride) => void generate((promptOverride ?? prompt).trim() || activeFrame?.prompt || "", undefined, controls)}
+          onGenerate={(controls, promptOverride) => {
+            const nextPrompt = (promptOverride ?? prompt).trim();
+            if (!nextPrompt && activeFrame?.prompt) void runCurrentWorkflow();
+            else void generate(nextPrompt, undefined, controls);
+          }}
           onCreateProject={() => void createProject({ brandId: projectBrand?.id ?? null })}
           onUpdateFrame={(patch) => activeFrame && void updateFrame(activeFrame.id, patch)}
         />
@@ -2337,7 +2359,7 @@ function Canvas(props: {
         <div className="rh-selection-pill">
           <Wand2 />
           <div><strong>元素选择模式</strong><small>{activeSelectedNode.type === "reference" || activeSelectedNode.type === "image" || activeSelectedNode.type === "output" ? "点击图片预览，底部编辑生成参数" : "底部固定面板可编辑当前节点"}</small></div>
-          <button type="button" className="primary" onClick={props.onRunWorkflow} disabled={props.frame?.status === "generating"}><Play />运行工作流</button>
+          <button type="button" className="primary" onClick={props.onRunWorkflow} disabled={props.frame?.status === "generating" || Boolean(props.editingNodeId)} title={props.editingNodeId ? "请先保存或关闭节点编辑器，再运行整个工作流。" : "运行当前画布工作流"}><Play />{props.editingNodeId ? "关闭后运行" : "运行工作流"}</button>
           <button type="button" onClick={() => props.setEditingNodeId(activeSelectedNode.id)}><Route />返回节点</button>
           <button type="button" onClick={closeNodeEditor}><X />退出</button>
         </div>
@@ -2957,7 +2979,7 @@ function NodeEditor({
         >
           {!imageUrl && <Image />}
           <span>{imageUrl ? "当前图片" : "空图片节点"}</span>
-          {generating && <div className="rh-generation-focus"><strong>生成中 {generationProgress}%...</strong><small>取消</small><i><b style={{ width: `${generationProgress}%` }} /></i></div>}
+          {generating && <div className="rh-generation-focus"><strong>生成中 {generationProgress}%...</strong><small>@imgen 正在出图</small><i><b style={{ width: `${generationProgress}%` }} /></i></div>}
         </button>
         {generationMessage && (
           <small className={`rh-generation-message ${/失败|降级|unavailable|HTTP|missing/i.test(generationMessage) ? "warning" : ""}`}>

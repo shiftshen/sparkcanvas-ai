@@ -3580,6 +3580,7 @@ svg {
   overflow-x: auto !important;
   overflow-y: hidden !important;
   padding: 0 !important;
+  scrollbar-width: thin;
 }
 
 .rh-image-editor-footer select,
@@ -3590,6 +3591,51 @@ svg {
   height: 34px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.rh-image-editor-footer > select:nth-of-type(1) {
+  flex: 0 0 156px;
+}
+
+.rh-image-editor-footer > select:nth-of-type(2) {
+  flex: 0 0 96px;
+}
+
+.rh-image-editor-footer > select:nth-of-type(3) {
+  flex: 0 0 72px;
+}
+
+.rh-image-editor-footer > select:nth-of-type(4) {
+  flex: 0 0 86px;
+}
+
+.rh-image-editor-footer > select:nth-of-type(5) {
+  flex: 0 0 70px;
+}
+
+.rh-image-editor-footer > select:nth-of-type(6) {
+  flex: 0 0 146px;
+}
+
+.rh-image-editor-footer > select:nth-of-type(7) {
+  flex: 0 0 136px;
+}
+
+.rh-image-editor-footer > button,
+.rh-image-editor-footer > .rh-mini-range,
+.rh-image-editor-footer > small {
+  flex: 0 0 auto;
+}
+
+.rh-image-editor-footer > .rh-mini-range {
+  width: 116px;
+}
+
+.rh-image-editor-footer .submit {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  box-shadow: -10px 0 18px rgba(33, 33, 32, 0.86);
 }
 
 .rh-editor-actions.compact {
@@ -4419,12 +4465,13 @@ svg {
     right: 8px !important;
     bottom: 10px !important;
     width: auto !important;
-    height: auto !important;
+    height: 190px !important;
     min-height: 190px !important;
+    max-height: calc(100vh - 118px) !important;
     transform: none;
     grid-template-columns: 48px minmax(0, 1fr) !important;
-    grid-template-rows: 72px auto 8px !important;
-    overflow: visible;
+    grid-template-rows: 72px 42px 8px !important;
+    overflow: hidden !important;
   }
 
   .rh-composer .rh-add {
@@ -4435,10 +4482,12 @@ svg {
 
   .rh-composer-row {
     display: flex !important;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-content: flex-start;
-    overflow: visible !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
     padding-bottom: 2px;
+    scrollbar-width: thin;
   }
 
   .rh-composer-row .rh-brand-select,
@@ -4489,6 +4538,16 @@ svg {
     flex: 0 0 88px !important;
     width: 88px !important;
     min-width: 88px !important;
+  }
+
+  .rh-composer-advanced {
+    left: 0 !important;
+    right: 0 !important;
+    bottom: calc(100% + 8px) !important;
+    width: auto !important;
+    max-height: min(230px, calc(100vh - 330px));
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    overflow: auto;
   }
 
   .rh-selection-pill {
@@ -4563,8 +4622,10 @@ svg {
   .rh-image-editor-footer {
     grid-column: 1 / -1 !important;
     grid-row: 3 !important;
-    grid-template-columns: repeat(12, max-content) !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
     overflow-x: auto !important;
+    overflow-y: hidden !important;
     padding-bottom: 2px !important;
   }
 

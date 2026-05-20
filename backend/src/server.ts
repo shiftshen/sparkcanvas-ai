@@ -1179,14 +1179,14 @@ async function repairInterruptedGenerations() {
     if (frame.status !== "generating") continue;
     const task = db.tasks.find((item) => item.id === frame.taskId);
     if (task && runningTimers.has(task.id)) continue;
-    ensureFrameOutputPreviews(frame, "上次生成被中断，已自动补齐可见预览。");
+    ensureFrameOutputPreviews(frame, "上次生成被中断，已保留预览；请点击运行工作流重试。");
     await repairDocumentArtifacts(frame);
-    frame.status = "success";
-    frame.progress = 100;
+    frame.status = "failed";
+    frame.progress = 0;
     frame.updatedAt = now();
     if (task && task.status !== "completed") {
-      task.status = "completed";
-      task.progress = frame.progress;
+      task.status = "failed";
+      task.progress = 0;
       task.updatedAt = now();
       task.completedAt = now();
     }
@@ -1980,7 +1980,9 @@ function imageExtensionForSkill(format: "png" | "jpeg" | "webp") {
 
 function detectImageExtension(filePath: string): "png" | "jpg" | "webp" | undefined {
   if (!existsSync(filePath)) return undefined;
-  const header = readFileSync(filePath).subarray(0, 12);
+  const bytes = readFileSync(filePath);
+  if (bytes.length < 12) return undefined;
+  const header = bytes.subarray(0, 12);
   if (header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "png";
   if (header.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return "jpg";
   if (header.subarray(0, 4).toString("ascii") === "RIFF" && header.subarray(8, 12).toString("ascii") === "WEBP") return "webp";
@@ -2066,6 +2068,7 @@ async function runImageGenerationSkill(prompt: string, references: ReferenceItem
       clearTimeout(timer);
       if (code === 0) {
         const actualExt = detectImageExtension(outputPath);
+        if (!actualExt) return reject(new Error("image generation skill did not produce a valid PNG/JPEG/WEBP file"));
         const expectedExt = imageExtensionForSkill(outputFormat);
         if (actualExt && actualExt !== expectedExt) {
           const actualName = `${outputName}.${actualExt}`;
@@ -2274,7 +2277,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
   const visualDraftNode = frame.workflowNodes.find((node) => node.id === "visual-draft");
   let sharedVisualUrl = visualDraftNode?.refs?.find((item) => item.imageUrl && ["visual", "generated", "document-preview", "video-preview"].includes(item.role))?.imageUrl;
   let sharedVisualNote = "";
-  const needsMasterVisualGeneration = frame.outputs.some((output) => output.kind === "image" || output.kind === "video");
+  const needsMasterVisualGeneration = frame.outputs.some((output) => ["image", "video", "document"].includes(output.kind));
 
   if (visualDraftNode && !sharedVisualUrl) {
     if (!needsMasterVisualGeneration) {
@@ -3122,6 +3125,67 @@ app.patch("/canvas/frames/:id", async (req, res) => {
 
   await persistDb();
   res.json(frame);
+});
+
+app.post("/canvas/frames/:id/run", async (req, res) => {
+  const frame = db.frames.find((item) => item.id === req.params.id);
+  if (!frame) return res.status(404).json({ message: "Frame not found" });
+  if (!frame.prompt.trim()) return res.status(400).json({ message: "Frame has no workflow prompt to run" });
+  if (frame.status === "generating") return res.status(409).json({ message: "Frame is already generating" });
+
+  const input = z.object({
+    modelId: z.string().optional(),
+    settings: generationSettingsPatchSchema.optional()
+  }).parse(req.body ?? {});
+
+  if (input.modelId) {
+    const model = models.find((item) => item.id === input.modelId);
+    if (model) {
+      frame.modelId = model.id;
+      frame.modelName = model.name;
+    }
+  }
+  if (input.settings) frame.settings = { ...defaultSettings(frame.prompt, frame.settings), ...input.settings };
+
+  for (const output of frame.outputs) {
+    delete output.imageUrl;
+    delete output.fileUrl;
+    delete output.videoId;
+    delete output.videoUrl;
+  }
+  for (const node of frame.workflowNodes) {
+    node.refs = (node.refs ?? []).filter((reference) => !["generated", "visual", "document-preview", "video-preview", "version"].includes(reference.role));
+  }
+
+  const brand = frameBrand(frame);
+  const taskId = nanoid(10);
+  frame.taskId = taskId;
+  frame.status = "generating";
+  frame.progress = 8;
+  frame.updatedAt = now();
+  frame.finalPrompt = buildFinalPrompt(frame.prompt, frame.brandContext || (brand ? buildBrandContext(brand) : ""), frame.brandInjected, brand);
+  frame.steps = buildWorkflow(frame.prompt, brand, frame.brandInjected);
+  const task: GenerationTask = {
+    id: taskId,
+    frameId: frame.id,
+    prompt: frame.prompt,
+    finalPrompt: frame.finalPrompt,
+    brandId: frame.brandId,
+    brandName: frame.brandName,
+    brandInjected: frame.brandInjected,
+    brandContext: frame.brandContext,
+    status: "queued",
+    progress: 8,
+    creditsCost: frame.cost,
+    workflow: frame.steps,
+    createdAt: now(),
+    updatedAt: now()
+  };
+  db.user.credits = Math.max(0, db.user.credits - frame.cost);
+  db.tasks.unshift(task);
+  await persistDb();
+  void completeTask(taskId);
+  res.status(202).json({ taskId, task, frame, credits: db.user.credits });
 });
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
