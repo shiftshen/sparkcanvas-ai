@@ -107,7 +107,7 @@ type ReferenceItem = {
 
 type ParsedAssetRef = {
   raw: string;
-  symbol: "@" | "#";
+  symbol: "$";
   type: "image" | "text";
   brandKey: string;
   path: string;
@@ -115,10 +115,30 @@ type ParsedAssetRef = {
   explicitBrand: boolean;
 };
 
+type CalAst = {
+  version: "cal/1.0";
+  agents: string[];
+  commands: string[];
+  resources: ParsedAssetRef[];
+  lockedTexts: string[];
+  tags: string[];
+  params: Record<string, string>;
+  outputs: string[];
+  pipelineSteps: number;
+  warnings: string[];
+};
+
 type ResolvedPromptAssets = {
   prompt: string;
   imageReferences: ReferenceItem[];
   textReferences: Array<{ key: string; value: string; raw: string }>;
+  lockedTexts: string[];
+  tags: string[];
+  params: Record<string, string>;
+  outputs: string[];
+  agents: string[];
+  commands: string[];
+  ast: CalAst;
   warnings: string[];
 };
 
@@ -442,22 +462,73 @@ function normalizeRefPath(path: string) {
 }
 
 function normalizeLegacyPromptRefs(prompt: string) {
-  prompt = prompt.replace(/＠/g, "@").replace(/＃/g, "#");
+  prompt = prompt.replace(/＠/g, "@").replace(/＃/g, "#").replace(/＄/g, "$").replace(/％/g, "%");
   const replacements: Array<[RegExp, string]> = [
-    [/@LOGO\b/g, "@logo"],
-    [/@IP\b/g, "@ip"],
-    [/@产品/g, "@product"],
-    [/@模特/g, "@model"],
-    [/@店铺/g, "@storefront"],
-    [/@环境/g, "@environment"],
-    [/@品牌/g, "#brand_name"],
-    [/@域名/g, "#domain"],
-    [/@视觉风格/g, "#style"],
-    [/@语气/g, "#tone"],
-    [/@场景/g, "#scene"],
-    [/@禁用项/g, "#forbidden"]
+    [/@LOGO\b/g, "$logo"],
+    [/@logo\b/g, "$logo"],
+    [/@IP\b/g, "$ip"],
+    [/@ip\b/g, "$ip"],
+    [/@产品/g, "$product"],
+    [/@模特/g, "$model"],
+    [/@店铺/g, "$storefront"],
+    [/@环境/g, "$environment"],
+    [/#slogen\b/g, "$copy.slogan"],
+    [/#slogan\b/g, "$copy.slogan"],
+    [/#brand_name\b/g, "$copy.brand_name"],
+    [/#logo\b/g, "$brand.logo_text"],
+    [/#ip\b/g, "$brand.ip"],
+    [/#style\b/g, "$brand.style"],
+    [/#tone\b/g, "$brand.tone"],
+    [/#scene\b/g, "$brand.scene"],
+    [/@品牌/g, "$copy.brand_name"],
+    [/@域名/g, "$copy.domain"],
+    [/@视觉风格/g, "$brand.style"],
+    [/@语气/g, "$brand.tone"],
+    [/@场景/g, "$brand.scene"],
+    [/@禁用项/g, "$brand.forbidden"]
   ];
   return replacements.reduce((next, [pattern, replacement]) => next.replace(pattern, replacement), prompt);
+}
+
+function extractLockedTexts(input: string) {
+  const lockedTexts: string[] = [];
+  const regex = /"([^"\\]*(?:\\.[^"\\]*)*)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(input)) !== null) {
+    lockedTexts.push(match[1].replace(/\\"/g, "\""));
+  }
+  return lockedTexts;
+}
+
+function extractTags(input: string) {
+  return Array.from(input.matchAll(/%([\p{L}\p{N}_\-.]+)/gu)).map((match) => match[1]);
+}
+
+function extractAgents(input: string) {
+  return Array.from(input.matchAll(/@([\p{L}\p{N}_\-.]+)/gu)).map((match) => match[1]);
+}
+
+function extractCommands(input: string) {
+  return Array.from(input.matchAll(/\/([\p{L}\p{N}_\-.]+)/gu)).map((match) => match[1]);
+}
+
+function extractOutputs(input: string) {
+  return Array.from(input.matchAll(/->\s*([^|]+)/g)).map((match) => match[1].trim()).filter(Boolean);
+}
+
+function extractParams(input: string) {
+  const params: Record<string, string> = {};
+  const regex = /([\p{L}\p{N}_\-.]+)\s*:\s*([^，,\n|]+?)(?=\s*->|[，,\n|]|$)/gu;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(input)) !== null) {
+    params[match[1]] = match[2].trim();
+  }
+  return params;
+}
+
+function isTextResourcePath(path: string) {
+  const head = path.split(".")[0];
+  return head === "copy" || head === "brand" || ["brand_name", "slogan", "title", "subtitle", "promotion", "cta", "price", "address", "phone", "notice", "domain", "market", "tone", "style", "scene", "forbidden", "story", "audience"].includes(head);
 }
 
 function parsePromptAssetRefs(prompt: string, currentBrand: Brand): ParsedAssetRef[] {
@@ -465,10 +536,10 @@ function parsePromptAssetRefs(prompt: string, currentBrand: Brand): ParsedAssetR
   const currentKey = brandKey(currentBrand);
   const knownBrandKeys = new Set(db.brands.flatMap((brand) => [brandKey(brand), normalizeKey(brand.name), brand.id]));
   const refs: ParsedAssetRef[] = [];
-  const regex = /([@#])([\p{L}0-9_-]+(?:\.[\p{L}0-9_-]+)*)/gu;
+  const regex = /(\$)([\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*)/gu;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(prompt)) !== null) {
-    const symbol = match[1] as "@" | "#";
+    const symbol = "$" as const;
     const parts = match[2].split(".");
     const first = normalizeKey(parts[0]);
     const hasBrandPrefix = parts.length > 1 && knownBrandKeys.has(first);
@@ -477,7 +548,7 @@ function parsePromptAssetRefs(prompt: string, currentBrand: Brand): ParsedAssetR
     refs.push({
       raw: match[0],
       symbol,
-      type: symbol === "@" ? "image" : "text",
+      type: isTextResourcePath(path) ? "text" : "image",
       brandKey: brand,
       path,
       fullKey: `${brand}.${path}`,
@@ -488,6 +559,7 @@ function parsePromptAssetRefs(prompt: string, currentBrand: Brand): ParsedAssetR
 }
 
 function textValueForPath(brand: Brand, pathKey: string) {
+  const normalized = pathKey.startsWith("copy.") ? pathKey.slice(5) : pathKey.startsWith("brand.") ? pathKey.slice(6) : pathKey;
   const textMap: Record<string, string | undefined> = {
     brand: `${brand.name}: ${brand.slogan}`,
     brand_name: brand.name,
@@ -504,9 +576,13 @@ function textValueForPath(brand: Brand, pathKey: string) {
     ip: `${brand.ipName}: ${brand.ipDescription}`,
     logo: `${brand.logoText}: ${brand.logoUsage}`,
     story: brand.brandStory,
-    audience: brand.targetAudience
+    audience: brand.targetAudience,
+    logo_text: `${brand.logoText}: ${brand.logoUsage}`,
+    color: `${brand.primaryColor}, ${brand.accentColor}`,
+    guide: `${brand.visualStyle}; ${brand.tone}; 禁用: ${brand.forbiddenWords.join(", ")}`,
+    forbidden: brand.forbiddenWords.join(", ")
   };
-  return textMap[pathKey] ?? textMap[pathKey.split(".")[0]];
+  return textMap[normalized] ?? textMap[normalized.split(".")[0]];
 }
 
 function assetMatchesPath(asset: Asset, pathKey: string) {
@@ -522,6 +598,12 @@ function assetMatchesPath(asset: Asset, pathKey: string) {
 function resolvePromptAssets(prompt: string, currentBrand: Brand): ResolvedPromptAssets {
   prompt = normalizeLegacyPromptRefs(prompt);
   const refs = parsePromptAssetRefs(prompt, currentBrand);
+  const lockedTexts = extractLockedTexts(prompt);
+  const tags = extractTags(prompt);
+  const params = extractParams(prompt);
+  const outputs = extractOutputs(prompt);
+  const agents = extractAgents(prompt);
+  const commands = extractCommands(prompt);
   const imageReferences: ReferenceItem[] = [];
   const textReferences: Array<{ key: string; value: string; raw: string }> = [];
   const warnings: string[] = [];
@@ -536,7 +618,7 @@ function resolvePromptAssets(prompt: string, currentBrand: Brand): ResolvedPromp
     if (ref.type === "text") {
       const value = textValueForPath(brand, ref.path);
       if (!value) {
-        warnings.push(`未找到文本资源 #${ref.fullKey}`);
+        warnings.push(`未找到文本资源 $${ref.fullKey}`);
         continue;
       }
       textReferences.push({ key: ref.fullKey, value, raw: ref.raw });
@@ -546,7 +628,7 @@ function resolvePromptAssets(prompt: string, currentBrand: Brand): ResolvedPromp
 
     const asset = db.assets.find((item) => item.brandId === brand.id && item.imageUrl && assetMatchesPath(item, ref.path));
     if (!asset?.imageUrl) {
-      warnings.push(`未找到图片资源 @${ref.fullKey}`);
+      warnings.push(`未找到图片资源 $${ref.fullKey}`);
       continue;
     }
     imageReferences.push({
@@ -559,10 +641,30 @@ function resolvePromptAssets(prompt: string, currentBrand: Brand): ResolvedPromp
     });
   }
 
+  const ast: CalAst = {
+    version: "cal/1.0",
+    agents,
+    commands,
+    resources: refs,
+    lockedTexts,
+    tags,
+    params,
+    outputs,
+    pipelineSteps: prompt.split("|").length,
+    warnings
+  };
+
   return {
     prompt: expandedPrompt,
     imageReferences: imageReferences.filter((reference, index, list) => list.findIndex((item) => item.id === reference.id) === index),
     textReferences: textReferences.filter((reference, index, list) => list.findIndex((item) => item.key === reference.key && item.raw === reference.raw) === index),
+    lockedTexts,
+    tags,
+    params,
+    outputs,
+    agents,
+    commands,
+    ast,
     warnings
   };
 }
@@ -688,7 +790,7 @@ async function migrateDb() {
       frame.finalPrompt = buildFinalPrompt(frame.prompt, buildBrandContext(brand), frame.brandInjected, brand);
       changed = true;
     }
-    if (frame.brandInjected && !frame.brandContext.startsWith("@品牌")) {
+    if (frame.brandInjected && !frame.brandContext.startsWith("$copy.brand_name")) {
       frame.brandContext = buildBrandContext(brand);
       frame.finalPrompt = buildFinalPrompt(frame.prompt, frame.brandContext, frame.brandInjected, brand);
       changed = true;
@@ -847,16 +949,16 @@ function defaultSettings(prompt: string, settings?: Partial<GenerationSettings>)
 function buildBrandContext(brand: Brand) {
   const mentionForRole = (role: string) => {
     const map: Record<string, string> = {
-    logo: "@logo",
-    ip: "@ip",
-    product: "@product",
-    model: "@model",
-    storefront: "@storefront",
-    environment: "@environment",
-    general: "@asset",
-    upload: "@asset"
+    logo: "$logo",
+    ip: "$ip",
+    product: "$product",
+    model: "$model",
+    storefront: "$storefront",
+    environment: "$environment",
+    general: "$asset",
+    upload: "$asset"
     };
-    return map[role] ?? "@asset";
+    return map[role] ?? "$asset";
   };
   const roleLines = brand.assetRoles.map((asset) => `${mentionForRole(asset.role)} ${asset.title}；${asset.description}`).join("\n");
   const materialLines = db.assets
@@ -865,31 +967,38 @@ function buildBrandContext(brand: Brand) {
     .map((asset) => `${mentionForRole(assetTypeToReferenceRole(asset.type, asset.title))} ${asset.title} [image]；${asset.meta}`)
     .join("\n");
   return [
-    `#brand_name ${brand.name}`,
-    `#slogan ${brand.slogan}`,
-    `#domain ${brand.market}`,
-    `#logo ${brand.logoText}: 主色 ${brand.primaryColor}；强调色 ${brand.accentColor}；${brand.logoUsage}`,
-    `#ip ${brand.ipName}: ${brand.ipDescription}`,
-    `#style ${brand.visualStyle}`,
-    `#tone ${brand.tone}`,
-    `#scene ${brand.sceneKeywords.join(", ")}`,
-    `#forbidden ${brand.forbiddenWords.join(", ")}`,
-    roleLines ? `@asset_roles\n${roleLines}` : "",
-    materialLines ? `@assets\n${materialLines}` : ""
+    `$copy.brand_name ${brand.name}`,
+    `$copy.slogan ${brand.slogan}`,
+    `$copy.domain ${brand.market}`,
+    `$brand.logo_text ${brand.logoText}: 主色 ${brand.primaryColor}；强调色 ${brand.accentColor}；${brand.logoUsage}`,
+    `$brand.ip ${brand.ipName}: ${brand.ipDescription}`,
+    `$brand.style ${brand.visualStyle}`,
+    `$brand.tone ${brand.tone}`,
+    `$brand.scene ${brand.sceneKeywords.join(", ")}`,
+    `$brand.forbidden ${brand.forbiddenWords.join(", ")}`,
+    roleLines ? `$asset_roles\n${roleLines}` : "",
+    materialLines ? `$assets\n${materialLines}` : ""
   ].filter(Boolean).join("\n");
 }
 
 function buildFinalPrompt(prompt: string, brandContext: string, inject: boolean, brand?: Brand) {
   prompt = normalizeLegacyPromptRefs(prompt);
-  const resolved = brand ? resolvePromptAssets(prompt, brand) : { prompt, imageReferences: [], textReferences: [], warnings: [] };
+  const emptyAst: CalAst = { version: "cal/1.0", agents: [], commands: [], resources: [], lockedTexts: [], tags: [], params: {}, outputs: [], pipelineSteps: 1, warnings: [] };
+  const resolved = brand ? resolvePromptAssets(prompt, brand) : { prompt, imageReferences: [], textReferences: [], lockedTexts: [], tags: [], params: {}, outputs: [], agents: [], commands: [], ast: emptyAst, warnings: [] };
   const referenceSummary = [
-    resolved.imageReferences.length ? `图片引用: ${resolved.imageReferences.map((item) => item.description.split(" · ")[0]).join(", ")}` : "",
-    resolved.textReferences.length ? `文本引用: ${resolved.textReferences.map((item) => `${item.key}="${item.value}"`).join(", ")}` : "",
+    resolved.agents.length ? `执行者: ${resolved.agents.map((item) => `@${item}`).join(", ")}` : "",
+    resolved.commands.length ? `命令: ${resolved.commands.map((item) => `/${item}`).join(", ")}` : "",
+    resolved.imageReferences.length ? `图片资源: ${resolved.imageReferences.map((item) => item.description.split(" · ")[0]).join(", ")}` : "",
+    resolved.textReferences.length ? `文本资源: ${resolved.textReferences.map((item) => `${item.key}="${item.value}"`).join(", ")}` : "",
+    resolved.lockedTexts.length ? `锁定文字: ${resolved.lockedTexts.map((item) => `"${item}"`).join(", ")}` : "",
+    resolved.tags.length ? `主题标签: ${resolved.tags.map((item) => `%${item}`).join(", ")}` : "",
+    Object.keys(resolved.params).length ? `参数: ${JSON.stringify(resolved.params)}` : "",
+    resolved.outputs.length ? `输出: ${resolved.outputs.join(", ")}` : "",
     resolved.warnings.length ? `缺失提示: ${resolved.warnings.join("；")}` : ""
   ].filter(Boolean).join("\n");
   const taskPrompt = referenceSummary ? `${resolved.prompt}\n\n【资源解析】\n${referenceSummary}` : resolved.prompt;
   if (!inject) return taskPrompt;
-  return `${brandContext}\n\n【本次任务】${taskPrompt}\n\n请解析 @logo、@ip、@product、@model、@storefront 等图片引用；#slogan、#brand_name 等文本引用已展开。带 [image] 或【资源解析】中的图片引用已作为参考图传入。严格保持品牌字段、素材角色、色彩、Logo/IP/商品一致。`;
+  return `${brandContext}\n\n【本次任务】${taskPrompt}\n\n请按 CAL 1.0 执行：@ 是智能体，/ 是命令，$ 是真实资源，双引号是锁定画面文字，% 是主题标签，: 是参数，-> 是输出。$ 图片资源已作为真实参考图传入 skill；$copy 和 $brand 文本资源已展开。严格保持品牌字段、素材角色、色彩、Logo/IP/商品一致。`;
 }
 
 function localPublicPathFromUrl(imageUrl?: string) {
@@ -1725,6 +1834,41 @@ app.get("/ai/diagnostics", async (_req, res) => {
   res.json(await imageSkillDiagnostics());
 });
 
+app.post("/ai/transform-text", async (req, res) => {
+  const input = z.object({
+    text: z.string().min(1),
+    action: z.enum(["translate", "optimize"]),
+    targetLanguage: z.string().default("English"),
+    brandId: z.string().optional(),
+    model: z.string().optional()
+  }).parse(req.body);
+  const brand = findBrand(input.brandId);
+  const resolved = resolvePromptAssets(input.text, brand);
+  const instruction = input.action === "translate"
+    ? `把用户内容翻译成 ${input.targetLanguage}。保留 CAL 语法 token，例如 @设计师、/生成海报、$logo、$copy.slogan、%高级感、-> 海报，不要改写这些 token。`
+    : "优化为可直接执行的 CAL 1.0 画布提示词。保留用户已写的 CAL token，补齐必要的 @智能体、/命令、$资源、%标签、参数和输出目标，保持简洁可控。";
+  const fallback = input.action === "translate"
+    ? `${input.text}\n\nTranslation unavailable; keep original CAL prompt.`
+    : resolved.prompt;
+  let text = fallback;
+  try {
+    const remote = await runTextGeneration(
+      [
+        instruction,
+        `当前品牌: ${brand.name}`,
+        `品牌风格: ${brand.visualStyle}`,
+        `资源解析: ${JSON.stringify({ imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params })}`,
+        `用户内容:\n${input.text}`
+      ].join("\n"),
+      input.model
+    );
+    if (remote) text = remote.trim();
+  } catch (error) {
+    text = `${fallback}\n\n远程文本模型降级: ${error instanceof Error ? error.message.slice(0, 160) : "unavailable"}`;
+  }
+  res.json({ text, action: input.action, model: input.model ?? serviceConfig("text").model, resolved });
+});
+
 app.post("/ai/resolve-references", async (req, res) => {
   const input = z.object({
     prompt: z.string().min(1),
@@ -1816,7 +1960,10 @@ app.patch("/canvas/frames/:id", async (req, res) => {
   frame.brandInjected = frame.settings.brandInject;
   frame.brandContext = frame.brandInjected ? nextBrandContext : "";
   frame.finalPrompt = buildFinalPrompt(frame.prompt, nextBrandContext, frame.brandInjected, brand);
-  frame.workflowNodes = manualWorkflowNodes ?? mergeWorkflowNodes(buildWorkflowNodes(frame.prompt, brand, model, frame.settings, nextBrandContext, frame.brandInjected), frame.workflowNodes);
+  frame.workflowNodes = manualWorkflowNodes
+    ?? (frame.workflowNodes.length === 0 && !frame.prompt.trim()
+      ? []
+      : mergeWorkflowNodes(buildWorkflowNodes(frame.prompt, brand, model, frame.settings, nextBrandContext, frame.brandInjected), frame.workflowNodes));
   frame.outputs = manualOutputs ?? frame.outputs;
   frame.steps = buildWorkflow(frame.prompt, brand, frame.brandInjected);
 
@@ -1928,9 +2075,10 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
 
   const brand = findBrand(frame.brandId);
   const source = input.prompt.trim();
+  const resolved = resolvePromptAssets(source, brand);
   const translated = input.translate
-    ? `English prompt: ${source}. Keep XMANX black-orange ecommerce visual language, concise commercial composition.`
-    : source;
+    ? `English prompt: ${resolved.prompt}. Keep CAL resource intent and ${brand.name} visual language.`
+    : resolved.prompt;
   const storyboardRefs = buildReferenceItems(brand, 4);
   const fallbackText = input.mode === "table"
     ? [
@@ -1952,6 +2100,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
       [
         `任务: ${input.mode === "table" ? "生成标准 Markdown 分镜故事版表格，表头必须包含 镜号、参考图、时长、画面描述、音效、分镜提示词、视频运动提示词。" : "生成可直接进入画布下游节点的文本故事或提示词。"}`,
         `用户输入: ${translated}`,
+        `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
         `品牌: ${brand.name}`,
         `品牌风格: ${brand.visualStyle}`,
         `品牌语气: ${brand.tone}`
@@ -1988,10 +2137,11 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
 
   const brand = findBrand(frame.brandId);
   const source = input.prompt.trim();
+  const resolved = resolvePromptAssets(source, brand);
   const fallbackScript = [
     `分镜脚本: ${node.title || "Script"}`,
     "",
-    `剧情目标: ${source}`,
+    `剧情目标: ${resolved.prompt}`,
     `品牌约束: ${brand.name}; ${brand.visualStyle}`,
     "",
     "镜头 1",
@@ -2019,7 +2169,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
     const remote = await runTextGeneration(
       [
         "任务: 生成可执行的视频分镜脚本，分镜清晰，包含镜头、时长、画面、运动、音效、品牌收束。",
-        `剧情目标: ${source}`,
+        `剧情目标: ${resolved.prompt}`,
+        `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
         `品牌: ${brand.name}`,
         `品牌风格: ${brand.visualStyle}`,
         input.translate ? "同时整理为英文视频模型易读结构。" : ""
@@ -2059,12 +2210,14 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
 
   const brand = findBrand(frame.brandId);
   const settings = input.settings ?? {};
-  const prompt = input.prompt.trim();
+  const resolved = resolvePromptAssets(input.prompt.trim(), brand);
+  const prompt = resolved.prompt;
   let generationLines: string[] = [];
   try {
     const result = await runVideoGeneration(
       [
         prompt,
+        `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
         `品牌约束: ${brand.name}; ${brand.visualStyle}`,
         "输出要求: 商业广告视频，可用于后续合成节点。"
       ].join("\n"),
@@ -2119,7 +2272,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
 
   const brand = findBrand(frame.brandId);
   const settings = input.settings ?? {};
-  const prompt = input.prompt.trim();
+  const resolved = resolvePromptAssets(input.prompt.trim(), brand);
+  const prompt = resolved.prompt;
   const audioPlan = [
     prompt,
     "",
@@ -2129,6 +2283,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
     `场景: ${settings.scene ?? "广告短视频"}`,
     `循环: ${settings.loop ? "开启" : "关闭"}`,
     `翻译: ${settings.translate ? "开启" : "关闭"}`,
+    `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
     `品牌约束: ${brand.name}; ${brand.tone}; ${brand.visualStyle}`,
     "执行状态: 已保存音频生成配置，等待接入真实音频生成 skill。"
   ].join("\n");

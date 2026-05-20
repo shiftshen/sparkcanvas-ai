@@ -178,7 +178,7 @@ try {
       type: "logo",
       brandId: brand.id,
       color: "#111827",
-      meta: "@logo · smoke logo image",
+      meta: "$logo · smoke logo image",
       imageUrl: "/brand-assets/generated/xmanx-logo.png"
     })
   });
@@ -189,7 +189,7 @@ try {
       type: "model",
       brandId: brand.id,
       color: "#f97316",
-      meta: "@ip · smoke IP image",
+      meta: "$ip · smoke IP image",
       imageUrl: "/brand-assets/generated/xmanx-ip.png"
     })
   });
@@ -197,14 +197,15 @@ try {
   const resolvedRefs = await request("/ai/resolve-references", {
     method: "POST",
     body: JSON.stringify({
-      prompt: "参考 @model，画面中心写 #slogen，再加入 #brand_name",
+      prompt: '@设计师 /生成海报 使用 $model，显示 "会员免费锅底"，画面中心写 $copy.slogan，再加入 $copy.brand_name，主题 %高级感 尺寸: 1080x1350 -> 海报',
       brandId: brand.id,
       brandInject: true
     })
   });
-  assert(resolvedRefs.imageReferences.some((reference) => reference.role === "model" && reference.imageUrl), "resolved @ references should expose concrete image references");
-  assert(resolvedRefs.textReferences.some((reference) => reference.key.endsWith(".slogan") && reference.value === brand.slogan), "#slogen should resolve to current brand slogan");
-  assert(resolvedRefs.prompt.includes(`"${brand.slogan}"`) && resolvedRefs.finalPrompt.includes("图片引用"), "resolved payload should expand text and keep image reference summary");
+  assert(resolvedRefs.imageReferences.some((reference) => reference.role === "model" && reference.imageUrl), "resolved CAL resources should expose concrete image references");
+  assert(resolvedRefs.textReferences.some((reference) => reference.key.endsWith(".copy.slogan") && reference.value === brand.slogan), "$copy.slogan should resolve to current brand slogan");
+  assert(resolvedRefs.lockedTexts.includes("会员免费锅底") && resolvedRefs.tags.includes("高级感") && resolvedRefs.params["尺寸"] === "1080x1350", "CAL parser should extract locked text, tags and params");
+  assert(resolvedRefs.prompt.includes(`"${brand.slogan}"`) && resolvedRefs.finalPrompt.includes("图片资源"), "resolved payload should expand text and keep image reference summary");
 
   const legacyRefs = await request("/ai/resolve-references", {
     method: "POST",
@@ -216,12 +217,23 @@ try {
   });
   assert(legacyRefs.imageReferences.some((reference) => reference.role === "logo" && reference.imageUrl), "legacy @LOGO should resolve to logo image reference");
   assert(legacyRefs.imageReferences.some((reference) => reference.role === "ip" && reference.imageUrl), "legacy @IP should resolve to IP image reference");
-  assert(legacyRefs.textReferences.some((reference) => reference.key.endsWith(".brand_name") && reference.value === brand.name), "legacy @品牌 should resolve to #brand_name text reference");
+  assert(legacyRefs.textReferences.some((reference) => reference.key.endsWith(".copy.brand_name") && reference.value === brand.name), "legacy @品牌 should resolve to $copy.brand_name text reference");
+
+  const emptyFrame = await request("/canvas/frames", {
+    method: "POST",
+    body: JSON.stringify({ brandId: brand.id })
+  });
+  assert(emptyFrame.workflowNodes.length === 0 && emptyFrame.outputs.length === 0 && emptyFrame.prompt === "", "new canvas should start from a truly empty frame");
+  const emptyFrameSettings = await request(`/canvas/frames/${emptyFrame.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ settings: { ratio: "4:5", count: 1, quality: "hd", strength: 72, brandInject: true } })
+  });
+  assert(emptyFrameSettings.workflowNodes.length === 0, "settings changes on empty canvas must not inject default nodes");
 
   const generated = await request("/generate", {
     method: "POST",
     body: JSON.stringify({
-      prompt: "参考 @model，画面中心写 #slogan，为 xmanx.com 黑橙色运动鞋生成首发海报",
+      prompt: '@设计师 /生成海报 使用 $model $logo，显示 $copy.slogan，为 xmanx.com 黑橙色运动鞋生成首发海报，主题 %新品上市',
       mode: "magic",
       modelId: "yijiarj-nano-banana-2",
       brandId: brand.id,
@@ -238,8 +250,8 @@ try {
   assert(completed.frame.modelName === "yijiarj · nano_banana_2", "selected model should be stored on the frame");
   assert(completed.frame.brandId === brand.id && completed.frame.brandInjected === true, "generated frame should store brand injection state");
   assert(completed.frame.brandContext.includes("XM Smoke IP"), "brand context should include IP details");
-  assert(completed.frame.finalPrompt.includes("#brand_name XMANX Smoke") && completed.frame.finalPrompt.includes("【本次任务】"), "final prompt should include code-style organized brand context");
-  assert(completed.frame.finalPrompt.includes("【资源解析】") && completed.frame.finalPrompt.includes("AI launch kit for xmanx.com"), "final prompt should resolve @ image refs and # text refs");
+  assert(completed.frame.finalPrompt.includes("$copy.brand_name XMANX Smoke") && completed.frame.finalPrompt.includes("【本次任务】"), "final prompt should include code-style organized brand context");
+  assert(completed.frame.finalPrompt.includes("【资源解析】") && completed.frame.finalPrompt.includes("AI launch kit for xmanx.com"), "final prompt should resolve CAL image refs and text refs");
   assert(completed.frame.workflowNodes?.some((node) => node.type === "prompt" && node.body.includes("xmanx.com")), "workflow should expose the prompt node");
   assert(completed.frame.workflowNodes?.some((node) => node.type === "image"), "workflow should expose an image input node");
   const inputRefs = completed.frame.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [];
@@ -327,7 +339,7 @@ try {
   assert(moved.x === 480 && moved.y === 260, "frame position should persist");
   assert(moved.brandId === brand.id, `frame should keep selected brand after updates: ${moved.brandId} !== ${brand.id}`);
   assert(moved.brandInjected === false && moved.brandContext === "", "brand injection toggle should hide full brand context");
-  assert(moved.finalPrompt.includes("AI launch kit for xmanx.com") && !moved.finalPrompt.includes("#brand_name XMANX Smoke"), `resource references should still resolve without full brand context injection: ${moved.finalPrompt}`);
+  assert(moved.finalPrompt.includes("AI launch kit for xmanx.com") && !moved.finalPrompt.includes("$copy.brand_name XMANX Smoke"), `resource references should still resolve without full brand context injection: ${moved.finalPrompt}`);
 
   const after = await request("/workspace");
   assert(after.assets.length === initial.assets.length + 4, "only manually created brand materials should be added to assets");

@@ -120,7 +120,8 @@ type ReferenceItem = {
 
 type MentionItem = ReferenceItem & {
   token: string;
-  group: "brand" | "asset";
+  group: "agent" | "command" | "resource" | "copy" | "tag";
+  kind: "agent" | "command" | "resource" | "copy" | "tag";
 };
 
 type AssetUploadOptions = {
@@ -233,16 +234,17 @@ type TextGenerateResponse = { frame: Frame; node: WorkflowNode; text: string; mo
 type ScriptGenerateResponse = { frame: Frame; node: WorkflowNode; script: string; model: string };
 type VideoGenerateResponse = { frame: Frame; node: WorkflowNode; videoPlan: string; model: string };
 type AudioGenerateResponse = { frame: Frame; node: WorkflowNode; audioPlan: string; model: string };
+type TransformTextResponse = { text: string; action: "translate" | "optimize"; model: string };
 
 const coreNodeIds = ["input-image", "brand", "prompt", "output"];
 const nodeOrder = ["input-image", "brand", "prompt", "output"];
 const requiredBrandSlots = [
-  { role: "logo", token: "@logo", title: "Logo", hint: "透明底标志、标准组合或主视觉标识", assetType: "logo" },
-  { role: "ip", token: "@ip", title: "IP", hint: "品牌角色、吉祥物或虚拟主理人", assetType: "model" },
-  { role: "product", token: "@product", title: "产品", hint: "核心 SKU、包装或商品实拍参考", assetType: "product" },
-  { role: "model", token: "@model", title: "模特", hint: "固定真人、数字人或穿搭模特", assetType: "model" },
-  { role: "storefront", token: "@storefront", title: "店铺", hint: "官网、门店、直播间或电商页面", assetType: "upload" },
-  { role: "environment", token: "@environment", title: "环境", hint: "使用场景、背景空间或品牌氛围", assetType: "upload" }
+  { role: "logo", token: "$logo", title: "Logo", hint: "透明底标志、标准组合或主视觉标识", assetType: "logo" },
+  { role: "ip", token: "$ip", title: "IP", hint: "品牌角色、吉祥物或虚拟主理人", assetType: "model" },
+  { role: "product", token: "$product", title: "产品", hint: "核心 SKU、包装或商品实拍参考", assetType: "product" },
+  { role: "model", token: "$model", title: "模特", hint: "固定真人、数字人或穿搭模特", assetType: "model" },
+  { role: "storefront", token: "$storefront", title: "店铺", hint: "官网、门店、直播间或电商页面", assetType: "upload" },
+  { role: "environment", token: "$environment", title: "环境", hint: "使用场景、背景空间或品牌氛围", assetType: "upload" }
 ] as const satisfies ReadonlyArray<{ role: BrandAssetRole["role"]; token: string; title: string; hint: string; assetType: Asset["type"] }>;
 const defaultSettings: GenerationSettings = { ratio: "16:9", count: 1, quality: "hd", strength: 72, duration: 0, brandInject: true };
 type GraphEdge = { from: WorkflowNode; to: WorkflowNode; id: string };
@@ -320,6 +322,10 @@ function normalizeWorkflowNodes(nodes: WorkflowNode[] = [], withDefaults = true)
   return [...merged, ...extras];
 }
 
+function shouldUseDefaultWorkflow(nodes: WorkflowNode[] = []) {
+  return nodes.length > 0 && coreNodeIds.some((id) => nodes.some((node) => node.id === id));
+}
+
 function displayNodes(nodes: WorkflowNode[], withDefaults = true) {
   const normalized = normalizeWorkflowNodes(nodes, withDefaults);
   const positioned = new Map<string, WorkflowNode>();
@@ -381,37 +387,37 @@ function graphEdges(nodes: WorkflowNode[]): GraphEdge[] {
 function buildBrandContext(brand?: Brand, assets: Asset[] = []) {
   if (!brand) return "";
   const assetLines = buildMentionItems(brand, assets)
-    .filter((item) => item.group === "asset")
+    .filter((item) => item.kind === "resource" && item.imageUrl)
     .map((item) => `${item.token} ${item.title}${item.imageUrl ? " [image]" : ""}: ${item.description}`)
     .join("\n");
   return [
-    `#brand_name ${brand.name}`,
-    `#slogan ${brand.slogan}`,
-    `#domain ${brand.market}`,
-    `#logo ${brand.logoText}: 主色 ${brand.primaryColor}; 强调色 ${brand.accentColor}; ${brand.logoUsage}`,
-    `#ip ${brand.ipName}: ${brand.ipDescription}`,
-    `#style ${brand.visualStyle}`,
-    `#tone ${brand.tone}`,
-    `#scene ${(brand.sceneKeywords ?? []).join(", ")}`,
-    `#forbidden ${(brand.forbiddenWords ?? []).join(", ")}`,
-    assetLines ? `@素材\n${assetLines}` : ""
+    `$copy.brand_name ${brand.name}`,
+    `$copy.slogan ${brand.slogan}`,
+    `$copy.domain ${brand.market}`,
+    `$brand.logo_text ${brand.logoText}: 主色 ${brand.primaryColor}; 强调色 ${brand.accentColor}; ${brand.logoUsage}`,
+    `$brand.ip ${brand.ipName}: ${brand.ipDescription}`,
+    `$brand.style ${brand.visualStyle}`,
+    `$brand.tone ${brand.tone}`,
+    `$brand.scene ${(brand.sceneKeywords ?? []).join(", ")}`,
+    `$brand.forbidden ${(brand.forbiddenWords ?? []).join(", ")}`,
+    assetLines ? `$assets\n${assetLines}` : ""
   ].filter(Boolean).join("\n");
 }
 
 function mentionTokenForRole(role: string) {
   const map: Record<string, string> = {
-    logo: "@logo",
-    ip: "@ip",
-    product: "@product",
-    model: "@model",
-    storefront: "@storefront",
-    environment: "@environment",
-    upload: "@asset",
-    general: "@asset",
-    generated_image: "@generated_image",
-    generated_video: "@video"
+    logo: "$logo",
+    ip: "$ip",
+    product: "$product",
+    model: "$model",
+    storefront: "$storefront",
+    environment: "$environment",
+    upload: "$asset",
+    general: "$asset",
+    generated_image: "$generated_image",
+    generated_video: "$video"
   };
-  return map[role] ?? "@素材";
+  return map[role] ?? "$asset";
 }
 
 function normalizeBrandKey(value = "") {
@@ -446,6 +452,56 @@ function assetRole(asset: Pick<Asset, "title" | "meta" | "type">): BrandAssetRol
 function buildMentionItems(brand?: Brand, assets: Asset[] = []): MentionItem[] {
   if (!brand) return [];
   const key = currentBrandKey(brand);
+  const agents: MentionItem[] = [
+    ["@设计师", "designer", "海报、主图、详情页、社媒图、视觉排版"],
+    ["@文案", "copywriter", "标题、广告语、促销文案、品牌故事"],
+    ["@修图师", "retoucher", "换模特、换背景、抠图、扩图、局部重绘"],
+    ["@摄影师", "photographer", "真实商业摄影、产品拍摄、模特大片"],
+    ["@视频导演", "video_director", "短视频脚本、分镜、动态展示、视频提示词"],
+    ["@品牌顾问", "brand_consultant", "品牌定位、视觉方向、IP 策略"],
+    ["@审核员", "reviewer", "错字、品牌一致性、广告规范检查"],
+    ["@翻译", "translator", "中文、英文、泰文等多语言转换"]
+  ].map(([token, role, description]) => ({
+    id: `agent_${role}`,
+    token,
+    group: "agent" as const,
+    kind: "agent" as const,
+    role,
+    title: token.replace("@", ""),
+    description,
+    color: brand.primaryColor
+  }));
+  const commands: MentionItem[] = [
+    ["/生成海报", "generate_poster", "调用图片模型生成品牌海报"],
+    ["/生成主图", "generate_product_image", "生成电商主图或产品图"],
+    ["/换模特", "change_model", "基于商品和模特参考生成换模特结果"],
+    ["/换背景", "change_background", "保留主体并替换画面背景"],
+    ["/写文案", "write_copy", "生成标题、副标题、促销文案"],
+    ["/翻译", "translate", "用文本模型翻译为目标语言"],
+    ["/润色", "polish", "优化提示词、文案或脚本"],
+    ["/写视频脚本", "write_video_script", "生成分镜、镜头、运动和音效"],
+    ["/生成视频", "generate_video", "调用视频模型创建视频任务"],
+    ["/审核", "review", "检查品牌一致性和平台风险"]
+  ].map(([token, role, description]) => ({
+    id: `command_${role}`,
+    token,
+    group: "command" as const,
+    kind: "command" as const,
+    role,
+    title: token.replace("/", ""),
+    description,
+    color: brand.accentColor
+  }));
+  const tags: MentionItem[] = ["%高级感", "%新品上市", "%Facebook广告", "%TikTok视频", "%电商主图", "%真实摄影", "%女性向", "%品牌维护"].map((token) => ({
+    id: `tag_${token}`,
+    token,
+    group: "tag" as const,
+    kind: "tag" as const,
+    role: "tag",
+    title: token.replace("%", ""),
+    description: "主题标签，用于风格、平台和模板推荐",
+    color: brand.accentColor
+  }));
   const assetItems = assets
     .filter((asset) => asset.brandId === brand.id && !asset.type.startsWith("generated_") && asset.imageUrl)
     .map((asset) => {
@@ -454,20 +510,23 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = []): MentionItem[] {
         ...ref,
         id: `asset_${asset.id}`,
         token: mentionTokenForRole(ref.role),
-        group: "asset" as const
+        group: "resource" as const,
+        kind: "resource" as const
       };
     });
   const coveredRoles = new Set(assetItems.map((item) => item.role));
   const brandItems: MentionItem[] = [
-    { id: "brand_name", token: "#brand_name", group: "brand", role: "brand_name", title: brand.name, description: `跨品牌: #${key}.brand_name`, color: brand.primaryColor },
-    { id: "brand_slogan", token: "#slogan", group: "brand", role: "slogan", title: brand.slogan, description: `跨品牌: #${key}.slogan`, color: brand.accentColor },
-    { id: "brand_logo_text", token: "#logo", group: "brand", role: "logo_text", title: brand.logoText, description: `跨品牌: #${key}.logo`, color: brand.primaryColor },
-    { id: "brand_ip_text", token: "#ip", group: "brand", role: "ip_text", title: brand.ipName, description: brand.ipDescription, color: brand.accentColor },
-    { id: "brand_visual", token: "#style", group: "brand", role: "style", title: "视觉风格", description: brand.visualStyle, color: brand.accentColor },
-    { id: "brand_tone", token: "#tone", group: "brand", role: "tone", title: "语气", description: brand.tone, color: brand.primaryColor },
-    { id: "brand_scene", token: "#scene", group: "brand", role: "scene", title: "场景关键词", description: (brand.sceneKeywords ?? []).join(", "), color: brand.accentColor }
+    { id: "brand_name", token: "$copy.brand_name", group: "copy", kind: "copy", role: "brand_name", title: brand.name, description: `跨品牌: $${key}.copy.brand_name`, color: brand.primaryColor },
+    { id: "brand_slogan", token: "$copy.slogan", group: "copy", kind: "copy", role: "slogan", title: brand.slogan, description: `跨品牌: $${key}.copy.slogan`, color: brand.accentColor },
+    { id: "brand_promotion", token: "$copy.promotion", group: "copy", kind: "copy", role: "promotion", title: "促销文案", description: brand.slogan, color: brand.accentColor },
+    { id: "brand_cta", token: "$copy.cta", group: "copy", kind: "copy", role: "cta", title: "行动按钮", description: "立即了解", color: brand.primaryColor },
+    { id: "brand_logo_text", token: "$brand.logo_text", group: "copy", kind: "copy", role: "logo_text", title: brand.logoText, description: `跨品牌: $${key}.brand.logo_text`, color: brand.primaryColor },
+    { id: "brand_ip_text", token: "$brand.ip", group: "copy", kind: "copy", role: "ip_text", title: brand.ipName, description: brand.ipDescription, color: brand.accentColor },
+    { id: "brand_visual", token: "$brand.style", group: "copy", kind: "copy", role: "style", title: "视觉风格", description: brand.visualStyle, color: brand.accentColor },
+    { id: "brand_tone", token: "$brand.tone", group: "copy", kind: "copy", role: "tone", title: "语气", description: brand.tone, color: brand.primaryColor },
+    { id: "brand_scene", token: "$brand.scene", group: "copy", kind: "copy", role: "scene", title: "场景关键词", description: (brand.sceneKeywords ?? []).join(", "), color: brand.accentColor }
   ].filter((item): item is MentionItem => Boolean(item.title || item.description) && !coveredRoles.has(item.role));
-  return [...brandItems, ...assetItems].filter((item, index, list) => list.findIndex((candidate) => candidate.token === item.token && candidate.title === item.title) === index);
+  return [...agents, ...commands, ...assetItems, ...brandItems, ...tags].filter((item, index, list) => list.findIndex((candidate) => candidate.token === item.token && candidate.title === item.title) === index);
 }
 
 function assetToRef(asset: Asset): ReferenceItem {
@@ -539,9 +598,9 @@ function parseStoryboardTable(body = "", refs: ReferenceItem[] = []): Storyboard
 
 function parseMentionSummary(body = "") {
   body = normalizeLegacyPromptRefs(body);
-  const lines = body.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("@") || line.startsWith("#"));
+  const lines = body.split("\n").map((line) => line.trim()).filter((line) => /^[@/$%]/.test(line));
   return lines.slice(0, 8).map((line) => {
-    const [token = "@引用", ...rest] = line.split(/\s+/);
+    const [token = "$引用", ...rest] = line.split(/\s+/);
     const copy = rest.join(" ").replace(/\[image\]/g, "").trim();
     return { token, copy: copy.length > 70 ? `${copy.slice(0, 70)}...` : copy };
   });
@@ -549,22 +608,27 @@ function parseMentionSummary(body = "") {
 
 function normalizeLegacyPromptRefs(body: string) {
   return body
-    .replace(/@LOGO\b/g, "@logo")
-    .replace(/@IP\b/g, "@ip")
-    .replace(/@产品/g, "@product")
-    .replace(/@模特/g, "@model")
-    .replace(/@店铺/g, "@storefront")
-    .replace(/@环境/g, "@environment")
-    .replace(/@品牌/g, "#brand_name")
-    .replace(/@域名/g, "#domain")
-    .replace(/@视觉风格/g, "#style")
-    .replace(/@语气/g, "#tone")
-    .replace(/@场景/g, "#scene")
-    .replace(/@禁用项/g, "#forbidden");
+    .replace(/@LOGO\b/g, "$logo")
+    .replace(/@logo\b/g, "$logo")
+    .replace(/@IP\b/g, "$ip")
+    .replace(/@ip\b/g, "$ip")
+    .replace(/@产品/g, "$product")
+    .replace(/@模特/g, "$model")
+    .replace(/@店铺/g, "$storefront")
+    .replace(/@环境/g, "$environment")
+    .replace(/#slogen\b/g, "$copy.slogan")
+    .replace(/#slogan\b/g, "$copy.slogan")
+    .replace(/#brand_name\b/g, "$copy.brand_name")
+    .replace(/@品牌/g, "$copy.brand_name")
+    .replace(/@域名/g, "$copy.domain")
+    .replace(/@视觉风格/g, "$brand.style")
+    .replace(/@语气/g, "$brand.tone")
+    .replace(/@场景/g, "$brand.scene")
+    .replace(/@禁用项/g, "$brand.forbidden");
 }
 
 function insertReferenceToken(body: string, token: string) {
-  const replaced = body.replace(/([@＠#＃])[^@＠#＃\s]*\s*$/, token);
+  const replaced = body.replace(/([@＠#＃$＄%％/])[^@＠#＃$＄%％/\s]*\s*$/u, token);
   const next = replaced === body ? `${body}${body.endsWith(" ") || !body ? "" : " "}${token}` : replaced;
   return `${next}${next.endsWith(" ") ? "" : " "}`;
 }
@@ -591,14 +655,14 @@ function referenceTokenCandidates(raw: string) {
 }
 
 function buildPromptReferencePreview(prompt: string, items: MentionItem[]) {
-  prompt = prompt.replace(/＠/g, "@").replace(/＃/g, "#");
-  const tokens = Array.from(prompt.matchAll(/([@#])([\p{L}0-9_-]+(?:\.[\p{L}0-9_-]+)*)/gu)).map((match) => match[0]);
+  prompt = normalizeLegacyPromptRefs(prompt.replace(/＠/g, "@").replace(/＃/g, "#").replace(/＄/g, "$").replace(/％/g, "%"));
+  const tokens = Array.from(prompt.matchAll(/([@/$%])([\p{L}0-9_-]+(?:\.[\p{L}0-9_-]+)*)/gu)).map((match) => match[0]);
   const images: MentionItem[] = [];
   const texts: MentionItem[] = [];
   for (const token of tokens) {
-    const candidates = referenceTokenCandidates(token);
-    const item = items.find((candidate) => candidates.includes(candidate.token.toLowerCase()));
+    const item = items.find((candidate) => candidate.token.toLowerCase() === token.toLowerCase());
     if (!item) continue;
+    if (!["resource", "copy"].includes(item.kind)) continue;
     const target = item.imageUrl ? images : texts;
     if (!target.some((existing) => existing.id === item.id)) target.push(item);
   }
@@ -606,16 +670,22 @@ function buildPromptReferencePreview(prompt: string, items: MentionItem[]) {
 }
 
 function activeReferenceQuery(prompt: string) {
-  const normalized = prompt.replace(/＠/g, "@").replace(/＃/g, "#").replace(/\s+$/g, "");
-  const match = normalized.match(/([@#])([^@#\s]*)$/);
+  const normalized = prompt.replace(/＠/g, "@").replace(/＃/g, "#").replace(/＄/g, "$").replace(/％/g, "%").replace(/\s+$/g, "");
+  const match = normalized.match(/([@/$%])([^@/$%\s]*)$/u);
   if (!match) return null;
-  return { symbol: match[1] as "@" | "#", query: match[2].toLowerCase() };
+  return { symbol: match[1] as "@" | "/" | "$" | "%", query: match[2].toLowerCase() };
 }
 
 function filterMentionItems(items: MentionItem[], prompt: string) {
   const active = activeReferenceQuery(prompt);
   if (!active) return [];
-  const pool = items.filter((item) => active.symbol === "@" ? Boolean(item.imageUrl) : !item.imageUrl);
+  const pool = items.filter((item) => {
+    if (active.symbol === "@") return item.kind === "agent";
+    if (active.symbol === "/") return item.kind === "command";
+    if (active.symbol === "$") return item.kind === "resource" || item.kind === "copy";
+    if (active.symbol === "%") return item.kind === "tag";
+    return false;
+  });
   if (!active.query) return pool;
   return pool.filter((item) => {
     const haystack = `${item.token} ${item.title} ${item.description} ${item.role}`.toLowerCase();
@@ -763,7 +833,7 @@ function App() {
   async function generate(input = prompt, template?: Template, reuseCurrentWorkflow = true) {
     if (!input.trim() || !activeBrand || !model) return;
     setError("");
-    const nodes = reuseCurrentWorkflow && activeFrame ? normalizeWorkflowNodes(activeFrame.workflowNodes) : undefined;
+    const nodes = reuseCurrentWorkflow && activeFrame ? normalizeWorkflowNodes(activeFrame.workflowNodes, shouldUseDefaultWorkflow(activeFrame.workflowNodes)) : undefined;
     const settings = activeFrame?.settings ?? defaultSettings;
     const response = await api.post<{ task: GenerationTask; frame: Frame; credits: number }>("/generate", {
       prompt: template ? template.intent : input,
@@ -857,7 +927,23 @@ function App() {
     if (!activeFrame) return;
     const selectedAssets = assets.filter((asset) => assetSelection.includes(asset.id));
     const refs = selectedAssets.map(assetToRef);
-    const nodes = normalizeWorkflowNodes(activeFrame.workflowNodes);
+    const nodes = normalizeWorkflowNodes(activeFrame.workflowNodes, shouldUseDefaultWorkflow(activeFrame.workflowNodes));
+    if (!nodes.some((node) => node.id === "input-image")) {
+      const nextNodes: WorkflowNode[] = [{
+        id: `node_refs_${Date.now().toString(36)}`,
+        type: "reference",
+        title: "素材参考",
+        body: refs.map((item) => `${item.role}: ${item.title}`).join(" / "),
+        preview: activeBrand?.accentColor ?? "#f97316",
+        refs,
+        x: 120,
+        y: 160,
+        w: 250,
+        h: 300
+      }];
+      await updateFrame(activeFrame.id, { workflowNodes: nextNodes });
+      return;
+    }
     const nextNodes = nodes.map((node) => {
       if (node.id !== "input-image") return node;
       const nextRefs = [...(node.refs ?? []), ...refs].filter((ref, index, list) => list.findIndex((item) => item.id === ref.id) === index);
@@ -1195,7 +1281,7 @@ function BrandPanel({
       <section className="rh-brand-score">
         <div>
           <strong>品牌采集完整度</strong>
-          <small>{complete.textDone} 项文字 · {complete.assetDone} 项图片素材 · 后续工作流自动注入 @引用</small>
+          <small>{complete.textDone} 项文字 · {complete.assetDone} 项图片素材 · 后续工作流自动注入 $资源</small>
         </div>
         <b>{complete.score}%</b>
         <span><i style={{ width: `${complete.score}%` }} /></span>
@@ -1207,7 +1293,7 @@ function BrandPanel({
       <section className="rh-brand-slots">
         <div className="rh-section-title">
           <strong>品牌素材采集</strong>
-          <small>上传后可在提示词里直接输入 @logo、@ip、@product，也可跨品牌写 @xmanx.logo。</small>
+          <small>上传后可在提示词里直接输入 $logo、$ip、$product，也可跨品牌写 $xmanx.logo。</small>
         </div>
         <div className="rh-brand-slot-grid">
           {requiredBrandSlots.map((slot) => {
@@ -1266,7 +1352,7 @@ function BrandPanel({
         <label>强调<input type="color" value={draft.accentColor} onChange={(event) => setDraft({ ...draft, accentColor: event.target.value })} /></label>
       </div>
       <button className="rh-primary-wide" type="button" onClick={() => onSave(draft)}><RefreshCw />保存品牌</button>
-      <label className="rh-brand-upload"><Upload />上传补充素材<input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && onUpload(event.target.files[0], "upload", { meta: "@素材 · supplemental brand reference" })} /></label>
+      <label className="rh-brand-upload"><Upload />上传补充素材<input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && onUpload(event.target.files[0], "upload", { meta: "$asset · supplemental brand reference" })} /></label>
       <div className="rh-brand-assets">
         {brandAssets.filter((asset) => asset.imageUrl).map((asset) => (
           <span key={asset.id} title={`${mentionTokenForRole(assetRole(asset))} ${asset.title}`} style={{ backgroundImage: `url(${asset.imageUrl})` }} />
@@ -1344,7 +1430,7 @@ function Canvas(props: {
   onGenerateAudioNode: (nodeId: string, nodePrompt: string, modelId: string, settings: { mode: string; duration: string; scene: string; loop: boolean; translate: boolean }) => void | Promise<void>;
 }) {
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
-  const [nodes, setNodes] = useState<WorkflowNode[]>(() => props.frame ? normalizeWorkflowNodes(props.frame.workflowNodes) : []);
+  const [nodes, setNodes] = useState<WorkflowNode[]>(() => props.frame ? normalizeWorkflowNodes(props.frame.workflowNodes, shouldUseDefaultWorkflow(props.frame.workflowNodes)) : []);
   const [openEdge, setOpenEdge] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [nodeGeneration, setNodeGeneration] = useState<{ nodeId: string; progress: number } | null>(null);
@@ -1353,7 +1439,7 @@ function Canvas(props: {
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const dragRef = useRef<{ id: string; x: number; y: number; cx: number; cy: number } | null>(null);
   const edgeDragRef = useRef<{ id: string; offset: number; cy: number } | null>(null);
-  const visibleNodes = useMemo(() => displayNodes(nodes, Boolean(props.frame)), [nodes, props.frame]);
+  const visibleNodes = useMemo(() => displayNodes(nodes, shouldUseDefaultWorkflow(nodes)), [nodes]);
   const activeSelectedNode = visibleNodes.find((node) => node.id === selectedNode || node.id === props.editingNodeId);
 
   const lastFrameIdRef = useRef<string | undefined>(props.frame?.id);
@@ -1361,11 +1447,11 @@ function Canvas(props: {
     const nextFrameId = props.frame?.id;
     if (nextFrameId !== lastFrameIdRef.current) {
       lastFrameIdRef.current = nextFrameId;
-      setNodes(nextFrameId ? normalizeWorkflowNodes(props.frame?.workflowNodes) : []);
+      setNodes(nextFrameId ? normalizeWorkflowNodes(props.frame?.workflowNodes, shouldUseDefaultWorkflow(props.frame?.workflowNodes ?? [])) : []);
       return;
     }
     if (props.editingNodeId) return;
-    setNodes(nextFrameId ? normalizeWorkflowNodes(props.frame?.workflowNodes) : []);
+    setNodes(nextFrameId ? normalizeWorkflowNodes(props.frame?.workflowNodes, shouldUseDefaultWorkflow(props.frame?.workflowNodes ?? [])) : []);
   }, [props.frame?.id, props.frame?.workflowNodes, props.editingNodeId]);
 
   function commit(nextNodes = nodes) {
@@ -1388,7 +1474,7 @@ function Canvas(props: {
       w: type === "process" || type === "script" ? 360 : type === "compose" ? 300 : type === "output" || type === "video" ? 260 : 230,
       h: type === "process" || type === "script" ? 260 : type === "compose" ? 260 : 238
     };
-    const next = [...normalizeWorkflowNodes(nodes, Boolean(props.frame)), node];
+    const next = [...normalizeWorkflowNodes(nodes, shouldUseDefaultWorkflow(nodes)), node];
     setNodes(next);
     setSelectedNode(node.id);
     props.setEditingNodeId(node.id);
@@ -1429,7 +1515,7 @@ function Canvas(props: {
       w: type === "process" || type === "script" ? 360 : type === "compose" ? 300 : type === "output" || type === "video" ? 260 : 230,
       h: type === "process" || type === "script" ? 260 : type === "compose" ? 260 : 238
     };
-    const current = normalizeWorkflowNodes(nodes, Boolean(props.frame));
+    const current = normalizeWorkflowNodes(nodes, shouldUseDefaultWorkflow(nodes));
     const next = [...current, node];
     setNodes(next);
     setSelectedNode(node.id);
@@ -1527,7 +1613,7 @@ function Canvas(props: {
   }
 
   function organizeCanvas() {
-    const normalized = normalizeWorkflowNodes(nodes, Boolean(props.frame));
+    const normalized = normalizeWorkflowNodes(nodes, shouldUseDefaultWorkflow(nodes));
     const next = normalized.map((node, index) => {
       const depth = node.id === "input-image" ? 0 : node.id === "brand" ? 1 : node.id === "prompt" ? 2 : node.id === "output" ? 3 : Math.max(1, normalized.findIndex((item) => item.id === node.parentId) + 1);
       const siblings = normalized.filter((item) => (item.parentId ?? "") === (node.parentId ?? "") && !coreNodeIds.includes(item.id));
@@ -1716,7 +1802,7 @@ function Canvas(props: {
               return Promise.resolve(commit(nextNodes))
                 .then(() => props.onGenerateNode(nodeId, nodePrompt, modelId, settings))
                 .then((result) => {
-                  if (result?.frame.workflowNodes) setNodes(normalizeWorkflowNodes(result.frame.workflowNodes));
+                  if (result?.frame.workflowNodes) setNodes(normalizeWorkflowNodes(result.frame.workflowNodes, shouldUseDefaultWorkflow(result.frame.workflowNodes)));
                   return result;
                 });
             }}
@@ -1836,7 +1922,7 @@ function NodeCard(props: {
             {parseMentionSummary(props.node.body).map((item) => (
               <span key={`${item.token}_${item.copy}`}><b>{item.token}</b>{item.copy}</span>
             ))}
-            {!parseMentionSummary(props.node.body).length && <span><b>@提示</b>{props.node.body || "点击编辑上下文"}</span>}
+            {!parseMentionSummary(props.node.body).length && <span><b>CAL</b>{props.node.body || "点击编辑上下文"}</span>}
           </div>
         </button>
       ) : (
@@ -1848,28 +1934,40 @@ function NodeCard(props: {
 }
 
 function MentionPopover({ items, compact = false, onPick }: { items: MentionItem[]; compact?: boolean; onPick: (item: MentionItem) => void }) {
-  const imageItems = items.filter((item) => item.imageUrl).slice(0, compact ? 6 : 10);
-  const textItems = items.filter((item) => !item.imageUrl).slice(0, compact ? 6 : 10);
+  const visibleItems = items.slice(0, compact ? 8 : 14);
+  const titleMap: Record<MentionItem["kind"], string> = {
+    agent: "@ 智能体",
+    command: "/ 命令",
+    resource: "$ 图片/资源",
+    copy: "$ 文案/品牌字段",
+    tag: "% 标签"
+  };
   return (
     <div className={`rh-node-mentions ${compact ? "compact" : ""}`}>
-      <strong>@ 图片引用 / # 文本引用</strong>
-      {imageItems.length > 0 && <small>视觉</small>}
-      {imageItems.map((item) => (
-          <button type="button" key={`${item.group}_${item.id}_${item.token}`} onMouseDown={(event) => event.preventDefault()} onClick={() => onPick(item)} title={`${item.token} · 生成时作为参考图传入 skill`}>
-            <span style={{ backgroundImage: `url(${item.imageUrl})` }} />
-            <b>{item.token}</b>
-            <small>{item.title}</small>
-          </button>
-        ))}
-      {textItems.length > 0 && <small>文本</small>}
-      {textItems.map((item) => (
-          <button type="button" key={`${item.group}_${item.id}_${item.token}`} onMouseDown={(event) => event.preventDefault()} onClick={() => onPick(item)} title={`${item.token} · 生成前展开为品牌文本`}>
-            <i style={{ background: item.color }}>{item.token.replace("#", "").slice(0, 2)}</i>
-            <b>{item.token}</b>
-            <small>{item.title}</small>
-          </button>
-        ))}
-      {!items.length && <small>当前品牌暂无可引用素材</small>}
+      <strong>CAL 自动补全</strong>
+      {Object.entries(titleMap).map(([kind, title]) => {
+        const groupItems = visibleItems.filter((item) => item.kind === kind);
+        if (!groupItems.length) return null;
+        return (
+          <React.Fragment key={kind}>
+            <small>{title}</small>
+            {groupItems.map((item) => (
+              <button
+                type="button"
+                key={`${item.group}_${item.id}_${item.token}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onPick(item)}
+                title={item.kind === "resource" ? `${item.token} · 生成时作为真实参考图传入 skill` : `${item.token} · ${item.description}`}
+              >
+                {item.imageUrl ? <span style={{ backgroundImage: `url(${item.imageUrl})` }} /> : <i style={{ background: item.color }}>{item.token.slice(0, 2)}</i>}
+                <b>{item.token}</b>
+                <small>{item.title}</small>
+              </button>
+            ))}
+          </React.Fragment>
+        );
+      })}
+      {!items.length && <small>没有匹配项。输入 @ / $ / % 可继续筛选。</small>}
     </div>
   );
 }
@@ -1954,6 +2052,8 @@ function NodeEditor({
   ].filter((item, index, list) => item.imageUrl && list.findIndex((candidate) => candidate.imageUrl === item.imageUrl) === index);
   const canGenerateImage = draft.type === "image" || draft.type === "reference" || draft.type === "output";
   const mentionItems = buildMentionItems(activeBrand, assets);
+  const activeDraftQuery = activeReferenceQuery(draft.body);
+  const filteredDraftMentionItems = filterMentionItems(mentionItems, draft.body);
 
   function appendMention(item: MentionItem) {
     setDraft((current) => {
@@ -2079,13 +2179,34 @@ function NodeEditor({
     onSave({ refs: nextDraft.refs });
   }
 
+  async function handleTransformDraft(action: "translate" | "optimize") {
+    const currentDraft = draft;
+    if (!currentDraft || !currentDraft.body.trim()) return;
+    setGenerating(true);
+    setGenerationMessage(action === "translate" ? "正在调用文本模型翻译..." : "正在调用文本模型优化 CAL...");
+    try {
+      const result = await api.post<TransformTextResponse>("/ai/transform-text", {
+        text: currentDraft.body,
+        action,
+        brandId: activeBrand?.id,
+        model: textModel
+      });
+      const nextDraft = { ...currentDraft, body: result.text };
+      setDraft(nextDraft);
+      onSave({ body: nextDraft.body });
+      setGenerationMessage(action === "translate" ? "翻译完成，已保留 CAL 引用。" : "优化完成，已更新为 CAL 提示词。");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   if (canGenerateImage) {
     const imagePromptReady = Boolean((draft.body || draft.title).trim());
     return (
       <aside className="rh-node-editor rh-image-editor" onPointerDown={(event) => event.stopPropagation()}>
         <div className="rh-image-editor-toolbar">
           <button type="button" title="风格"><Box /><span>风格</span></button>
-          <button type="button" title="标记"><Sparkles /><span>标记</span></button>
+          <button type="button" title="优化 CAL" onClick={() => void handleTransformDraft("optimize")}><Sparkles /><span>优化</span></button>
           <button type="button" title="聚焦"><Camera /><span>聚焦</span></button>
           <button type="button" className="active" title="列表"><Layers3 /><b>1</b></button>
           <button type="button" className="ghost" title="放大预览" onClick={() => imageUrl && onPreview({ title: draft.title, subtitle: draft.body, imageUrl, color: draft.preview, nodeId: draft.id })} disabled={!imageUrl}><Expand /></button>
@@ -2097,10 +2218,10 @@ function NodeEditor({
           value={draft.body}
           onChange={(event) => setDraft({ ...draft, body: event.target.value })}
           onBlur={() => onSave({ body: draft.body })}
-          placeholder="描述你想要生成的画面内容，按/呼出指令，@引用素材"
+          placeholder='@设计师 /生成海报 使用 $logo $product.hero，显示 "会员免费锅底"，主题 %高级感'
         />
-        {/[@#]$|[@#][\w.-]*$/.test(draft.body) && (
-          <MentionPopover items={mentionItems} onPick={appendMention} />
+        {activeDraftQuery && (
+          <MentionPopover items={filteredDraftMentionItems} onPick={appendMention} />
         )}
         <button
           type="button"
@@ -2122,7 +2243,7 @@ function NodeEditor({
           </select>
           <button type="button"><Camera />摄像机</button>
           <span />
-          <button type="button" title="翻译"><Languages /></button>
+          <button type="button" title="调用文本模型翻译" onClick={() => void handleTransformDraft("translate")}><Languages /></button>
           <select value={imageQuality} onChange={(event) => setImageQuality(event.target.value as GenerationSettings["quality"])} title="质量">
             <option value="standard">standard</option><option value="hd">hd</option><option value="ultra">ultra</option>
           </select>
@@ -2165,7 +2286,7 @@ function NodeEditor({
           onChange={(event) => setDraft({ ...draft, body: event.target.value })}
           placeholder={draft.type === "brand" ? "整理 Logo、IP、产品、模特、语气、禁用项等品牌上下文。" : "输入最终提示词。"}
         />
-        {/[@#]$|[@#][\w.-]*$/.test(draft.body) && <MentionPopover items={mentionItems} compact onPick={appendMention} />}
+        {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
         <div className="rh-editor-actions">
           <button type="button" onClick={() => { onSave({ title: draft.title, body: draft.body }); onClose(); }}>保存</button>
           <button type="button" onClick={onClose}>关闭</button>
@@ -2206,8 +2327,8 @@ function NodeEditor({
             placeholder={textMode === "table" ? "描述要拆解的分镜、字段或故事版结构" : "输入故事、脚本方向或提示词"}
           />
         </div>
-        {/[@#]$|[@#][\w.-]*$/.test(draft.body) && (
-          <MentionPopover items={mentionItems} compact onPick={appendMention} />
+        {activeDraftQuery && (
+          <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />
         )}
         <div className="rh-text-editor-footer">
           <select value={textModel} onChange={(event) => setTextModel(event.target.value)}>
@@ -2216,7 +2337,8 @@ function NodeEditor({
             <option>Lib Nano Pro</option>
           </select>
           <span />
-          <button type="button" className={translateText ? "active" : ""} onClick={() => setTranslateText((value) => !value)} title="翻译"><Languages /></button>
+          <button type="button" onClick={() => void handleTransformDraft("optimize")} title="优化 CAL"><Wand2 /></button>
+          <button type="button" className={translateText ? "active" : ""} onClick={() => void handleTransformDraft("translate")} title="调用文本模型翻译"><Languages /></button>
           <small>♦ 6</small>
           <button type="button" className="submit" onClick={() => void handleTextGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
         </div>
@@ -2241,6 +2363,7 @@ function NodeEditor({
           onBlur={() => onSave({ title: draft.title, body: draft.body })}
           placeholder={draft.type === "compose" ? "选择多个视频节点后，描述剪辑顺序、转场、节奏和输出规格" : "描述旁白、音效、配乐风格或音频参考"}
         />
+        {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
         <div className="rh-editor-actions">
           <button type="button" onClick={() => { onSave({ title: draft.title, body: draft.body }); onClose(); }}>保存</button>
         </div>
@@ -2286,10 +2409,10 @@ function NodeEditor({
           value={draft.body}
           onChange={(event) => setDraft({ ...draft, body: event.target.value })}
           onBlur={() => onSave({ body: draft.body })}
-          placeholder="描述配乐、音效或旁白。可用 @logo / @ip 参考品牌视觉，用 #slogan / #style 引用品牌文本"
+          placeholder='描述配乐、音效或旁白。可用 $logo / $ip 引用图片资源，用 $copy.slogan 引用品牌文案'
         />
-        {/[@#]$|[@#][\w.-]*$/.test(draft.body) && (
-          <MentionPopover items={mentionItems} compact onPick={appendMention} />
+        {activeDraftQuery && (
+          <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />
         )}
         <div className="rh-audio-preview">
           <Music2 />
@@ -2309,7 +2432,8 @@ function NodeEditor({
           </select>
           <span />
           <button type="button" className={audioLoop ? "active" : ""} onClick={() => setAudioLoop((value) => !value)} title="循环"><RefreshCw /></button>
-          <button type="button" className={translateAudio ? "active" : ""} onClick={() => setTranslateAudio((value) => !value)} title="翻译"><Languages /></button>
+          <button type="button" onClick={() => void handleTransformDraft("optimize")} title="优化 CAL"><Wand2 /></button>
+          <button type="button" className={translateAudio ? "active" : ""} onClick={() => void handleTransformDraft("translate")} title="调用文本模型翻译"><Languages /></button>
           <small>♦ 18</small>
           <button type="button" className="submit" onClick={() => void handleAudioGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
         </div>
@@ -2337,15 +2461,17 @@ function NodeEditor({
           value={draft.body}
           onChange={(event) => setDraft({ ...draft, body: event.target.value })}
           onBlur={() => onSave({ title: draft.title, body: draft.body })}
-          placeholder="描述剧情或添加角色参考、视频参考等，为你生成分镜脚本"
+          placeholder='@视频导演 /写视频脚本 使用 $product.hero $ip，主题 %真实摄影'
         />
+        {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
         <div className="rh-script-editor-footer">
           <select value={scriptModel} onChange={(event) => setScriptModel(event.target.value)}>
             <option>gpt-5.4</option>
             <option>deepseek-ai/DeepSeek-V4-Flash</option>
           </select>
           <span />
-          <button type="button" className={translateScript ? "active" : ""} onClick={() => setTranslateScript((value) => !value)} title="翻译"><Languages /></button>
+          <button type="button" onClick={() => void handleTransformDraft("optimize")} title="优化 CAL"><Wand2 /></button>
+          <button type="button" className={translateScript ? "active" : ""} onClick={() => void handleTransformDraft("translate")} title="调用文本模型翻译"><Languages /></button>
           <small>♦ 6</small>
           <button type="button" className="submit" onClick={() => void handleScriptGenerate()} disabled={generating || !draft.body.trim()}>{generating ? <Loader2 className="spin" /> : <Send />}</button>
         </div>
@@ -2393,10 +2519,10 @@ function NodeEditor({
           value={draft.body}
           onChange={(event) => setDraft({ ...draft, body: event.target.value })}
           onBlur={() => onSave({ body: draft.body })}
-          placeholder="描述你想要生成的画面内容，@引用素材"
+          placeholder='@视频导演 /生成视频 使用 $product.hero $logo，主题 %TikTok视频'
         />
-        {/[@#]$|[@#][\w.-]*$/.test(draft.body) && (
-          <MentionPopover items={mentionItems} compact onPick={appendMention} />
+        {activeDraftQuery && (
+          <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />
         )}
         <div className="rh-video-preview">
           <Play />
@@ -2414,7 +2540,8 @@ function NodeEditor({
           </select>
           <button type="button" className={videoSound ? "active" : ""} onClick={() => setVideoSound((value) => !value)} title="音效"><Volume2 /></button>
           <span />
-          <button type="button" className={translateVideo ? "active" : ""} onClick={() => setTranslateVideo((value) => !value)} title="翻译"><Languages /></button>
+          <button type="button" onClick={() => void handleTransformDraft("optimize")} title="优化 CAL"><Wand2 /></button>
+          <button type="button" className={translateVideo ? "active" : ""} onClick={() => void handleTransformDraft("translate")} title="调用文本模型翻译"><Languages /></button>
           <button type="button" title="参数"><SlidersHorizontal /></button>
           <button type="button">1个</button>
           <small>♦ 135</small>
@@ -2439,7 +2566,8 @@ function NodeEditor({
       </label>
       <label>
         生成 / 处理提示词
-        <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} onBlur={() => onSave({ body: draft.body })} placeholder="描述这个节点要生成或处理的内容，可以 @ 引用素材。" />
+        <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} onBlur={() => onSave({ body: draft.body })} placeholder="描述这个节点要生成或处理的内容，可以用 $ 引用资源。" />
+        {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
       </label>
       <div className="rh-editor-actions">
         <button type="button" onClick={() => { onSave({ title: draft.title, body: draft.body, preview: draft.preview, refs: draft.refs }); onClose(); }}>保存</button>
@@ -2477,7 +2605,7 @@ function BottomComposer(props: {
   return (
     <div className="rh-composer">
       <button type="button" className="rh-add" onClick={props.onCreateProject} title="新建项目画布"><Plus /><span>New</span></button>
-      <textarea value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} placeholder="生成当前画布：@引用图片素材，#引用品牌文案" aria-label="生成当前画布提示词" />
+      <textarea value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} placeholder='@设计师 /生成海报 使用 $logo $product.hero，显示 "会员免费锅底"，主题 %高级感 -> 海报' aria-label="生成当前画布提示词" />
       {referencePreview.total > 0 && (
         <div className="rh-composer-refs">
           <strong>{referencePreview.images.length} 图 / {referencePreview.texts.length} 文本</strong>
@@ -2488,16 +2616,16 @@ function BottomComposer(props: {
       )}
       {activeQuery && (
         <div className="rh-mention-popover">
-          <strong>{activeQuery.symbol === "@" ? "@ 图片引用" : "# 文本引用"}</strong>
-          <em>{activeQuery.symbol === "@" ? "视觉资源会作为参考图传入 skill" : "文本字段会在生成前展开"}</em>
+          <strong>{activeQuery.symbol === "@" ? "@ 智能体" : activeQuery.symbol === "/" ? "/ 命令" : activeQuery.symbol === "$" ? "$ 资源/文案" : "% 标签"}</strong>
+          <em>{activeQuery.symbol === "$" ? "图片资源会作为真实参考图传入 skill，文案资源会展开" : "按 CAL 语言规则生成结构化执行参数"}</em>
           {filteredMentionItems.map((item) => (
             <button type="button" key={`${item.group}_${item.id}_${item.token}`} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(item)}>
-              <span style={item.imageUrl ? { backgroundImage: `url(${item.imageUrl})` } : { background: item.color }}>{!item.imageUrl ? item.token.replace("#", "").slice(0, 2) : ""}</span>
+              <span style={item.imageUrl ? { backgroundImage: `url(${item.imageUrl})` } : { background: item.color }}>{!item.imageUrl ? item.token.slice(0, 2) : ""}</span>
               <b>{item.token}</b>
               <small>{item.title}</small>
             </button>
           ))}
-          {!filteredMentionItems.length && <small>没有匹配资源。先在品牌面板补齐素材，或换一个字段名。</small>}
+          {!filteredMentionItems.length && <small>没有匹配项。继续输入或先在品牌面板补齐素材。</small>}
         </div>
       )}
       <div className="rh-composer-row">
