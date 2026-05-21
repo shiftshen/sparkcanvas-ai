@@ -29,7 +29,7 @@ npm run dev
 
 ```bash
 export YIJIARJ_BASE_URL='https://api.yijiarj.cn/v1'
-export YIJIARJ_API_KEY='sk-your-key'
+export YIJIARJ_API_KEY='YOUR_YIJIARJ_API_KEY'
 export IMAGE_GEN_MODEL='nano_banana_2'
 export VIDEO_GEN_MODEL='grok-imagine-1.0-video-super'
 export TEXT_GEN_MODEL='gpt-5.4'
@@ -91,6 +91,7 @@ docker compose -f config/docker-compose.yml up -d
 ## 目录结构说明
 
 - `/docs/`：包含所有的核心设计文档。
+  - `AI_HANDOFF.md`：给下一位 AI/开发者的完整交接文档，包含参考站点、CAL 目标、API 对接、模型成本/时长、测试命令和风险清单。
   - `SparkCanvas_Product_Design.md`：产品核心理念与交互设计。
   - `Acceptance_Checklist.md`：当前上线验收清单，以品牌资产、CAL、画布工作流和真实输出闭环为准。
   - `Product_QA_Matrix_2026-05-21.md`：产品、UX、前端、后端、AI 工作流和 QA 的统一验收矩阵。

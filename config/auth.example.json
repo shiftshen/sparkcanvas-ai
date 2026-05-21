@@ -1,7 +1,10 @@
 {
-  "YIJIARJ_API_KEY": "sk-your-key",
   "YIJIARJ_BASE_URL": "https://api.yijiarj.cn/v1",
+  "YIJIARJ_API_KEY": "YOUR_YIJIARJ_API_KEY",
+  "IMAGE_GEN_BASE_URL": "https://api.yijiarj.cn/v1",
+  "IMAGE_GEN_KEY": "YOUR_IMAGE_GEN_KEY",
   "IMAGE_GEN_MODEL": "nano_banana_2",
-  "VIDEO_GEN_MODEL": "grok-imagine-1.0-video-super-720p",
-  "TEXT_GEN_MODEL": "gpt-5.4"
+  "VIDEO_GEN_MODEL": "grok-imagine-1.0-video-super",
+  "TEXT_GEN_MODEL": "gpt-5.4",
+  "SPARKCANVAS_PUBLIC_BASE_URL": "https://xmanx.com"
 }
