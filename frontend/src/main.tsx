@@ -3970,9 +3970,9 @@ function NodeEditor({
         </div>
         <div className="rh-video-editor-footer">
           <select value={videoModel} onChange={(event) => setVideoModel(event.target.value)}>
-            <option value="grok-imagine-1.0-video-super">grok-imagine-1.0-video-super · ¥0.38/次</option>
-            <option value="veo_3_1-fast">veo_3_1-fast · ¥0.437/次</option>
-            <option value="grok-imagine-1.0-video-super-720p">grok-imagine-1.0-video-super-720p · ¥0.58/次</option>
+            <option value="grok-imagine-1.0-video-super">grok-imagine-1.0-video-super · 10s · ¥0.38/次</option>
+            <option value="veo_3_1-fast">veo_3_1-fast · 8s · ¥0.437/次</option>
+            <option value="grok-imagine-1.0-video-super-720p">grok-imagine-1.0-video-super-720p · 10s · ¥0.58/次</option>
             <option value="veo_3_1-fast-fl">veo_3_1-fast-fl · 首尾帧</option>
           </select>
           <select value={videoRatio} onChange={(event) => setVideoRatio(event.target.value)}>

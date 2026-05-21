@@ -168,6 +168,8 @@ try {
   const modelDiagnostics = await request("/ai/models/diagnostics");
   assert(modelDiagnostics.models.some((item) => item.id === "imgen-skill" && item.status === "recommended"), "model diagnostics should mark @imgen as the recommended image route");
   assert(modelDiagnostics.models.some((item) => item.id === "yijiarj-veo-3-1-fast" && item.type === "video"), "model diagnostics should include switchable video candidates");
+  assert(modelDiagnostics.models.some((item) => item.model === "veo_3_1-fast" && item.clipSeconds === 8), "veo_3_1-fast should be planned as an 8s fixed video model");
+  assert(modelDiagnostics.models.some((item) => item.model === "grok-imagine-1.0-video-super" && item.clipSeconds === 10), "grok video super should remain planned as a 10s fixed video model");
 
   const invalidGenerate = await fetch(`${baseUrl}/generate`, {
     method: "POST",
@@ -734,7 +736,7 @@ try {
   });
   assert(videoNode.videoPlan.includes("视频类型: 图生视频") && videoNode.node.type === "video", "canvas video node should use image-to-video when visual references or first frames exist");
   assert(videoNode.videoPlan.includes("Storyboard plan") && videoNode.videoPlan.includes("关键帧") && videoNode.videoPlan.includes("引用素材"), "video node should create a duration-aware storyboard and keyframe plan with reference controls");
-  assert(videoNode.videoPlan.includes("最终成片 5s") && videoNode.videoPlan.includes("模型固定单次输出 10s") && videoNode.videoPlan.includes("后裁切"), "5s final video should be planned as a 10s model clip followed by trimming");
+  assert(videoNode.videoPlan.includes("最终成片 5s") && videoNode.videoPlan.includes("固定单次输出 10s") && videoNode.videoPlan.includes("后裁切"), "5s final video should be planned as a 10s model clip followed by trimming");
   assert(!videoNode.videoPlan.includes("720P · 5s"), "video plan should not mix final duration into the ratio selector");
   assert(videoNode.videoPlan.includes("分镜板:"), "video node should expose storyboard-board generation status before image-to-video execution");
 
