@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -8,6 +8,7 @@ const port = 4201;
 const baseUrl = `http://localhost:${port}`;
 const tempDir = await mkdtemp(path.join(tmpdir(), "sparkcanvas-prod-smoke-"));
 const dataFile = path.join(tempDir, "sparkcanvas.json");
+const generatedDir = path.join(tempDir, "generated");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -20,6 +21,7 @@ const server = spawn("node", ["dist/server.js"], {
     NODE_ENV: "production",
     PORT: String(port),
     SPARKCANVAS_DATA_FILE: dataFile,
+    SPARKCANVAS_GENERATED_DIR: generatedDir,
     SPARKCANVAS_DISABLE_IMAGE_GEN: "1",
     SPARKCANVAS_AUTH_TOKEN: "prod-smoke-token",
     SPARKCANVAS_ADMIN_ACCOUNT: "admin@example.com",
@@ -47,6 +49,8 @@ async function waitForServer() {
 }
 
 try {
+  await mkdir(generatedDir, { recursive: true });
+  await writeFile(path.join(generatedDir, "private.txt"), "sparkcanvas private generated file");
   await waitForServer();
 
   const demoLogin = await fetch(`${baseUrl}/auth/login`, {
@@ -70,6 +74,17 @@ try {
   });
   assert(workspace.ok, `production workspace auth failed: ${workspace.status}`);
 
+  const generatedWithoutToken = await fetch(`${baseUrl}/generated/private.txt`, {
+    headers: { Origin: "https://xmanx.com" }
+  });
+  assert(generatedWithoutToken.status === 401, "production generated files must require auth");
+
+  const generatedWithToken = await fetch(`${baseUrl}/generated/private.txt`, {
+    headers: { Authorization: "Bearer prod-smoke-token", Origin: "https://xmanx.com" }
+  });
+  const generatedText = await generatedWithToken.text();
+  assert(generatedWithToken.ok && generatedText === "sparkcanvas private generated file", "production generated files should be readable with auth");
+
   const evilOrigin = await fetch(`${baseUrl}/workspace`, {
     headers: { Authorization: "Bearer prod-smoke-token", Origin: "https://evil.example" }
   });
@@ -77,7 +92,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["production-demo-login-disabled", "production-admin-login", "production-token-auth", "production-cors-origin-filter"]
+    checked: ["production-demo-login-disabled", "production-admin-login", "production-token-auth", "production-generated-file-auth", "production-cors-origin-filter"]
   }, null, 2));
 } finally {
   server.kill("SIGTERM");

@@ -33,6 +33,7 @@ type Brand = {
   assetRoles: BrandAssetRole[];
   autoInject: boolean;
   active: boolean;
+  archived?: boolean;
   updatedAt: string;
 };
 
@@ -275,7 +276,8 @@ const brandDetailSchema = z.object({
   forbiddenWords: z.array(z.string()).optional(),
   assetRoles: z.array(assetRoleSchema).optional(),
   autoInject: z.boolean().optional(),
-  active: z.boolean().optional()
+  active: z.boolean().optional(),
+  archived: z.boolean().optional()
 });
 
 const workflowNodeSchema = z.object({
@@ -1299,11 +1301,11 @@ async function repairInterruptedGenerations() {
 }
 
 function activeBrand() {
-  return db.brands.find((brand) => brand.active) ?? db.brands[0];
+  return db.brands.find((brand) => brand.active && !brand.archived) ?? db.brands.find((brand) => !brand.archived) ?? db.brands[0];
 }
 
 function findBrand(brandId?: string) {
-  return (brandId ? db.brands.find((brand) => brand.id === brandId) : undefined) ?? activeBrand();
+  return (brandId ? db.brands.find((brand) => brand.id === brandId && !brand.archived) : undefined) ?? activeBrand();
 }
 
 function frameBrand(frame: Pick<CanvasFrame, "brandId">) {
@@ -1950,22 +1952,84 @@ async function compactReferenceImage(sourcePath: string, outputName: string, ind
   if (!/\.(png|jpe?g|webp)$/i.test(sourcePath)) return sourcePath;
   await mkdir(generatedDir, { recursive: true });
   const compactPath = path.join(generatedDir, `${outputName}-ref-${index + 1}-compact.jpg`);
-  const ok = await new Promise<boolean>((resolve) => {
-    const child = spawn("sips", ["-Z", "768", "-s", "format", "jpeg", sourcePath, "--out", compactPath], { stdio: "ignore" });
-    const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      resolve(false);
-    }, 10000);
-    child.on("error", () => {
-      clearTimeout(timer);
-      resolve(false);
+  const candidates = [
+    { command: process.env.MAGICK_PATH || "magick", args: [sourcePath, "-resize", "768x768>", "-quality", "82", compactPath] },
+    { command: process.env.CONVERT_PATH || "convert", args: [sourcePath, "-resize", "768x768>", "-quality", "82", compactPath] },
+    { command: "sips", args: ["-Z", "768", "-s", "format", "jpeg", sourcePath, "--out", compactPath] }
+  ];
+  for (const candidate of candidates) {
+    const ok = await new Promise<boolean>((resolve) => {
+      const child = spawn(candidate.command, candidate.args, { stdio: "ignore" });
+      const timer = setTimeout(() => {
+        child.kill("SIGTERM");
+        resolve(false);
+      }, 10000);
+      child.on("error", () => {
+        clearTimeout(timer);
+        resolve(false);
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve(code === 0 && existsSync(compactPath));
+      });
     });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve(code === 0 && existsSync(compactPath));
-    });
+    if (ok) return compactPath;
+  }
+  return sourcePath;
+}
+
+function generatedFileRequestAuthorized(req: Request) {
+  if (!isProduction) return true;
+  const bearer = req.header("authorization")?.replace(/^Bearer\s+/i, "");
+  const queryToken = typeof req.query.token === "string" ? req.query.token : "";
+  return Boolean(authToken && (bearer === authToken || queryToken === authToken));
+}
+
+function generatedFileMiddleware(req: Request, res: Response, next: NextFunction) {
+  if (!generatedFileRequestAuthorized(req)) return res.status(401).json({ message: "Unauthorized generated file request" });
+  next();
+}
+
+function generatedFileUrl(url?: string) {
+  if (!url?.startsWith("/generated/")) return url;
+  if (!isProduction || !authToken) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}token=${encodeURIComponent(authToken)}`;
+}
+
+function applyGeneratedFileAuthToFrame(frame: CanvasFrame) {
+  if (!isProduction || !authToken) return frame;
+  const patchReference = (reference: ReferenceItem): ReferenceItem => ({
+    ...reference,
+    imageUrl: generatedFileUrl(reference.imageUrl)
   });
-  return ok ? compactPath : sourcePath;
+  return {
+    ...frame,
+    workflowNodes: frame.workflowNodes.map((node) => ({
+      ...node,
+      imageUrl: generatedFileUrl(node.imageUrl),
+      fileUrl: generatedFileUrl(node.fileUrl),
+      videoUrl: generatedFileUrl(node.videoUrl),
+      refs: node.refs?.map(patchReference)
+    })),
+    outputs: frame.outputs.map((output) => ({
+      ...output,
+      imageUrl: generatedFileUrl(output.imageUrl),
+      fileUrl: generatedFileUrl(output.fileUrl),
+      videoUrl: generatedFileUrl(output.videoUrl)
+    }))
+  };
+}
+
+function applyGeneratedFileAuthToWorkspace() {
+  if (!isProduction || !authToken) {
+    return { brands: db.brands, assets: db.assets, frames: db.frames };
+  }
+  return {
+    brands: db.brands,
+    assets: db.assets.map((asset) => ({ ...asset, imageUrl: generatedFileUrl(asset.imageUrl) })),
+    frames: db.frames.map(applyGeneratedFileAuthToFrame)
+  };
 }
 
 async function materializeReferenceImage(reference: ReferenceItem, outputName: string, index: number) {
@@ -2794,10 +2858,10 @@ function appendCopyNote(copy: string, note: string) {
 function pdfFontPath() {
   return [
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-    "/System/Library/Fonts/PingFang.ttc",
-    "/System/Library/Fonts/STHeiti Light.ttc",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
   ].find((candidate) => existsSync(candidate));
 }
 
@@ -2843,8 +2907,12 @@ function writeCanvasPdf(filePath: string, title: string, lines: string[], images
     doc.pipe(output);
     const fontPath = pdfFontPath();
     if (fontPath) {
-      doc.registerFont("SparkCanvasFont", fontPath);
-      doc.font("SparkCanvasFont");
+      try {
+        doc.registerFont("SparkCanvasFont", fontPath);
+        doc.font("SparkCanvasFont");
+      } catch {
+        doc.font("Helvetica");
+      }
     }
     doc.fontSize(20).fillColor("#111827").text(title || "SparkCanvas PDF", { width: 500 });
     doc.moveDown(0.4);
@@ -3615,7 +3683,7 @@ app.use(cors({
   credentials: false
 }));
 app.use(express.json({ limit: "20mb" }));
-app.use("/generated", express.static(generatedDir));
+app.use("/generated", generatedFileMiddleware, express.static(generatedDir));
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "sparkcanvas-api", domain: "xmanx.com" });
@@ -3654,7 +3722,8 @@ app.post("/me/credits/refill", async (_req, res) => {
 app.get("/workspace", async (_req, res) => {
   await repairInterruptedGenerations();
   await refreshPendingVideoOutputs();
-  res.json({ user: db.user, brands: db.brands, assets: db.assets, templates, models, frames: db.frames, tasks: db.tasks, ai: aiStatus() });
+  const workspace = applyGeneratedFileAuthToWorkspace();
+  res.json({ user: db.user, brands: workspace.brands, assets: workspace.assets, templates, models, frames: workspace.frames, tasks: db.tasks, ai: aiStatus() });
 });
 
 app.get("/workspace/export", (_req, res) => {
@@ -3702,9 +3771,63 @@ app.patch("/brands/:id", async (req, res) => {
   const brand = db.brands.find((item) => item.id === req.params.id);
   if (!brand) return res.status(404).json({ message: "Brand not found" });
   Object.assign(brand, brandDetailSchema.parse(req.body), { updatedAt: now() });
-  if (brand.active) db.brands.forEach((item) => { if (item.id !== brand.id) item.active = false; });
+  if (brand.active) {
+    brand.archived = false;
+    db.brands.forEach((item) => { if (item.id !== brand.id) item.active = false; });
+  }
   await persistDb();
   res.json(brand);
+});
+
+app.patch("/brands/:id/archive", async (req, res) => {
+  const brand = db.brands.find((item) => item.id === req.params.id);
+  if (!brand) return res.status(404).json({ message: "Brand not found" });
+  const input = z.object({ archived: z.boolean().default(true) }).parse(req.body ?? {});
+  brand.archived = input.archived;
+  if (brand.archived) brand.active = false;
+  brand.updatedAt = now();
+  if (!db.brands.some((item) => item.active && !item.archived)) {
+    const fallback = db.brands.find((item) => !item.archived);
+    if (fallback) fallback.active = true;
+  }
+  await persistDb();
+  res.json(brand);
+});
+
+app.delete("/brands/:id", async (req, res) => {
+  const index = db.brands.findIndex((item) => item.id === req.params.id);
+  if (index === -1) return res.status(404).json({ message: "Brand not found" });
+  if (db.brands.length <= 1) return res.status(409).json({ message: "Cannot delete the last brand" });
+  const [brand] = db.brands.splice(index, 1);
+  const removedAssets = db.assets.filter((asset) => asset.brandId === brand.id);
+  db.assets = db.assets.filter((asset) => asset.brandId !== brand.id);
+  const removedImageUrls = new Set(removedAssets.map((asset) => asset.imageUrl).filter(Boolean));
+  const removedAssetRefPrefixes = new Set(removedAssets.map((asset) => `asset_${asset.id}`));
+  for (const frame of db.frames) {
+    if (frame.brandId === brand.id) {
+      frame.brandId = "";
+      frame.brandName = "";
+      frame.brandInjected = false;
+      frame.brandContext = "";
+      frame.updatedAt = now();
+    }
+    frame.workflowNodes = frame.workflowNodes.map((node) => {
+      if (!node.refs?.length) return node;
+      return {
+        ...node,
+        refs: node.refs.filter((reference) => {
+          const removedAssetRef = Array.from(removedAssetRefPrefixes).some((prefix) => reference.id === prefix || reference.id.startsWith(`${prefix}_`));
+          return !removedAssetRef && (!reference.imageUrl || !removedImageUrls.has(reference.imageUrl));
+        })
+      };
+    });
+  }
+  if (!db.brands.some((item) => item.active && !item.archived)) {
+    const fallback = db.brands.find((item) => !item.archived) ?? db.brands[0];
+    if (fallback) fallback.active = true;
+  }
+  await persistDb();
+  res.json({ ok: true, id: brand.id, removedAssets: removedAssets.length });
 });
 
 app.post("/assets/upload", express.raw({ type: ["image/png", "image/jpeg", "image/jpg", "image/webp", "application/octet-stream"], limit: "25mb" }), async (req, res) => {

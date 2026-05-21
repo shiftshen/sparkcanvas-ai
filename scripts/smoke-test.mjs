@@ -446,6 +446,32 @@ try {
   const cleanupFrame = cleanupWorkspace.frames.find((frame) => frame.id === emptyFrame.id);
   assert(cleanupFrame.workflowNodes.every((node) => !(node.refs ?? []).some((ref) => ref.id.startsWith(`asset_${tempAsset.id}`) || ref.imageUrl === tempAsset.imageUrl)), "asset deletion should clean derived canvas refs");
 
+  const lifecycleBrand = await request("/brands", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Lifecycle Smoke",
+      logoText: "LS",
+      primaryColor: "#111827",
+      accentColor: "#22c55e",
+      tone: "clean QA brand",
+      market: "test"
+    })
+  });
+  const lifecycleAsset = await request("/assets", {
+    method: "POST",
+    body: JSON.stringify({ title: "Lifecycle Logo", type: "logo", brandId: lifecycleBrand.id, color: "#22c55e", meta: "$logo lifecycle", imageUrl: "/brand-assets/generated/xmanx-logo.png" })
+  });
+  const archivedBrand = await request(`/brands/${lifecycleBrand.id}/archive`, {
+    method: "PATCH",
+    body: JSON.stringify({ archived: true })
+  });
+  assert(archivedBrand.archived === true && archivedBrand.active === false, "brand archive should deactivate the brand");
+  const deletedBrand = await request(`/brands/${lifecycleBrand.id}`, { method: "DELETE" });
+  assert(deletedBrand.ok === true && deletedBrand.removedAssets >= 1, "brand deletion should remove associated assets");
+  const afterBrandDelete = await request("/workspace");
+  assert(!afterBrandDelete.brands.some((item) => item.id === lifecycleBrand.id), "deleted brand should be removed from workspace");
+  assert(!afterBrandDelete.assets.some((item) => item.id === lifecycleAsset.id), "brand deletion should remove associated assets from workspace");
+
   const plainImageNode = {
     id: "node_plain_horse",
     type: "image",
@@ -816,7 +842,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "dapot-brand-profile", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "compose", "audio", "generate", "task", "canvas", "export", ...optionalChecks],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "brand-lifecycle", "dapot-brand-profile", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "compose", "audio", "generate", "task", "canvas", "export", ...optionalChecks],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));

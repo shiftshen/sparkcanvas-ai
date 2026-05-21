@@ -92,6 +92,7 @@ docker compose -f config/docker-compose.yml up -d
 
 - `/docs/`：包含所有的核心设计文档。
   - `AI_HANDOFF.md`：给下一位 AI/开发者的完整交接文档，包含参考站点、CAL 目标、API 对接、模型成本/时长、测试命令和风险清单。
+  - `Upgrade_Verification_2026-05-21.md`：本轮按升级方案完成的 P0/P1 修复、验证命令和保留项。
   - `SparkCanvas_Product_Design.md`：产品核心理念与交互设计。
   - `Acceptance_Checklist.md`：当前上线验收清单，以品牌资产、CAL、画布工作流和真实输出闭环为准。
   - `Product_QA_Matrix_2026-05-21.md`：产品、UX、前端、后端、AI 工作流和 QA 的统一验收矩阵。
