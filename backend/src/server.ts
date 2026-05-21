@@ -1704,6 +1704,18 @@ async function videoInputImageDataUrl(imageUrl?: string) {
   return `data:${mime};base64,${bytes.toString("base64")}`;
 }
 
+function publicUrlFromLocalAsset(assetUrl?: string) {
+  if (!assetUrl?.startsWith("/")) return "";
+  const publicBase = (process.env.SPARKCANVAS_PUBLIC_BASE_URL || process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  return publicBase ? `${publicBase}${assetUrl}` : "";
+}
+
+function videoInputReferenceUrl(imageUrl?: string) {
+  if (!imageUrl) return "";
+  if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
+  return publicUrlFromLocalAsset(imageUrl);
+}
+
 function localGeneratedVideoPath(videoUrl?: string) {
   if (!videoUrl?.startsWith("/generated/")) return undefined;
   const filePath = path.join(generatedDir, videoUrl.replace(/^\/generated\//, ""));
@@ -1818,6 +1830,13 @@ function videoCanvasSize(settings?: { ratio?: string }) {
   if (ratio === "1:1") return { width: 1024, height: 1024 };
   if (ratio === "4:5") return { width: 1080, height: 1350 };
   return { width: 1280, height: 720 };
+}
+
+function videoSizeParam(model: string, settings?: { ratio?: string }, hasInputReference = false) {
+  const { width, height } = videoCanvasSize(settings);
+  const modelNeedsLandscapeReference = hasInputReference && /^(veo_3_1-fast|veo_3_1-4k)$/i.test(model);
+  if (modelNeedsLandscapeReference && height > width) return "1920x1080";
+  return `${width}x${height}`;
 }
 
 function videoModelNeedsFirstFrameFallback(model: string) {
@@ -2246,18 +2265,14 @@ type VideoRunResult = {
   fallbackReason?: string;
 };
 
-async function submitVideoCreate(prompt: string, model: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }, firstFrameImage?: string, timeoutMs = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? "120000")) {
+async function submitVideoCreate(prompt: string, model: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }, inputReference?: string, timeoutMs = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? "120000")) {
   const config = serviceConfig("video");
   const payload: Record<string, unknown> = {
     model,
     prompt,
-    aspect_ratio: settings?.ratio?.split("·")[0]?.trim() || "16:9",
-    duration: videoDurationSeconds(settings),
-    with_audio: settings?.sound !== false,
-    mode: firstFrameImage ? "图生视频" : settings?.mode ?? "文生视频",
-    translate: Boolean(settings?.translate)
+    size: videoSizeParam(model, settings, Boolean(inputReference))
   };
-  if (firstFrameImage) payload.image_url = firstFrameImage;
+  if (inputReference) payload.input_reference = inputReference;
   return postJson(`${config.baseUrl}/videos`, config.apiKey, payload, timeoutMs);
 }
 
@@ -2265,7 +2280,8 @@ async function runVideoGeneration(prompt: string, modelName?: string, settings?:
   const config = serviceConfig("video");
   if (!config.apiKey) return undefined;
   const model = modelName || config.model;
-  if (options.firstFrameUrl && videoModelNeedsFirstFrameFallback(model)) {
+  const inputReference = videoInputReferenceUrl(options.firstFrameUrl);
+  if (options.firstFrameUrl && !inputReference && videoModelNeedsFirstFrameFallback(model)) {
     const videoUrl = await createFirstFrameLockedVideo(options.firstFrameUrl, `first-frame-locked-${nanoid(8)}`, settings);
     if (videoUrl) {
       return {
@@ -2277,17 +2293,16 @@ async function runVideoGeneration(prompt: string, modelName?: string, settings?:
       };
     }
   }
-  const firstFrameImage = await videoInputImageDataUrl(options.firstFrameUrl);
-  let usedFirstFrame = Boolean(firstFrameImage);
+  let usedFirstFrame = Boolean(inputReference);
   let fallbackReason = "";
   let created: unknown;
   try {
-    created = await submitVideoCreate(prompt, model, settings, firstFrameImage);
+    created = await submitVideoCreate(prompt, model, settings, inputReference);
   } catch (error) {
-    if (!firstFrameImage) throw error;
-    usedFirstFrame = false;
-    fallbackReason = `视频 API 未接受首帧图生视频参数，已重试文生视频：${error instanceof Error ? error.message.slice(0, 180) : "unknown error"}`;
-    created = await submitVideoCreate(prompt, model, settings);
+    if (inputReference) {
+      throw new Error(`视频 API 未接受 input_reference 参考图，已停止，避免降级成错误的文生视频：${error instanceof Error ? error.message.slice(0, 180) : "unknown error"}`);
+    }
+    throw error;
   }
   const immediateUrl = videoUrlFromResponse(created);
   if (immediateUrl) return { videoId: videoIdFromResponse(created), videoUrl: immediateUrl, raw: created, usedFirstFrame, fallbackReason };
@@ -2312,7 +2327,8 @@ async function createVideoGenerationJob(prompt: string, modelName?: string, sett
   const config = serviceConfig("video");
   if (!config.apiKey) return undefined;
   const model = modelName || config.model;
-  if (options.firstFrameUrl && videoModelNeedsFirstFrameFallback(model)) {
+  const inputReference = videoInputReferenceUrl(options.firstFrameUrl);
+  if (options.firstFrameUrl && !inputReference && videoModelNeedsFirstFrameFallback(model)) {
     const videoUrl = await createFirstFrameLockedVideo(options.firstFrameUrl, `first-frame-locked-${nanoid(8)}`, settings);
     if (videoUrl) {
       return {
@@ -2324,17 +2340,16 @@ async function createVideoGenerationJob(prompt: string, modelName?: string, sett
       };
     }
   }
-  const firstFrameImage = await videoInputImageDataUrl(options.firstFrameUrl);
-  let usedFirstFrame = Boolean(firstFrameImage);
+  let usedFirstFrame = Boolean(inputReference);
   let fallbackReason = "";
   let created: unknown;
   try {
-    created = await submitVideoCreate(prompt, model, settings, firstFrameImage, timeoutMs);
+    created = await submitVideoCreate(prompt, model, settings, inputReference, timeoutMs);
   } catch (error) {
-    if (!firstFrameImage) throw error;
-    usedFirstFrame = false;
-    fallbackReason = `视频 API 未接受首帧图生视频参数，已重试文生视频：${error instanceof Error ? error.message.slice(0, 180) : "unknown error"}`;
-    created = await submitVideoCreate(prompt, model, settings, undefined, timeoutMs);
+    if (inputReference) {
+      throw new Error(`视频 API 未接受 input_reference 参考图，已停止，避免降级成错误的文生视频：${error instanceof Error ? error.message.slice(0, 180) : "unknown error"}`);
+    }
+    throw error;
   }
   return {
     videoId: videoIdFromResponse(created),
@@ -2352,11 +2367,7 @@ async function createVideoProbe(prompt: string, modelName?: string) {
   const created = await postJson(`${config.baseUrl}/videos`, config.apiKey, {
     model,
     prompt,
-    aspect_ratio: "16:9",
-    duration: 5,
-    with_audio: true,
-    mode: "文生视频",
-    translate: false
+    size: videoSizeParam(model, { ratio: "16:9" })
   }, 30000);
   return {
     videoId: videoIdFromResponse(created),
@@ -4420,7 +4431,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
       id: `first_frame_${node.id}`,
       role: "first-frame",
       title: "视频首帧",
-      description: usedFirstFrame ? "已作为 image_url 提交给视频模型。" : "由图片 skill/画布输出生成，用于人工检查视频一致性。",
+      description: usedFirstFrame ? "已作为 input_reference 提交给视频模型。" : "由图片 skill/画布输出生成，用于人工检查视频一致性。",
       color: node.preview ?? "#111827",
       imageUrl: firstFrameUrl
     });
@@ -4435,7 +4446,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
         if (firstFrameUrl) targetOutput.imageUrl = firstFrameUrl;
       }
       if (firstFrameNote) targetOutput.copy = appendCopyNote(targetOutput.copy, firstFrameNote);
-      if (usedFirstFrame) targetOutput.copy = appendCopyNote(targetOutput.copy, "已提交视频首帧 image_url 以锁定人物、Logo 和品牌画面。");
+      if (usedFirstFrame) targetOutput.copy = appendCopyNote(targetOutput.copy, "已提交视频首帧 input_reference 以锁定人物、Logo 和品牌画面。");
       if (fallbackReason) targetOutput.copy = appendCopyNote(targetOutput.copy, fallbackReason);
       targetOutput.copy = appendCopyNote(targetOutput.copy, generationLines.join(" ") || "执行状态: 已保存视频生成配置，未配置视频 API Key。");
       if (targetOutput.videoUrl) {
