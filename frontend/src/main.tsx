@@ -985,7 +985,19 @@ function assetRole(asset: Pick<Asset, "title" | "meta" | "type">): BrandAssetRol
   return "general";
 }
 
-function buildMentionItems(brand?: Brand, assets: Asset[] = []): MentionItem[] {
+function buildMentionItems(brand?: Brand, assets: Asset[] = [], brands: Brand[] = []): MentionItem[] {
+  const crossBrandItems = brands
+    .filter((item) => item.id !== brand?.id)
+    .flatMap((item) => {
+      const key = currentBrandKey(item);
+      return buildMentionItems(item, assets)
+        .filter((mention) => mention.token === `$${key}` || mention.token.startsWith(`$${key}.`))
+        .map((mention) => ({
+          ...mention,
+          id: `${mention.id}_cross_${item.id}`,
+          description: mention.description.includes("跨品牌") ? mention.description : `${mention.description} · 跨品牌引用`
+        }));
+    });
   if (!brand) {
     const neutral = "#f97316";
     const agents: MentionItem[] = [{ id: "agent_imgen", token: "@imgen", group: "agent", kind: "agent", role: "imgen", title: "imgen", description: "图片生成 Skill：无品牌项目也可直接生成，只有显式 $ 引用才会传参考图", color: "#111827" }];
@@ -1009,7 +1021,7 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = []): MentionItem[] {
       description: "主题标签，用于风格、平台和模板推荐",
       color: neutral
     }));
-    return [...agents, ...commands, ...tags];
+    return [...agents, ...commands, ...crossBrandItems, ...tags].filter((item, index, list) => list.findIndex((candidate) => candidate.token === item.token && candidate.title === item.title) === index);
   }
   const key = currentBrandKey(brand);
   const hasText = (value?: string) => Boolean(value?.trim());
@@ -1105,7 +1117,7 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = []): MentionItem[] {
     { id: "brand_tone", token: "$brand.tone", group: "copy", kind: "copy", role: "tone", title: "语气", description: brand.tone, color: brand.primaryColor },
     { id: "brand_scene", token: "$brand.scene", group: "copy", kind: "copy", role: "scene", title: "场景关键词", description: (brand.sceneKeywords ?? []).join(", "), color: brand.accentColor }
   ].filter((item): item is MentionItem => Boolean(hasText(item.title) && hasText(item.description)) && !coveredRoles.has(item.role));
-  return [...agents, ...commands, ...brandPackage, ...assetItems, ...brandItems, ...tags].filter((item, index, list) => list.findIndex((candidate) => candidate.token === item.token && candidate.title === item.title) === index);
+  return [...agents, ...commands, ...brandPackage, ...assetItems, ...brandItems, ...crossBrandItems, ...tags].filter((item, index, list) => list.findIndex((candidate) => candidate.token === item.token && candidate.title === item.title) === index);
 }
 
 function assetToRef(asset: Asset): ReferenceItem {
@@ -4133,7 +4145,7 @@ function BottomComposer(props: {
     const marker = `用途: ${currentPreset.label} 尺寸: ${currentPreset.size}`;
     return clean.includes("->") ? clean.replace(/\s*->\s*/, ` ${marker} -> `) : `${clean} ${marker}`;
   }
-  const mentionItems = buildMentionItems(props.activeBrand, props.assets);
+  const mentionItems = buildMentionItems(props.activeBrand, props.assets, props.brands);
   const referencePreview = buildPromptReferencePreview(props.prompt, mentionItems);
   const filteredMentionItems = filterMentionItems(mentionItems, props.prompt).slice(0, 10);
   const activeQuery = activeReferenceQuery(props.prompt);

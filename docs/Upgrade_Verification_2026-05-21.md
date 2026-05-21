@@ -26,6 +26,9 @@ Source plan: `/Users/shift/Downloads/SparkCanvas 升级完善方案.md`
   - Text node generation accepts legacy `mode: "text"` and normalizes it to editable story text instead of returning 400.
   - Workspace export smoke verifies `brands` and `frames` are present and include the generated smoke frame.
   - Frontend demo login account/password can be overridden with `VITE_SPARKCANVAS_DEMO_ACCOUNT` and `VITE_SPARKCANVAS_DEMO_PASSWORD`.
+- CAL composer UX:
+  - The bottom composer now offers qualified cross-brand `$brand.asset` suggestions even when the current canvas is unbranded.
+  - Browser validation confirmed `$dapot.` lists DAPOT assets and clicking `$dapot.logo` inserts the token into the composer.
 
 ## Verified Commands
 
