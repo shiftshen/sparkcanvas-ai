@@ -2266,19 +2266,47 @@ svg {
 }
 
 .rh-image-tile:hover .rh-image-node-actions,
-.rh-node.selected .rh-image-node-actions {
+.rh-node.selected .rh-image-node-actions,
+.rh-node.video .rh-image-node-actions,
+.rh-node.output .rh-image-node-actions {
   opacity: 1;
 }
 
 .rh-image-node-actions button {
+  min-width: 28px;
   width: 28px;
   height: 28px;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   border-radius: 7px;
   color: #e5e7eb;
   background: rgba(2, 6, 23, 0.76);
   border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.rh-image-node-actions button span {
+  display: none;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.rh-node.selected .rh-image-node-actions .primary-action,
+.rh-node.video .rh-image-node-actions .primary-action,
+.rh-node.output .rh-image-node-actions .primary-action {
+  width: auto;
+  min-width: 56px;
+  padding: 0 8px;
+  color: #111827;
+  background: #fff;
+  border-color: rgba(255, 255, 255, 0.72);
+}
+
+.rh-node.selected .rh-image-node-actions .primary-action span,
+.rh-node.video .rh-image-node-actions .primary-action span,
+.rh-node.output .rh-image-node-actions .primary-action span {
+  display: inline;
 }
 
 .rh-image-node-actions button:disabled {

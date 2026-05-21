@@ -2488,6 +2488,8 @@ function Canvas(props: {
   const edgeDragRef = useRef<{ id: string; offset: number; cy: number } | null>(null);
   const nodesRef = useRef(nodes);
   const visibleNodes = useMemo(() => displayNodes(nodes, shouldUseDefaultWorkflow(nodes)), [nodes]);
+  const autoFitKey = `${props.frame?.id ?? ""}:${visibleNodes.map((node) => node.id).join(",")}`;
+  const lastAutoFitKeyRef = useRef<string | undefined>(undefined);
   const activeSelectedNode = visibleNodes.find((node) => node.id === selectedNode || node.id === props.editingNodeId);
   const imageAssets = props.assets.filter((asset) => asset.imageUrl && (!props.activeBrand || asset.brandId === props.activeBrand.id));
 
@@ -2857,6 +2859,13 @@ function Canvas(props: {
     });
   }
 
+  useEffect(() => {
+    if (!props.frame?.id || !visibleNodes.length || lastAutoFitKeyRef.current === autoFitKey) return;
+    lastAutoFitKeyRef.current = autoFitKey;
+    const timer = window.setTimeout(() => fitCanvas(), 80);
+    return () => window.clearTimeout(timer);
+  }, [autoFitKey, props.frame?.id, visibleNodes.length]);
+
   return (
     <main
       className={`rh-canvas ${activeSelectedNode ? "selecting" : ""} ${gridSnap ? "snap" : ""}`}
@@ -3164,7 +3173,7 @@ function NodeCard(props: {
           <span>{props.node.type === "output" ? (isVideoOutput ? nodeVideoUrl ? "MP4 ready" : nodeVideoId ? "MP4 pending" : "Empty output" : imageUrl ? "Preview output" : "Empty output") : props.refs.length ? `${props.refs.length} refs` : "Add image"}</span>
           {typeof props.generationProgress === "number" && <div className="rh-node-generating"><b>生成中 {props.generationProgress}%</b><i><em style={{ width: `${props.generationProgress}%` }} /></i></div>}
           <div className="rh-image-node-actions" onClick={(event) => event.stopPropagation()}>
-            <button type="button" title="编辑/生成" onClick={props.onEdit}><Wand2 /></button>
+            <button type="button" className="primary-action" title="编辑/生成" onClick={props.onEdit}><Wand2 /><span>{props.node.type === "output" ? "生成" : "编辑"}</span></button>
             <button type="button" title="预览" onClick={() => canPreview && props.onPreview({ title, subtitle: props.output?.copy ?? props.node.body, imageUrl, videoUrl: nodeVideoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!canPreview}><Expand /></button>
             <button type="button" title={props.output?.kind === "document" ? "下载PDF" : props.output?.kind === "video" ? "下载MP4" : "下载图片"} onClick={() => downloadFile(downloadUrl, downloadTitle, downloadExt)} disabled={!downloadUrl}><Download /></button>
           </div>
@@ -3218,7 +3227,7 @@ function NodeCard(props: {
             <em>{executionSummary.chips.length ? executionSummary.chips.join(" · ") : "模型固定 10s"}</em>
           </div>
           <div className="rh-image-node-actions" onClick={(event) => event.stopPropagation()}>
-            <button type="button" title="编辑/生成" onClick={props.onEdit}><Wand2 /></button>
+            <button type="button" className="primary-action" title="编辑/生成" onClick={props.onEdit}><Wand2 /><span>生成</span></button>
             <button type="button" title="预览" onClick={() => nodeVideoUrl && props.onPreview({ title, subtitle: props.node.body, imageUrl: nodePosterUrl, videoUrl: nodeVideoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!nodeVideoUrl}><Expand /></button>
             <button type="button" title="下载MP4" onClick={() => downloadFile(nodeVideoUrl, downloadTitle, "mp4")} disabled={!nodeVideoUrl}><Download /></button>
           </div>

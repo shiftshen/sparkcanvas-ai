@@ -32,6 +32,9 @@ Source plan: `/Users/shift/Downloads/SparkCanvas 升级完善方案.md`
 - Asset reference management:
   - New supplemental uploads now receive deterministic editable CAL tags such as `$asset.filename`, `$menu.filename`, `$storefront.filename`, or `$environment.filename` instead of every upload falling back to `$asset`.
   - The Assets panel uses the same visible token in the card header and editable reference-tag field, reducing accidental tag drift.
+- Canvas video operation UX:
+  - Video and output nodes now keep a visible primary `生成` button on the node card, instead of relying on icon-only hover actions.
+  - Switching/loading a canvas schedules an automatic fit-to-workflow pass once the node structure is ready, making later video/compose/output nodes easier to find.
 
 ## Verified Commands
 
