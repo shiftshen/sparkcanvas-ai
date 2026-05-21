@@ -23,7 +23,7 @@ npm run dev
 
 ### 图片生成配置
 
-图片生成走本地 skill 脚本 `scripts/generate_image.py`，由后端调用，不在前端直接请求图片 API。默认图片角色为 `@imgen · image skill`，实际模型、网关和密钥由 `IMAGE_GEN_*` 或本地私有 `auth.json` 控制；文本默认用当前账号已验证可用的 `gpt-5.4`，视频默认用当前账号已验证能创建任务的 `grok-imagine-1.0-video-super-720p`。`yijiarj · nano_banana_2` 和 `veo_3_1-fast` 保留为候选模型，但当前账号通道可能不可用。底部控制栏和节点编辑器都可以切换模型和参数。
+图片生成走本地 skill 脚本 `scripts/generate_image.py`，由后端调用，不在前端直接请求图片 API。默认图片角色为 `@imgen · image skill`，实际模型、网关和密钥由 `IMAGE_GEN_*` 或本地私有 `auth.json` 控制；文本默认用当前账号已验证可用的 `gpt-5.4`。视频走 yijiarj `/v1/videos`，参考图必须按模型能力表传公网 `input_reference` 链接和 `size`，不能传本地路径或旧的 `image_url/aspect_ratio`。
 
 推荐使用环境变量：
 
@@ -31,12 +31,24 @@ npm run dev
 export YIJIARJ_BASE_URL='https://api.yijiarj.cn/v1'
 export YIJIARJ_API_KEY='sk-your-key'
 export IMAGE_GEN_MODEL='nano_banana_2'
-export VIDEO_GEN_MODEL='grok-imagine-1.0-video-super-720p'
+export VIDEO_GEN_MODEL='grok-imagine-1.0-video-super'
 export TEXT_GEN_MODEL='gpt-5.4'
 npm run dev
 ```
 
 也可以复制 `config/auth.example.json` 为本地私有 `auth.json` 或 `config/auth.json`。这些文件已加入 `.gitignore`，不要提交真实密钥。
+
+本地 `/generated/...` 图片如果要作为视频参考图提交给 yijiarj，生产环境需设置：
+
+```bash
+export SPARKCANVAS_PUBLIC_BASE_URL='https://xmanx.com'
+```
+
+模型能力规则：
+
+- `grok-imagine-1.0-video-super` / `grok-imagine-1.0-video-super-720p`：支持 `input_reference` 图片链接，竖屏可用 `size=720x1280`。
+- `veo_3_1-fast`：支持文生和图生；ad 分组传图只支持横屏，系统会把图生请求尺寸固定为 `1920x1080`；生成链接约 6 小时过期，必须下载到本地或自己的服务器。
+- `veo_3_1-fast-fl`：首尾帧模型，不支持纯文生，必须传 `input_reference`，多图用 `|` 分隔。
 
 登录后可通过 `GET /api/ai/status` 查看脱敏后的 skill 配置状态。接口只返回 base URL、模型、密钥来源和是否已配置，不返回密钥值。
 

@@ -3306,7 +3306,7 @@ function NodeEditor({
   const [scriptModel, setScriptModel] = useState("gpt-5.4");
   const [translateScript, setTranslateScript] = useState(false);
   const [videoMode, setVideoMode] = useState("图生视频");
-  const [videoModel, setVideoModel] = useState("grok-imagine-1.0-video-super-720p");
+  const [videoModel, setVideoModel] = useState("grok-imagine-1.0-video-super");
   const [videoRatio, setVideoRatio] = useState("16:9 · 720P");
   const [videoDuration, setVideoDuration] = useState(() => inferVideoDurationLabel(`${node?.body ?? ""} ${framePrompt}`, frameSettings.duration));
   const [videoSound, setVideoSound] = useState(true);
@@ -3965,8 +3965,10 @@ function NodeEditor({
         </div>
         <div className="rh-video-editor-footer">
           <select value={videoModel} onChange={(event) => setVideoModel(event.target.value)}>
+            <option>grok-imagine-1.0-video-super</option>
             <option>grok-imagine-1.0-video-super-720p</option>
             <option>veo_3_1-fast</option>
+            <option>veo_3_1-fast-fl</option>
           </select>
           <select value={videoRatio} onChange={(event) => setVideoRatio(event.target.value)}>
             <option>16:9 · 720P</option>

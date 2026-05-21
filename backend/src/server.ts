@@ -230,8 +230,10 @@ const models = [
   { id: "yijiarj-nano-banana-2", provider: "yijiarj", model: "nano_banana_2", name: "yijiarj · nano_banana_2", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认图片模型，经本地 skill 调用 yijiarj Gemini native image API，支持多图参考" },
   { id: "cliproxyapi-gpt-5-4", provider: "cliproxyapi", model: "gpt-5.4", name: "cliproxyapi · gpt-5.4", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
   { id: "cliproxyapi-gpt-5", provider: "cliproxyapi", model: "gpt-5", name: "cliproxyapi · gpt-5", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
-  { id: "yijiarj-grok-video-720p", provider: "yijiarj", model: "grok-imagine-1.0-video-super-720p", name: "yijiarj · grok video 720p", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "当前可用视频模型，经 yijiarj /v1/videos 创建并轮询任务" },
-  { id: "yijiarj-veo-3-1-fast", provider: "yijiarj", model: "veo_3_1-fast", name: "yijiarj · veo_3_1-fast", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "候选视频模型，当前账号通道可能不可用" }
+  { id: "yijiarj-grok-video-super", provider: "yijiarj", model: "grok-imagine-1.0-video-super", name: "yijiarj · grok video super", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "yijiarj /v1/videos；参考图必须传 input_reference 链接；竖屏用 size=720x1280" },
+  { id: "yijiarj-grok-video-720p", provider: "yijiarj", model: "grok-imagine-1.0-video-super-720p", name: "yijiarj · grok video 720p", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "yijiarj /v1/videos；参考图必须传 input_reference 链接；竖屏用 size=720x1280" },
+  { id: "yijiarj-veo-3-1-fast", provider: "yijiarj", model: "veo_3_1-fast", name: "yijiarj · veo_3_1-fast", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "VEO 文生/图生；传图时 ad 分组只支持横屏，自动使用 size=1920x1080；链接约 6 小时过期，完成后需下载本地" },
+  { id: "yijiarj-veo-3-1-fast-fl", provider: "yijiarj", model: "veo_3_1-fast-fl", name: "yijiarj · veo_3_1-fast-fl", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "VEO 首尾帧模型；不支持纯文生，必须传 input_reference，支持多图用 | 分隔" }
 ];
 
 const assetRoleSchema = z.object({
@@ -1824,6 +1826,58 @@ async function concatLocalVideos(videoUrls: string[], outputName: string) {
   return ok ? `/generated/${outputName}.mp4` : "";
 }
 
+type VideoModelCapability = {
+  referenceParam: "input_reference";
+  referenceType: "url";
+  supportsTextToVideo: boolean;
+  supportsImageToVideo: boolean;
+  supportsEndFrames: boolean;
+  imageReferenceRequiresLandscape: boolean;
+  defaultTextSize: string;
+  defaultImageSize: string;
+  expiresHours?: number;
+};
+
+function videoModelCapability(model: string): VideoModelCapability {
+  const normalized = model.toLowerCase();
+  if (normalized === "veo_3_1-fast-fl") {
+    return {
+      referenceParam: "input_reference",
+      referenceType: "url",
+      supportsTextToVideo: false,
+      supportsImageToVideo: true,
+      supportsEndFrames: true,
+      imageReferenceRequiresLandscape: false,
+      defaultTextSize: "1920x1080",
+      defaultImageSize: "1920x1080",
+      expiresHours: 6
+    };
+  }
+  if (normalized === "veo_3_1-fast" || normalized === "veo_3_1-4k") {
+    return {
+      referenceParam: "input_reference",
+      referenceType: "url",
+      supportsTextToVideo: true,
+      supportsImageToVideo: true,
+      supportsEndFrames: false,
+      imageReferenceRequiresLandscape: true,
+      defaultTextSize: "1920x1080",
+      defaultImageSize: "1920x1080",
+      expiresHours: 6
+    };
+  }
+  return {
+    referenceParam: "input_reference",
+    referenceType: "url",
+    supportsTextToVideo: true,
+    supportsImageToVideo: true,
+    supportsEndFrames: false,
+    imageReferenceRequiresLandscape: false,
+    defaultTextSize: "1280x720",
+    defaultImageSize: "720x1280"
+  };
+}
+
 function videoCanvasSize(settings?: { ratio?: string }) {
   const ratio = settings?.ratio?.split("·")[0]?.trim() || "16:9";
   if (ratio === "9:16") return { width: 720, height: 1280 };
@@ -1833,9 +1887,9 @@ function videoCanvasSize(settings?: { ratio?: string }) {
 }
 
 function videoSizeParam(model: string, settings?: { ratio?: string }, hasInputReference = false) {
+  const capability = videoModelCapability(model);
+  if (hasInputReference && capability.imageReferenceRequiresLandscape) return capability.defaultImageSize;
   const { width, height } = videoCanvasSize(settings);
-  const modelNeedsLandscapeReference = hasInputReference && /^(veo_3_1-fast|veo_3_1-4k)$/i.test(model);
-  if (modelNeedsLandscapeReference && height > width) return "1920x1080";
   return `${width}x${height}`;
 }
 
@@ -2004,11 +2058,11 @@ function serviceConfig(kind: "text" | "video") {
     return {
       baseUrl: defaultAiBaseUrl,
       apiKey: "",
-      model: kind === "text" ? "gpt-5.4" : "grok-imagine-1.0-video-super-720p"
+      model: kind === "text" ? "gpt-5.4" : "grok-imagine-1.0-video-super"
     };
   }
   const prefix = kind === "text" ? "TEXT_GEN" : "VIDEO_GEN";
-  const modelFallback = kind === "text" ? "gpt-5.4" : "grok-imagine-1.0-video-super-720p";
+  const modelFallback = kind === "text" ? "gpt-5.4" : "grok-imagine-1.0-video-super";
   const baseUrl = process.env[`${prefix}_BASE_URL`]
     || localAuthValue(`${prefix}_BASE_URL`)
     || process.env.YIJIARJ_BASE_URL
@@ -2267,6 +2321,10 @@ type VideoRunResult = {
 
 async function submitVideoCreate(prompt: string, model: string, settings?: { mode?: string; ratio?: string; duration?: string; sound?: boolean; translate?: boolean; contentLanguage?: ContentLanguage | string }, inputReference?: string, timeoutMs = Number(process.env.AI_REQUEST_TIMEOUT_MS ?? "120000")) {
   const config = serviceConfig("video");
+  const capability = videoModelCapability(model);
+  if (!inputReference && !capability.supportsTextToVideo) {
+    throw new Error(`${model} 不支持纯文生视频，必须提供 input_reference 参考图链接。`);
+  }
   const payload: Record<string, unknown> = {
     model,
     prompt,
@@ -2281,6 +2339,9 @@ async function runVideoGeneration(prompt: string, modelName?: string, settings?:
   if (!config.apiKey) return undefined;
   const model = modelName || config.model;
   const inputReference = videoInputReferenceUrl(options.firstFrameUrl);
+  if (options.firstFrameUrl && !inputReference && !videoModelNeedsFirstFrameFallback(model)) {
+    throw new Error(`${model} 的参考图参数需要公网图片链接。请设置 SPARKCANVAS_PUBLIC_BASE_URL，或先把本地图片上传到图床后再生成视频。`);
+  }
   if (options.firstFrameUrl && !inputReference && videoModelNeedsFirstFrameFallback(model)) {
     const videoUrl = await createFirstFrameLockedVideo(options.firstFrameUrl, `first-frame-locked-${nanoid(8)}`, settings);
     if (videoUrl) {
@@ -2328,6 +2389,9 @@ async function createVideoGenerationJob(prompt: string, modelName?: string, sett
   if (!config.apiKey) return undefined;
   const model = modelName || config.model;
   const inputReference = videoInputReferenceUrl(options.firstFrameUrl);
+  if (options.firstFrameUrl && !inputReference && !videoModelNeedsFirstFrameFallback(model)) {
+    throw new Error(`${model} 的参考图参数需要公网图片链接。请设置 SPARKCANVAS_PUBLIC_BASE_URL，或先把本地图片上传到图床后再生成视频。`);
+  }
   if (options.firstFrameUrl && !inputReference && videoModelNeedsFirstFrameFallback(model)) {
     const videoUrl = await createFirstFrameLockedVideo(options.firstFrameUrl, `first-frame-locked-${nanoid(8)}`, settings);
     if (videoUrl) {
