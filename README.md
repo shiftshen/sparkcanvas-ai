@@ -19,6 +19,13 @@ npm run dev
 
 打开 `http://localhost:3100`。演示账号已内置：账号 `shift`，密码 `123456`。
 
+前端演示登录可用 Vite 环境变量覆盖，避免把真实演示账号写进前端调用逻辑：
+
+```bash
+export VITE_SPARKCANVAS_DEMO_ACCOUNT='shift'
+export VITE_SPARKCANVAS_DEMO_PASSWORD='123456'
+```
+
 本地数据会持久化到 `backend/data/sparkcanvas.json`，包括品牌、资产、任务、画布和积分。
 
 ### 图片生成配置

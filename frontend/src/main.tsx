@@ -692,6 +692,9 @@ function dimensionsFromPreset(preset: WorkflowPreset) {
 }
 type GraphEdge = { from: WorkflowNode; to: WorkflowNode; id: string };
 
+const demoLoginAccount = import.meta.env.VITE_SPARKCANVAS_DEMO_ACCOUNT ?? "shift";
+const demoLoginPassword = import.meta.env.VITE_SPARKCANVAS_DEMO_PASSWORD ?? "123456";
+
 const api = {
   async get<T>(path: string): Promise<T> {
     const response = await fetch(`/api${path}`, { headers: authHeaders() });
@@ -1460,7 +1463,7 @@ function App() {
   async function login() {
     setLoading(true);
     setError("");
-    const result = await api.post<{ token: string; user: User }>("/auth/login", { account: "shift", password: "123456" });
+    const result = await api.post<{ token: string; user: User }>("/auth/login", { account: demoLoginAccount, password: demoLoginPassword });
     window.localStorage.setItem("sparkcanvas.token", result.token);
     setUser(result.user);
     await loadWorkspace();

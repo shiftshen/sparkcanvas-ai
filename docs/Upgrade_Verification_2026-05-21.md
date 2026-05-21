@@ -22,6 +22,10 @@ Source plan: `/Users/shift/Downloads/SparkCanvas 升级完善方案.md`
 - Automated tests:
   - Smoke now covers brand archive/delete lifecycle.
   - Production smoke now covers generated-file auth.
+- Follow-up hardening:
+  - Text node generation accepts legacy `mode: "text"` and normalizes it to editable story text instead of returning 400.
+  - Workspace export smoke verifies `brands` and `frames` are present and include the generated smoke frame.
+  - Frontend demo login account/password can be overridden with `VITE_SPARKCANVAS_DEMO_ACCOUNT` and `VITE_SPARKCANVAS_DEMO_PASSWORD`.
 
 ## Verified Commands
 
@@ -47,4 +51,3 @@ Result: all passed.
 - Frontend-wide async handler cleanup remains a larger refactor. Existing backend route catcher and node editor generation handlers cover the main tested flows, but a dedicated UI audit should still review every `void handle...()` call.
 - Production object storage is still recommended for generated media. Query-token URLs keep previews working, but a controlled private object-storage layer would be better for real deployment.
 - Long-form video voice/audio continuity still needs real provider-level validation beyond local compose smoke.
-

@@ -750,6 +750,12 @@ try {
   assert(textNode.node.type === "process" && !textNode.text.includes("| 镜号 |"), "text node should generate editable text, not storyboard table");
   assert(textNode.text.includes("English + Thai"), "text generation should carry selected content language");
 
+  const legacyTextModeNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_text/generate-text`, {
+    method: "POST",
+    body: JSON.stringify({ prompt: "用普通文本解释 DAPOT 的品牌语气", model: "gpt-5.4", translate: false, mode: "text" })
+  });
+  assert(legacyTextModeNode.node.type === "process" && legacyTextModeNode.mode === "story", "legacy text mode should normalize to editable story text");
+
   const scriptNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_script/generate-script`, {
     method: "POST",
     body: JSON.stringify({ prompt: "生成三镜头分镜表格", model: "gpt-5.4", translate: false })
@@ -839,10 +845,13 @@ try {
 
   const exported = await request("/workspace/export");
   assert(exported.domain === "xmanx.com", "workspace export should include production domain");
+  assert(Array.isArray(exported.workspace?.brands) && exported.workspace.brands.length > 0, "workspace export should include brands");
+  assert(Array.isArray(exported.workspace?.frames) && exported.workspace.frames.length > 0, "workspace export should include frames");
+  assert(exported.workspace.frames.some((frame) => frame.id === generated.frame.id), "workspace export should include the generated smoke frame");
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "brand-lifecycle", "dapot-brand-profile", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "script", "video", "compose", "audio", "generate", "task", "canvas", "export", ...optionalChecks],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "brand-lifecycle", "dapot-brand-profile", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "legacy-text-mode", "script", "video", "compose", "audio", "generate", "task", "canvas", "export", "export-structure", ...optionalChecks],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));

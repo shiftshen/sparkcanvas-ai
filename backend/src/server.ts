@@ -4293,8 +4293,9 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
     model: z.string().optional(),
     translate: z.boolean().optional(),
     contentLanguage: contentLanguageSchema.optional(),
-    mode: z.enum(["story", "table"]).optional()
+    mode: z.enum(["story", "table", "text"]).optional()
   }).parse(req.body);
+  const textMode = input.mode === "text" ? "story" : input.mode ?? "story";
 
   const brand = frameBrand(frame);
   const contextBrand = frameContextBrand(frame);
@@ -4321,6 +4322,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
         `品牌: ${brandLabel(contextBrand)}`,
         `品牌风格: ${brandVisualStyle(contextBrand)}`,
         `品牌语气: ${brandTone(contextBrand)}`,
+        `文本模式: ${textMode}`,
         contentLanguageInstruction({ contentLanguage }, "text")
       ].join("\n"),
       input.model
@@ -4335,7 +4337,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
   node.type = "process";
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame, node, text: generatedText, model: input.model ?? serviceConfig("text").model });
+  res.json({ frame, node, text: generatedText, mode: textMode, model: input.model ?? serviceConfig("text").model });
 });
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) => {
