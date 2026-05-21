@@ -88,11 +88,16 @@ type ModelOption = {
   name: string;
   type: "image" | "video";
   costMultiplier: number;
+  unitCostCny?: number;
   description: string;
   model?: string;
   provider?: string;
   reasoningEffort?: string;
 };
+
+function modelOptionLabel(model: ModelOption) {
+  return model.unitCostCny ? `${model.name} · ¥${model.unitCostCny}/次` : model.name;
+}
 
 type WorkflowNode = {
   id: string;
@@ -3965,10 +3970,10 @@ function NodeEditor({
         </div>
         <div className="rh-video-editor-footer">
           <select value={videoModel} onChange={(event) => setVideoModel(event.target.value)}>
-            <option>grok-imagine-1.0-video-super</option>
-            <option>grok-imagine-1.0-video-super-720p</option>
-            <option>veo_3_1-fast</option>
-            <option>veo_3_1-fast-fl</option>
+            <option value="grok-imagine-1.0-video-super">grok-imagine-1.0-video-super · ¥0.38/次</option>
+            <option value="veo_3_1-fast">veo_3_1-fast · ¥0.437/次</option>
+            <option value="grok-imagine-1.0-video-super-720p">grok-imagine-1.0-video-super-720p · ¥0.58/次</option>
+            <option value="veo_3_1-fast-fl">veo_3_1-fast-fl · 首尾帧</option>
           </select>
           <select value={videoRatio} onChange={(event) => setVideoRatio(event.target.value)}>
             <option>16:9 · 720P</option>
@@ -4218,7 +4223,7 @@ function BottomComposer(props: {
       <div className="rh-composer-row">
         {workflowMode && <span className="rh-workflow-pill"><Route />CAL</span>}
         <select value={props.model?.id ?? "imgen-skill"} onChange={(event) => props.onUpdateFrame({ modelId: event.target.value })}>
-          {props.models.filter((item) => item.type === "image").map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+          {props.models.filter((item) => item.type === "image").map((item) => <option value={item.id} key={item.id}>{modelOptionLabel(item)}</option>)}
         </select>
         <select className="rh-brand-select" value={props.frame?.brandId ?? ""} onChange={(event) => updateProjectBrand(event.target.value)} title="项目品牌">
           <option value="">{t.brandNone}</option>

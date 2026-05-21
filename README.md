@@ -46,8 +46,10 @@ export SPARKCANVAS_PUBLIC_BASE_URL='https://xmanx.com'
 
 模型能力规则：
 
-- `grok-imagine-1.0-video-super` / `grok-imagine-1.0-video-super-720p`：支持 `input_reference` 图片链接，竖屏可用 `size=720x1280`。
-- `veo_3_1-fast`：支持文生和图生；ad 分组传图只支持横屏，系统会把图生请求尺寸固定为 `1920x1080`；生成链接约 6 小时过期，必须下载到本地或自己的服务器。
+- `nano_banana_2`：默认图片模型，统一经本地 `@imgen` skill 调用，约 ¥0.24/次。视频目标时先生成分镜/首帧参考图；海报/广告图目标时才生成最终广告图片。
+- `grok-imagine-1.0-video-super`：最低成本视频模型，约 ¥0.38/次；支持 `input_reference` 图片链接，竖屏可用 `size=720x1280`；模型池可能临时返回 `No available accounts for video generation`。
+- `grok-imagine-1.0-video-super-720p`：约 ¥0.58/次；支持 `input_reference` 图片链接，竖屏可用 `size=720x1280`。
+- `veo_3_1-fast`：约 ¥0.437/次；支持文生和图生；ad 分组传图只支持横屏，系统会把图生请求尺寸固定为 `1920x1080`；生成链接约 6 小时过期，必须下载到本地或自己的服务器。
 - `veo_3_1-fast-fl`：首尾帧模型，不支持纯文生，必须传 `input_reference`，多图用 `|` 分隔。
 
 登录后可通过 `GET /api/ai/status` 查看脱敏后的 skill 配置状态。接口只返回 base URL、模型、密钥来源和是否已配置，不返回密钥值。

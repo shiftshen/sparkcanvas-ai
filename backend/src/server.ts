@@ -226,13 +226,13 @@ const templates = [
 ];
 
 const models = [
-  { id: "imgen-skill", provider: "otcbot", model: "nano_banana_2", name: "@imgen · image skill", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认图片角色，统一走本地 scripts/generate_image.py；默认模型 nano_banana_2，网关和密钥由 IMAGE_GEN_* / auth.json 控制" },
-  { id: "yijiarj-nano-banana-2", provider: "yijiarj", model: "nano_banana_2", name: "yijiarj · nano_banana_2", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认图片模型，经本地 skill 调用 yijiarj Gemini native image API，支持多图参考" },
+  { id: "imgen-skill", provider: "otcbot", model: "nano_banana_2", name: "@imgen · image skill", type: "image", costMultiplier: 1, unitCostCny: 0.24, reasoningEffort: "high", description: "默认图片角色，统一走本地 scripts/generate_image.py；默认模型 nano_banana_2，网关和密钥由 IMAGE_GEN_* / auth.json 控制" },
+  { id: "yijiarj-nano-banana-2", provider: "yijiarj", model: "nano_banana_2", name: "yijiarj · nano_banana_2", type: "image", costMultiplier: 1, unitCostCny: 0.24, reasoningEffort: "high", description: "默认图片模型，经本地 skill 调用 yijiarj Gemini native image API，支持多图参考；约 ¥0.24/次" },
   { id: "cliproxyapi-gpt-5-4", provider: "cliproxyapi", model: "gpt-5.4", name: "cliproxyapi · gpt-5.4", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
   { id: "cliproxyapi-gpt-5", provider: "cliproxyapi", model: "gpt-5", name: "cliproxyapi · gpt-5", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
-  { id: "yijiarj-grok-video-super", provider: "yijiarj", model: "grok-imagine-1.0-video-super", name: "yijiarj · grok video super", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "yijiarj /v1/videos；参考图必须传 input_reference 链接；竖屏用 size=720x1280" },
-  { id: "yijiarj-grok-video-720p", provider: "yijiarj", model: "grok-imagine-1.0-video-super-720p", name: "yijiarj · grok video 720p", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "yijiarj /v1/videos；参考图必须传 input_reference 链接；竖屏用 size=720x1280" },
-  { id: "yijiarj-veo-3-1-fast", provider: "yijiarj", model: "veo_3_1-fast", name: "yijiarj · veo_3_1-fast", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "VEO 文生/图生；传图时 ad 分组只支持横屏，自动使用 size=1920x1080；链接约 6 小时过期，完成后需下载本地" },
+  { id: "yijiarj-grok-video-super", provider: "yijiarj", model: "grok-imagine-1.0-video-super", name: "yijiarj · grok video super", type: "video", costMultiplier: 4, unitCostCny: 0.38, reasoningEffort: "medium", description: "最低成本视频模型；yijiarj /v1/videos；参考图必须传 input_reference 链接；竖屏用 size=720x1280；约 ¥0.38/次，模型池可能临时无可用账号" },
+  { id: "yijiarj-grok-video-720p", provider: "yijiarj", model: "grok-imagine-1.0-video-super-720p", name: "yijiarj · grok video 720p", type: "video", costMultiplier: 4, unitCostCny: 0.58, reasoningEffort: "medium", description: "yijiarj /v1/videos；参考图必须传 input_reference 链接；竖屏用 size=720x1280；约 ¥0.58/次" },
+  { id: "yijiarj-veo-3-1-fast", provider: "yijiarj", model: "veo_3_1-fast", name: "yijiarj · veo_3_1-fast", type: "video", costMultiplier: 4, unitCostCny: 0.437, reasoningEffort: "medium", description: "VEO 文生/图生；传图时 ad 分组只支持横屏，自动使用 size=1920x1080；链接约 6 小时过期，完成后需下载本地；约 ¥0.437/次" },
   { id: "yijiarj-veo-3-1-fast-fl", provider: "yijiarj", model: "veo_3_1-fast-fl", name: "yijiarj · veo_3_1-fast-fl", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "VEO 首尾帧模型；不支持纯文生，必须传 input_reference，支持多图用 | 分隔" }
 ];
 
@@ -2533,6 +2533,7 @@ function modelDiagnostics() {
       type: item.type,
       provider: item.provider,
       model: item.model ?? imageConfig.model,
+      unitCostCny: "unitCostCny" in item ? item.unitCostCny : undefined,
       configured,
       route: isImage ? "scripts/generate_image.py" : isVideo ? `${videoConfig.baseUrl}/videos` : `${textConfig.baseUrl}/chat/completions`,
       status: item.id === "imgen-skill" ? "recommended" : configured ? "candidate" : "missing_key",
