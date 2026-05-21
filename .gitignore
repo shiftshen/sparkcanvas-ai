@@ -10,3 +10,5 @@ backend/data/
 frontend/tsconfig.tsbuildinfo
 npm-debug.log*
 .DS_Store
+.project-doctor/
+*.local.md

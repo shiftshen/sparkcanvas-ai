@@ -471,6 +471,13 @@ function assetReferencePath(asset: Pick<Asset, "meta">) {
   return match ? normalizeRefPath(match[1]) : "";
 }
 
+function stripKnownBrandPrefix(pathKey: string) {
+  const parts = pathKey.split(".").filter(Boolean);
+  if (parts.length <= 1) return pathKey;
+  const knownBrandKeys = new Set(db.brands.flatMap((brand) => [brandKey(brand), normalizeKey(brand.name), brand.id]));
+  return knownBrandKeys.has(normalizeKey(parts[0])) ? normalizeRefPath(parts.slice(1).join(".")) : pathKey;
+}
+
 function normalizeKey(value = "") {
   return value
     .toLowerCase()
@@ -771,7 +778,7 @@ function finalOutputFromPrompt(prompt: string): WorkflowOutputTarget {
 
 function extractParams(input: string) {
   const params: Record<string, string> = {};
-  const regex = /([\p{L}\p{N}_\-.]+)\s*:\s*([^，,\n|]+?)(?=\s*->|[，,\n|]|$)/gu;
+  const regex = /([\p{L}_][\p{L}\p{N}_\-.]*)\s*:\s*([^，,\n|]+?)(?=\s*->|[，,\n|]|$)/gu;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(input)) !== null) {
     params[match[1]] = match[2].trim();
@@ -840,10 +847,11 @@ function textValueForPath(brand: Brand, pathKey: string) {
 }
 
 function assetMatchesPath(asset: Asset, pathKey: string) {
+  pathKey = stripKnownBrandPrefix(pathKey);
   if (!pathKey) return true;
   const role = assetTypeToReferenceRole(asset.type, asset.title, asset.meta);
   const text = `${asset.title} ${asset.meta}`.toLowerCase();
-  const explicitPath = assetReferencePath(asset);
+  const explicitPath = stripKnownBrandPrefix(assetReferencePath(asset));
   if (explicitPath && pathKey === explicitPath) return true;
   const [head, ...rest] = pathKey.split(".");
   if (head === "brand") return role === "logo";
@@ -2289,16 +2297,40 @@ async function refreshPendingVideoOutputs(limit = 2) {
       const localPath = localGeneratedVideoPath(node.videoUrl);
       if (node.type === "video" && node.videoUrl && localPath && !(await usableVideoFile(localPath))) {
         delete node.videoUrl;
-        node.body = appendCopyNote(node.body, "本地 MP4 文件无有效视频内容，已恢复为等待状态。");
+        node.body = appendCopyNote(cleanVideoStatusNotes(node.body, "pending"), "本地 MP4 文件无有效视频内容，已恢复为等待状态。");
         changed = true;
+      } else if (node.type === "video" && node.videoUrl && localPath) {
+        const cleanedBody = cleanVideoStatusNotes(node.body, "ready");
+        if (cleanedBody !== node.body) {
+          node.body = cleanedBody;
+          changed = true;
+        }
+      } else if (node.type === "video" && node.videoId && !node.videoUrl) {
+        const cleanedBody = cleanVideoStatusNotes(node.body, "pending");
+        if (cleanedBody !== node.body) {
+          node.body = cleanedBody;
+          changed = true;
+        }
       }
     }
     for (const output of frame.outputs) {
       const localPath = localGeneratedVideoPath(output.videoUrl);
       if (output.kind === "video" && output.videoUrl && localPath && !(await usableVideoFile(localPath))) {
         delete output.videoUrl;
-        output.copy = appendCopyNote(output.copy, "本地 MP4 文件无有效视频内容，已恢复为等待状态。");
+        output.copy = appendCopyNote(cleanVideoStatusNotes(output.copy, "pending"), "本地 MP4 文件无有效视频内容，已恢复为等待状态。");
         changed = true;
+      } else if (output.kind === "video" && output.videoUrl && localPath) {
+        const cleanedCopy = cleanVideoStatusNotes(output.copy, "ready");
+        if (cleanedCopy !== output.copy) {
+          output.copy = cleanedCopy;
+          changed = true;
+        }
+      } else if (output.kind === "video" && output.videoId && !output.videoUrl) {
+        const cleanedCopy = cleanVideoStatusNotes(output.copy, "pending");
+        if (cleanedCopy !== output.copy) {
+          output.copy = cleanedCopy;
+          changed = true;
+        }
       }
     }
   }
@@ -2326,7 +2358,7 @@ async function refreshPendingVideoOutputs(limit = 2) {
           : urls[0];
         if (composedUrl) {
           output.videoUrl = composedUrl;
-          output.copy = appendCopyNote(output.copy, `MP4 文件已生成: ${composedUrl}`);
+          output.copy = appendCopyNote(cleanVideoStatusNotes(output.copy, "ready"), `MP4 文件已生成: ${composedUrl}`);
         }
         return true;
       } else if (statuses.length) {
@@ -2363,7 +2395,7 @@ async function refreshPendingVideoOutputs(limit = 2) {
           : urls[0];
         if (composedUrl) {
           node.videoUrl = composedUrl;
-          node.body = appendCopyNote(node.body, `MP4 文件已生成: ${composedUrl}`);
+          node.body = appendCopyNote(cleanVideoStatusNotes(node.body, "ready"), `MP4 文件已生成: ${composedUrl}`);
         }
         return true;
       } else if (statuses.length) {
@@ -2853,6 +2885,21 @@ function nodesForOutput(frame: CanvasFrame, output: CanvasFrame["outputs"][numbe
 
 function appendCopyNote(copy: string, note: string) {
   return copy.includes(note) ? copy : `${copy} · ${note}`;
+}
+
+function cleanVideoStatusNotes(copy = "", state: "ready" | "pending") {
+  const staleReadyPatterns = state === "ready"
+    ? [
+        / · 本地 MP4 文件无有效视频内容，已恢复为等待状态。/g,
+        / · 视频合成计划已生成：[^。]+。/g,
+        / · 视频任务状态: [^·]+/g
+      ]
+    : [
+        / · MP4 文件已生成: [^·]+/g,
+        / · 最终 MP4 文件已生成: [^·]+/g,
+        / · 所有分段视频已返回并完成裁切\/合成: [^·]+/g
+      ];
+  return staleReadyPatterns.reduce((next, pattern) => next.replace(pattern, ""), copy).trim();
 }
 
 function pdfFontPath() {
@@ -3961,14 +4008,14 @@ app.post("/ai/transform-text", async (req, res) => {
     text: z.string().min(1),
     action: z.enum(["translate", "optimize"]),
     targetLanguage: z.string().default("English"),
-    brandId: z.string().optional(),
+    brandId: z.string().nullable().optional(),
     model: z.string().optional(),
     outputTarget: z.enum(["jpg", "png", "poster", "pdf", "mp4", "kit"]).default("jpg"),
     orientation: z.enum(["square", "portrait", "landscape"]).default("landscape"),
     contentLanguage: contentLanguageSchema.default("zh-en"),
     nodeType: z.enum(["image", "brand", "prompt", "model", "output", "reference", "process", "script", "video", "compose", "audio"]).optional()
   }).parse(req.body);
-  const brand = findBrand(input.brandId);
+  const brand = input.brandId === null ? undefined : findBrand(input.brandId);
   const resolved = resolvePromptAssets(input.text, brand);
   if (input.action === "optimize") {
     const text = input.nodeType
@@ -3987,8 +4034,8 @@ app.post("/ai/transform-text", async (req, res) => {
     const remote = await runTextGeneration(
       [
         instruction,
-        `当前品牌: ${brand.name}`,
-        `品牌风格: ${brand.visualStyle}`,
+        `当前品牌: ${brand ? brand.name : "无品牌"}`,
+        `品牌风格: ${brand ? brand.visualStyle : "无品牌，仅使用用户提示词和显式 $ 跨品牌引用"}`,
         `资源解析: ${JSON.stringify({ imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params })}`,
         contentLanguageInstruction({ contentLanguage: input.contentLanguage }, "text"),
         `用户内容:\n${input.text}`
@@ -4005,16 +4052,16 @@ app.post("/ai/transform-text", async (req, res) => {
 app.post("/ai/resolve-references", async (req, res) => {
   const input = z.object({
     prompt: z.string().min(1),
-    brandId: z.string().optional(),
+    brandId: z.string().nullable().optional(),
     brandInject: z.boolean().optional()
   }).parse(req.body);
-  const brand = findBrand(input.brandId);
+  const brand = input.brandId === null ? undefined : findBrand(input.brandId);
   const resolved = resolvePromptAssets(input.prompt, brand);
   res.json({
     ...resolved,
-    brandId: brand.id,
-    brandKey: brandKey(brand),
-    finalPrompt: buildFinalPrompt(input.prompt, buildBrandContext(brand), input.brandInject ?? true, brand)
+    brandId: brand?.id ?? "",
+    brandKey: brand ? brandKey(brand) : "",
+    finalPrompt: buildFinalPrompt(input.prompt, brand ? buildBrandContext(brand) : "", Boolean(brand && (input.brandInject ?? true)), brand)
   });
 });
 

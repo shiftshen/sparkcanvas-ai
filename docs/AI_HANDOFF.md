@@ -4,6 +4,43 @@ This document is for the next AI agent or developer taking over SparkCanvas. It 
 
 Important security rule: do not commit real API keys, tokens, `auth.json`, `.env`, or `backend/data`. Use `config/auth.example.json` as the public template and keep real credentials local.
 
+## Latest Handoff Update - 2026-05-21
+
+Latest committed direction: harden CAL canvas UX, unbranded workflows, and handoff readiness.
+
+What changed in the latest round:
+
+- New projects and the bottom `New` action now start as unbranded empty canvases by default.
+- `brandId: null` is now a strict state:
+  - Unqualified `$logo` / `$ip` do not silently fall back to the active brand.
+  - Explicit cross-brand references like `$xmanx.logo` and `$dapot.ip` still resolve.
+  - Text optimization no longer injects active-brand context into unbranded prompts such as `马`.
+- Preview modal `前插 / 后插` actions are real insert operations for image/video preview outputs.
+- Canvas/reference nodes now show clearer asset titles instead of only generic reference counts.
+- Project panel, asset panel, canvas status, bottom composer, workflow presets, and CAL suggestion labels have broader `zh/en/th` localization coverage.
+- Smoke tests were extended for unbranded canvas behavior, explicit cross-brand references, localization-sensitive CAL items, and preview insertion behavior.
+
+Latest validation command run before handoff:
+
+```bash
+PATH="/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH" npm test
+```
+
+Actual result from the latest local run: frontend typecheck, backend typecheck, backend build, frontend build, `scripts/smoke-test.mjs`, and `scripts/production-smoke.mjs` passed.
+
+Do not commit local Project Evolution scaffolding unless explicitly requested:
+
+- `AGENTS.md`
+- `PROJECT_VISION.md`
+- `PRODUCT_MAP.md`
+- `FEATURE_MATRIX.md`
+- `EVOLUTION_PLAN.md`
+- `PROJECT_HEALTH.md`
+- `BUG_QUEUE.md`
+- `TEST_PLAN.md`
+- `CHANGELOG.md`
+- `scripts/project-doctor.sh`
+
 ## 1. Product Target
 
 SparkCanvas is an AI brand workflow canvas for generating commercial assets from brand context.

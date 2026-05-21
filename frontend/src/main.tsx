@@ -3,8 +3,6 @@ import { createRoot } from "react-dom/client";
 import {
   ArrowDownToLine,
   ChevronLeft,
-  Box,
-  Camera,
   Download,
   Expand,
   FolderKanban,
@@ -95,8 +93,9 @@ type ModelOption = {
   reasoningEffort?: string;
 };
 
-function modelOptionLabel(model: ModelOption) {
-  return model.unitCostCny ? `${model.name} · ¥${model.unitCostCny}/次` : model.name;
+function modelOptionLabel(model: ModelOption, locale: Locale = "zh") {
+  const unit = locale === "en" ? "run" : locale === "th" ? "ครั้ง" : "次";
+  return model.unitCostCny ? `${model.name} · ¥${model.unitCostCny}/${unit}` : model.name;
 }
 
 type WorkflowNode = {
@@ -321,9 +320,14 @@ const i18n = {
       placeholder: "为 xmanx 生成 5.1 活动投放画面",
       contentLanguage: "内容语言",
       brandNone: "无品牌",
+      projectBrand: "项目品牌",
+      noProjectBrand: "未绑定项目品牌",
+      brandInjectFull: "生成时自动注入完整品牌上下文",
+      brandExplicitOnly: "只使用提示词里显式 $ 引用的品牌素材",
       injectOn: "注入",
       injectOff: "显式",
       outputFormat: "输出文件格式",
+      kit: "套装",
       preset: "用途和尺寸",
       optimize: "优化",
       optimizing: "优化中",
@@ -343,12 +347,14 @@ const i18n = {
       noCredits: "积分不足，无法提交生成任务",
       generating: "生成中",
       ready: "Skill ready · runtime ok",
-      keyMissing: "Skill key missing"
+      keyMissing: "Skill key missing",
+      runtimeKeyMissing: "Skill runtime ok · key missing",
+      skillReady: "Skill ready"
     },
     login: {
       badge: "CAL 1.0 · Prompt Asset Reference System",
       title: "像写代码一样用 AI 设计品牌内容",
-      subtitle: "SparkCanvas 把品牌 Logo、IP、产品、模特和文案变成可引用变量，在可见即所得画布中生成图片、文本、脚本、视频和音频。",
+      subtitle: "SparkCanvas 把品牌 Logo、IP、产品、模特和文案变成可引用变量，在可见即所得画布中生成图片、文本、脚本、视频和音频配置。",
       cta: "进入工作台",
       secondary: "查看 CAL 教材",
       prompt: "@imgen /生成海报 使用 $logo $ip $product，生成 5.1 活动教材和短视频 -> pdf 和 mp4",
@@ -371,7 +377,7 @@ const i18n = {
       ["1. 建品牌", "在品牌管理里上传 Logo、产品、IP、模特等参考图，补齐口号、定位、禁用词。"],
       ["2. 写 CAL", "像写代码一样输入：@imgen /生成海报 使用 $logo $product，显示 $copy.slogan -> 海报；也可以 -> pdf 和 mp4。"],
       ["3. 真引用", "$logo、$ip、$product 会作为真实图片传入 skill；$copy.slogan 会展开成文案。"],
-      ["4. 加节点", "双击空白处或点击线路 +，继续添加图片、文本、脚本、视频、合成或音频节点。"],
+      ["4. 加节点", "双击空白处或点击线路 +，继续添加图片、文本、脚本、视频、合成或音频配置节点。"],
       ["5. 可控迭代", "点击节点后在底部固定面板调整模型、比例、提示词、历史版本和素材替换。"]
     ]
   },
@@ -385,9 +391,14 @@ const i18n = {
       placeholder: "Create a 5.1 campaign visual for xmanx",
       contentLanguage: "Content language",
       brandNone: "No brand",
+      projectBrand: "Project brand",
+      noProjectBrand: "No project brand",
+      brandInjectFull: "Automatically inject the full brand context during generation",
+      brandExplicitOnly: "Only use explicitly referenced $ brand assets in the prompt",
       injectOn: "Inject",
       injectOff: "Explicit",
       outputFormat: "Output format",
+      kit: "Kit",
       preset: "Use case and size",
       optimize: "Optimize",
       optimizing: "Optimizing",
@@ -407,12 +418,14 @@ const i18n = {
       noCredits: "Not enough credits to submit generation",
       generating: "Generating",
       ready: "Skill ready · runtime ok",
-      keyMissing: "Skill key missing"
+      keyMissing: "Skill key missing",
+      runtimeKeyMissing: "Skill runtime ok · key missing",
+      skillReady: "Skill ready"
     },
     login: {
       badge: "CAL 1.0 · Prompt Asset Reference System",
       title: "Design with AI like writing code",
-      subtitle: "SparkCanvas turns logos, IP characters, products, models, and copy into reference variables on a WYSIWYG canvas for images, text, scripts, video, and audio.",
+      subtitle: "SparkCanvas turns logos, IP characters, products, models, and copy into reference variables on a WYSIWYG canvas for images, text, scripts, video, and audio plans.",
       cta: "Enter Studio",
       secondary: "Read CAL guide",
       prompt: "@imgen /generate-poster use $logo $ip $product, create a 5.1 campaign guide and short video -> pdf and mp4",
@@ -435,7 +448,7 @@ const i18n = {
       ["1. Build a brand", "Upload logo, product, IP, model references, then complete slogan, positioning, and forbidden terms."],
       ["2. Write CAL", "Type like code: @imgen /generate-poster use $logo $product, show $copy.slogan -> poster; or -> pdf and mp4."],
       ["3. Real references", "$logo, $ip, and $product are sent to the skill as images; $copy.slogan expands as text."],
-      ["4. Add nodes", "Double-click the canvas or use line + controls to add image, text, script, video, compose, and audio nodes."],
+      ["4. Add nodes", "Double-click the canvas or use line + controls to add image, text, script, video, compose, and audio-plan nodes."],
       ["5. Iterate with control", "Select a node and tune model, ratio, prompt, versions, and asset replacement in the bottom panel."]
     ]
   },
@@ -449,9 +462,14 @@ const i18n = {
       placeholder: "สร้างภาพแคมเปญ 5.1 สำหรับ xmanx",
       contentLanguage: "ภาษาคอนเทนต์",
       brandNone: "ไม่มีแบรนด์",
+      projectBrand: "แบรนด์ของโปรเจกต์",
+      noProjectBrand: "ยังไม่ได้ผูกแบรนด์",
+      brandInjectFull: "ใส่บริบทแบรนด์ทั้งหมดอัตโนมัติเมื่อสร้างงาน",
+      brandExplicitOnly: "ใช้เฉพาะแอสเซ็ต $ ที่อ้างอิงในพรอมป์",
       injectOn: "ใช้แบรนด์",
       injectOff: "อ้างอิงเอง",
       outputFormat: "รูปแบบไฟล์",
+      kit: "ชุดไฟล์",
       preset: "การใช้งานและขนาด",
       optimize: "ปรับพรอมป์",
       optimizing: "กำลังปรับ",
@@ -471,7 +489,9 @@ const i18n = {
       noCredits: "เครดิตไม่พอสำหรับการสร้าง",
       generating: "กำลังสร้าง",
       ready: "Skill ready · runtime ok",
-      keyMissing: "Skill key missing"
+      keyMissing: "Skill key missing",
+      runtimeKeyMissing: "Skill runtime ok · key missing",
+      skillReady: "Skill ready"
     },
     login: {
       badge: "CAL 1.0 · ระบบอ้างอิงทรัพยากรในพรอมป์",
@@ -499,7 +519,7 @@ const i18n = {
       ["1. สร้างแบรนด์", "อัปโหลดโลโก้ สินค้า IP โมเดล และเติม slogan, positioning, forbidden terms"],
       ["2. เขียน CAL", "พิมพ์เหมือนโค้ด: @imgen /generate-poster use $logo $product, show $copy.slogan -> poster หรือ -> pdf and mp4"],
       ["3. อ้างอิงจริง", "$logo, $ip, $product ถูกส่งเป็นรูปจริงให้ skill; $copy.slogan ถูกขยายเป็นข้อความ"],
-      ["4. เพิ่มโหนด", "ดับเบิลคลิกบนแคนวาสหรือกด + บนเส้นเพื่อเพิ่ม image/text/script/video/compose/audio"],
+      ["4. เพิ่มโหนด", "ดับเบิลคลิกบนแคนวาสหรือกด + บนเส้นเพื่อเพิ่ม image/text/script/video/compose/audio plan"],
       ["5. คุมการทำซ้ำ", "เลือกโหนดแล้วปรับ model, ratio, prompt, versions และ asset replacement ที่แผงล่าง"]
     ]
   }
@@ -513,9 +533,14 @@ const i18n = {
     placeholder: string;
     contentLanguage: string;
     brandNone: string;
+    projectBrand: string;
+    noProjectBrand: string;
+    brandInjectFull: string;
+    brandExplicitOnly: string;
     injectOn: string;
     injectOff: string;
     outputFormat: string;
+    kit: string;
     preset: string;
     optimize: string;
     optimizing: string;
@@ -536,6 +561,8 @@ const i18n = {
     generating: string;
     ready: string;
     keyMissing: string;
+    runtimeKeyMissing: string;
+    skillReady: string;
   };
   login: {
     badge: string;
@@ -577,6 +604,92 @@ const workflowPresets: WorkflowPreset[] = [
   { id: "video-frame-landscape", label: "视频首尾帧 横屏", size: "1920x1080", ratio: "16:9", orientation: "landscape", duration: 5, formats: ["mp4", "kit"], note: "图生视频首帧/尾帧" },
   { id: "video-frame-vertical", label: "视频首尾帧 竖屏", size: "1080x1920", ratio: "9:16", orientation: "portrait", duration: 5, formats: ["mp4", "kit"], note: "图生视频首帧/尾帧" }
 ];
+
+const workflowPresetCopies: Partial<Record<WorkflowPresetId, Record<Locale, { label: string; note: string }>>> = {
+  "feed-45": {
+    zh: { label: "Meta 信息流 4:5", note: "Facebook/Instagram 信息流竖图" },
+    en: { label: "Meta Feed 4:5", note: "Facebook/Instagram feed image" },
+    th: { label: "Meta Feed 4:5", note: "ภาพแนวตั้งสำหรับ Facebook/Instagram feed" }
+  },
+  "feed-square": {
+    zh: { label: "社媒方图", note: "Facebook/Instagram 方图" },
+    en: { label: "Social Square", note: "Facebook/Instagram square image" },
+    th: { label: "Social Square", note: "ภาพสี่เหลี่ยมสำหรับโซเชียล" }
+  },
+  "story-cover": {
+    zh: { label: "Story/Reels/TikTok", note: "竖屏封面、Story、Reels、TikTok 首帧" },
+    en: { label: "Story/Reels/TikTok", note: "Vertical cover, story, reels, or TikTok first frame" },
+    th: { label: "Story/Reels/TikTok", note: "ภาพแนวตั้งสำหรับ Story, Reels หรือ TikTok" }
+  },
+  "display-landscape": {
+    zh: { label: "Google Display 横图", note: "Google Display / Performance Max 横版素材" },
+    en: { label: "Google Display Landscape", note: "Landscape creative for Google Display / Performance Max" },
+    th: { label: "Google Display แนวนอน", note: "ครีเอทีฟแนวนอนสำหรับ Google Display / Performance Max" }
+  },
+  "display-square": {
+    zh: { label: "Google Display 方图", note: "Google Display / Performance Max 方图素材" },
+    en: { label: "Google Display Square", note: "Square creative for Google Display / Performance Max" },
+    th: { label: "Google Display สี่เหลี่ยม", note: "ครีเอทีฟสี่เหลี่ยมสำหรับ Google Display / Performance Max" }
+  },
+  "display-vertical": {
+    zh: { label: "Google Display 竖图", note: "Google Display 竖版素材" },
+    en: { label: "Google Display Vertical", note: "Vertical creative for Google Display" },
+    th: { label: "Google Display แนวตั้ง", note: "ครีเอทีฟแนวตั้งสำหรับ Google Display" }
+  },
+  "youtube-thumbnail": {
+    zh: { label: "YouTube 缩略图", note: "YouTube 视频封面/横屏首帧" },
+    en: { label: "YouTube Thumbnail", note: "YouTube cover or landscape first frame" },
+    th: { label: "YouTube Thumbnail", note: "ภาพปก YouTube หรือเฟรมแรกแนวนอน" }
+  },
+  "frame-landscape": {
+    zh: { label: "视频首尾帧 横屏", note: "Facebook/YouTube 视频首帧或尾帧" },
+    en: { label: "Video Keyframe Landscape", note: "First or last frame for Facebook/YouTube video" },
+    th: { label: "คีย์เฟรมวิดีโอแนวนอน", note: "เฟรมแรกหรือเฟรมท้ายสำหรับวิดีโอแนวนอน" }
+  },
+  "frame-vertical": {
+    zh: { label: "视频首尾帧 竖屏", note: "Reels/Story/TikTok 视频首帧或尾帧" },
+    en: { label: "Video Keyframe Vertical", note: "First or last frame for Reels, Stories, or TikTok" },
+    th: { label: "คีย์เฟรมวิดีโอแนวตั้ง", note: "เฟรมแรกหรือเฟรมท้ายสำหรับ Reels, Stories หรือ TikTok" }
+  },
+  "pdf-cover": {
+    zh: { label: "PDF 封面", note: "PDF 教材/手册封面视觉" },
+    en: { label: "PDF Cover", note: "Cover visual for PDF guide or handbook" },
+    th: { label: "ปก PDF", note: "ภาพปกสำหรับคู่มือหรือเอกสาร PDF" }
+  },
+  "video-feed-45": {
+    zh: { label: "Feed 视频 4:5", note: "Meta 信息流视频" },
+    en: { label: "Feed Video 4:5", note: "Meta feed video" },
+    th: { label: "Feed Video 4:5", note: "วิดีโอสำหรับ Meta feed" }
+  },
+  "video-landscape": {
+    zh: { label: "视频横屏", note: "Facebook/YouTube 横屏视频" },
+    en: { label: "Video Landscape", note: "Landscape video for Facebook/YouTube" },
+    th: { label: "วิดีโอแนวนอน", note: "วิดีโอแนวนอนสำหรับ Facebook/YouTube" }
+  },
+  "video-vertical": {
+    zh: { label: "Reels/Story 竖屏", note: "Reels/Stories/TikTok 竖屏视频" },
+    en: { label: "Reels/Story Vertical", note: "Vertical video for Reels, Stories, or TikTok" },
+    th: { label: "Reels/Story แนวตั้ง", note: "วิดีโอแนวตั้งสำหรับ Reels, Stories หรือ TikTok" }
+  },
+  "video-frame-landscape": {
+    zh: { label: "视频首尾帧 横屏", note: "图生视频首帧/尾帧" },
+    en: { label: "I2V Keyframe Landscape", note: "First/last frame for image-to-video" },
+    th: { label: "คีย์เฟรม I2V แนวนอน", note: "เฟรมแรก/ท้ายสำหรับ image-to-video" }
+  },
+  "video-frame-vertical": {
+    zh: { label: "视频首尾帧 竖屏", note: "图生视频首帧/尾帧" },
+    en: { label: "I2V Keyframe Vertical", note: "First/last frame for image-to-video" },
+    th: { label: "คีย์เฟรม I2V แนวตั้ง", note: "เฟรมแรก/ท้ายสำหรับ image-to-video" }
+  }
+};
+
+function workflowPresetLabel(preset: WorkflowPreset, locale: Locale) {
+  return workflowPresetCopies[preset.id]?.[locale]?.label ?? preset.label;
+}
+
+function workflowPresetNote(preset: WorkflowPreset, locale: Locale) {
+  return workflowPresetCopies[preset.id]?.[locale]?.note ?? preset.note;
+}
 
 function defaultPresetForOutput(output: WorkflowOutputTarget): WorkflowPreset {
   return workflowPresets.find((preset) => preset.formats.includes(output)) ?? workflowPresets[0];
@@ -642,7 +755,15 @@ function nodeExecutionSummary(node: WorkflowNode, output?: Frame["outputs"][numb
     const segment = firstMatch(text, [/片段\s*(\d+\/\d+)/, /第\s*(\d+)\s*段/]);
     const target = firstMatch(text, [/最终使用\s*(\d+s)/, /final segment target\s*(\d+s)/i]);
     const model = firstMatch(text, [/模型固定(?:生成|单次输出)?\s*(\d+s)/, /model must generate a\s*(\d+s)/i]);
-    const status = node.videoUrl || output?.videoUrl ? "MP4 已生成" : node.videoId || /任务已创建|videoId|MP4 分段任务/.test(text) ? "等待 MP4 返回" : /失败|failed|error/i.test(text) ? "生成失败" : "未生成";
+    const status = node.videoUrl
+      ? "片段 MP4 已生成"
+      : output?.videoUrl
+        ? "最终 MP4 已生成"
+        : node.videoId || /任务已创建|videoId|MP4 分段任务/.test(text)
+          ? "等待 MP4 返回"
+          : /失败|failed|error/i.test(text)
+            ? "生成失败"
+            : "未生成";
     return {
       title: segment ? `图生视频 ${segment}` : "图生视频片段",
       detail: status,
@@ -908,11 +1029,14 @@ function assetReferencePath(asset: Pick<Asset, "meta">) {
   return match ? match[1] : "";
 }
 
-function assetReferenceToken(asset: Pick<Asset, "meta" | "title" | "type">, brand?: Brand) {
-  const path = assetReferencePath(asset);
-  const token = path ? `$${path}` : mentionTokenForRole(assetRole(asset));
+function assetPathWithoutCurrentBrand(path: string, brand?: Brand) {
   const brandKey = brand ? currentBrandKey(brand) : "";
-  if (!brandKey || token.startsWith(`$${brandKey}.`)) return token;
+  return brandKey && path.startsWith(`${brandKey}.`) ? path.slice(brandKey.length + 1) : path;
+}
+
+function assetReferenceToken(asset: Pick<Asset, "meta" | "title" | "type">, brand?: Brand) {
+  const path = assetPathWithoutCurrentBrand(assetReferencePath(asset), brand);
+  const token = path ? `$${path}` : mentionTokenForRole(assetRole(asset));
   return token;
 }
 
@@ -986,6 +1110,15 @@ function promptRequestsWholeBrand(prompt: string, brand?: Brand) {
   return explicitPackage || naturalMention;
 }
 
+function referencedBrandNames(prompt: string, brands: Brand[]) {
+  return brands
+    .filter((brand) => {
+      const keys = brandReferenceKeys(brand).filter(Boolean);
+      return keys.some((key) => new RegExp(`\\$${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\.|\\b)`, "i").test(prompt));
+    })
+    .map((brand) => brand.name);
+}
+
 function normalizeRoleText(asset: Pick<Asset, "title" | "meta" | "type">) {
   return `${asset.title} ${asset.meta} ${asset.type}`.toLowerCase();
 }
@@ -1003,12 +1136,61 @@ function assetRole(asset: Pick<Asset, "title" | "meta" | "type">): BrandAssetRol
   return "general";
 }
 
-function buildMentionItems(brand?: Brand, assets: Asset[] = [], brands: Brand[] = []): MentionItem[] {
+function commandDefinitions(locale: Locale) {
+  if (locale === "en") {
+    return [
+      ["/generate-poster", "generate_poster", "Generate a brand poster with image models"],
+      ["/generate-product-image", "generate_product_image", "Generate ecommerce product imagery"],
+      ["/change-model", "change_model", "Generate model replacement from product and model references"],
+      ["/change-background", "change_background", "Keep the subject and replace the scene/background"],
+      ["/write-copy", "write_copy", "Generate title, subtitle, promotion copy, and CTA"],
+      ["/translate", "translate", "Translate with the text model"],
+      ["/polish", "polish", "Improve prompt, copy, or script"],
+      ["/write-video-script", "write_video_script", "Generate storyboard, camera motion, and sound"],
+      ["/generate-video", "generate_video", "Create a video model task"],
+      ["/review", "review", "Check brand consistency and platform risk"]
+    ];
+  }
+  if (locale === "th") {
+    return [
+      ["/generate-poster", "generate_poster", "สร้างโปสเตอร์แบรนด์ด้วยโมเดลรูปภาพ"],
+      ["/generate-product-image", "generate_product_image", "สร้างรูปสินค้าอีคอมเมิร์ซ"],
+      ["/change-model", "change_model", "เปลี่ยนโมเดลจากสินค้าและภาพอ้างอิง"],
+      ["/change-background", "change_background", "คงตัวแบบไว้และเปลี่ยนฉากหลัง"],
+      ["/write-copy", "write_copy", "สร้างหัวข้อ โปรโมชัน และ CTA"],
+      ["/translate", "translate", "แปลด้วยโมเดลข้อความ"],
+      ["/polish", "polish", "ปรับพรอมป์ ข้อความ หรือสคริปต์"],
+      ["/write-video-script", "write_video_script", "สร้าง storyboard, camera motion และเสียง"],
+      ["/generate-video", "generate_video", "สร้างงานวิดีโอ"],
+      ["/review", "review", "ตรวจความสอดคล้องแบรนด์และความเสี่ยงแพลตฟอร์ม"]
+    ];
+  }
+  return [
+    ["/生成海报", "generate_poster", "调用图片模型生成品牌海报"],
+    ["/生成主图", "generate_product_image", "生成电商主图或产品图"],
+    ["/换模特", "change_model", "基于商品和模特参考生成换模特结果"],
+    ["/换背景", "change_background", "保留主体并替换画面背景"],
+    ["/写文案", "write_copy", "生成标题、副标题、促销文案"],
+    ["/翻译", "translate", "用文本模型翻译为目标语言"],
+    ["/润色", "polish", "优化提示词、文案或脚本"],
+    ["/写视频脚本", "write_video_script", "生成分镜、镜头、运动和音效"],
+    ["/生成视频", "generate_video", "调用视频模型创建视频任务"],
+    ["/审核", "review", "检查品牌一致性和平台风险"]
+  ];
+}
+
+function tagDefinitions(locale: Locale, brandMode = false) {
+  if (locale === "en") return ["%premium", "%new-launch", "%Facebook-ad", "%TikTok-video", "%ecommerce-main-image", "%realistic-photo", ...(brandMode ? ["%female-audience", "%brand-consistency"] : [])];
+  if (locale === "th") return ["%premium", "%new-launch", "%Facebook-ad", "%TikTok-video", "%ecommerce-main-image", "%realistic-photo", ...(brandMode ? ["%female-audience", "%brand-consistency"] : [])];
+  return ["%高级感", "%新品上市", "%Facebook广告", "%TikTok视频", "%电商主图", "%真实摄影", ...(brandMode ? ["%女性向", "%品牌维护"] : [])];
+}
+
+function buildMentionItems(brand?: Brand, assets: Asset[] = [], brands: Brand[] = [], locale: Locale = "zh"): MentionItem[] {
   const crossBrandItems = brands
     .filter((item) => item.id !== brand?.id)
     .flatMap((item) => {
       const key = currentBrandKey(item);
-      return buildMentionItems(item, assets)
+      return buildMentionItems(item, assets, [], locale)
         .filter((mention) => mention.token === `$${key}` || mention.token.startsWith(`$${key}.`))
         .map((mention) => ({
           ...mention,
@@ -1019,17 +1201,17 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = [], brands: Brand[] 
   if (!brand) {
     const neutral = "#f97316";
     const agents: MentionItem[] = [{ id: "agent_imgen", token: "@imgen", group: "agent", kind: "agent", role: "imgen", title: "imgen", description: "图片生成 Skill：无品牌项目也可直接生成，只有显式 $ 引用才会传参考图", color: "#111827" }];
-    const commands: MentionItem[] = ["/生成海报", "/生成主图", "/写文案", "/翻译", "/润色", "/写视频脚本", "/生成视频"].map((token) => ({
-      id: `command_${token}`,
+    const commands: MentionItem[] = commandDefinitions(locale).map(([token, role, description]) => ({
+      id: `command_${role}`,
       token,
       group: "command" as const,
       kind: "command" as const,
-      role: token.replace("/", ""),
+      role,
       title: token.replace("/", ""),
-      description: "CAL 命令，用于生成结构化工作流",
+      description,
       color: neutral
     }));
-    const tags: MentionItem[] = ["%高级感", "%新品上市", "%Facebook广告", "%TikTok视频", "%电商主图", "%真实摄影"].map((token) => ({
+    const tags: MentionItem[] = tagDefinitions(locale).map((token) => ({
       id: `tag_${token}`,
       token,
       group: "tag" as const,
@@ -1055,18 +1237,7 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = [], brands: Brand[] 
     description,
     color: brand.primaryColor
   }));
-  const commands: MentionItem[] = [
-    ["/生成海报", "generate_poster", "调用图片模型生成品牌海报"],
-    ["/生成主图", "generate_product_image", "生成电商主图或产品图"],
-    ["/换模特", "change_model", "基于商品和模特参考生成换模特结果"],
-    ["/换背景", "change_background", "保留主体并替换画面背景"],
-    ["/写文案", "write_copy", "生成标题、副标题、促销文案"],
-    ["/翻译", "translate", "用文本模型翻译为目标语言"],
-    ["/润色", "polish", "优化提示词、文案或脚本"],
-    ["/写视频脚本", "write_video_script", "生成分镜、镜头、运动和音效"],
-    ["/生成视频", "generate_video", "调用视频模型创建视频任务"],
-    ["/审核", "review", "检查品牌一致性和平台风险"]
-  ].map(([token, role, description]) => ({
+  const commands: MentionItem[] = commandDefinitions(locale).map(([token, role, description]) => ({
     id: `command_${role}`,
     token,
     group: "command" as const,
@@ -1076,7 +1247,7 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = [], brands: Brand[] 
     description,
     color: brand.accentColor
   }));
-  const tags: MentionItem[] = ["%高级感", "%新品上市", "%Facebook广告", "%TikTok视频", "%电商主图", "%真实摄影", "%女性向", "%品牌维护"].map((token) => ({
+  const tags: MentionItem[] = tagDefinitions(locale, true).map((token) => ({
     id: `tag_${token}`,
     token,
     group: "tag" as const,
@@ -1336,7 +1507,7 @@ function promptTemplateForNode(type: WorkflowNode["type"], outputKind?: Frame["o
     return "/write-copy 使用 $copy.brand_name $copy.slogan，生成可编辑 Markdown：标题、卖点、三段正文、CTA。不要输出表格。";
   }
   if (type === "audio") {
-    return "/write-audio 使用 $copy.slogan，生成 15s 广告配乐提示词：情绪、节奏、乐器、起承转合、结尾品牌记忆点。";
+    return "/write-audio 使用 $copy.slogan，生成 15s 广告配乐配置：情绪、节奏、乐器、起承转合、结尾品牌记忆点。";
   }
   if (type === "compose") {
     return "/compose-video 选择多个视频片段，按 开场钩子 -> 产品证明 -> 优惠 CTA 合成，转场干净，输出 9:16 MP4。";
@@ -1616,7 +1787,7 @@ function App() {
   async function createProject(options?: { title?: string; brandId?: string | null }) {
     const frame = await api.post<Frame>("/canvas/frames", {
       title: options?.title,
-      brandId: options?.brandId === undefined ? activeBrand?.id ?? null : options.brandId
+      brandId: options?.brandId ?? null
     });
     setFrames((current) => [frame, ...current]);
     setSelectedFrameId(frame.id);
@@ -1703,6 +1874,58 @@ function App() {
     });
     setAssets((current) => [asset, ...current]);
     setPanel("assets");
+  }
+
+  async function insertPreviewIntoCanvas(target: PreviewTarget, position: "before" | "after") {
+    if (!activeFrame || (!target.imageUrl && !target.videoUrl)) return;
+    setError("");
+    try {
+      const currentNodes = normalizeWorkflowNodes(activeFrame.workflowNodes, shouldUseDefaultWorkflow(activeFrame.workflowNodes));
+      const anchor = target.nodeId ? currentNodes.find((node) => node.id === target.nodeId) : undefined;
+      const id = `node_preview_${Date.now().toString(36)}`;
+      const previewRef: ReferenceItem = {
+        id: `preview_${id}`,
+        role: target.videoUrl ? "video-preview" : "generated",
+        title: target.title || (target.videoUrl ? "视频预览" : "图片预览"),
+        description: target.subtitle || "从预览插入画布，可继续连接后续步骤。",
+        color: target.color ?? activeBrand?.accentColor ?? "#f97316",
+        imageUrl: target.imageUrl
+      };
+      const anchorChildCount = anchor ? currentNodes.filter((node) => node.parentId === anchor.id).length : 0;
+      const nextX = anchor
+        ? (anchor.x ?? 120) + (position === "before" ? -320 : 320)
+        : 160;
+      const nextY = anchor
+        ? (anchor.y ?? 160) + (position === "after" && anchorChildCount ? anchorChildCount * 280 : 0)
+        : 160;
+      const shouldRewireBefore = position === "before" && anchor && !coreNodeIds.includes(anchor.id);
+      const node: WorkflowNode = {
+        id,
+        type: target.videoUrl ? "video" : "reference",
+        title: target.videoUrl ? "视频素材" : "图片素材",
+        body: target.subtitle || "从预览插入画布，可继续连接后续步骤。",
+        parentId: position === "before" ? anchor?.parentId : anchor?.id,
+        inputIds: shouldRewireBefore ? anchor?.inputIds : undefined,
+        preview: target.color ?? activeBrand?.accentColor ?? "#f97316",
+        refs: target.imageUrl ? [previewRef] : undefined,
+        imageUrl: target.imageUrl,
+        videoUrl: target.videoUrl,
+        x: nextX,
+        y: nextY,
+        w: target.videoUrl ? 260 : 250,
+        h: target.videoUrl ? 238 : 300
+      };
+      const nextNodes = shouldRewireBefore
+        ? [...currentNodes, node].map((item) => item.id === anchor.id ? { ...item, parentId: node.id, inputIds: undefined } : item)
+        : [...currentNodes, node];
+      const updated = await updateFrame(activeFrame.id, { workflowNodes: nextNodes });
+      setFrames((current) => current.map((frame) => frame.id === updated.id ? updated : frame));
+      setSelectedFrameId(updated.id);
+      setEditingNodeId(node.id);
+      setPreview(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "预览插入画布失败");
+    }
   }
 
   async function addSelectedAssetsToCanvas() {
@@ -1892,6 +2115,7 @@ function App() {
       <Canvas
         frame={activeFrame}
         assets={assets}
+        brands={brands}
         activeBrand={projectBrand}
         model={model}
         models={models}
@@ -1932,12 +2156,19 @@ function App() {
             if (!nextPrompt && activeFrame?.prompt) void runCurrentWorkflow();
             else void generate(nextPrompt, undefined, controls);
           }}
-          onCreateProject={() => void createProject({ brandId: projectBrand?.id ?? null })}
+          onCreateProject={() => void createProject({ brandId: null })}
           onUpdateFrame={(patch) => activeFrame && void updateFrame(activeFrame.id, patch)}
         />
       )}
 
-      {preview && <ImagePreview preview={preview} onClose={() => setPreview(null)} onSaveAsset={(target) => void saveGeneratedAsset(target)} />}
+      {preview && (
+        <ImagePreview
+          preview={preview}
+          onClose={() => setPreview(null)}
+          onInsert={(target, position) => void insertPreviewIntoCanvas(target, position)}
+          onSaveAsset={(target) => void saveGeneratedAsset(target)}
+        />
+      )}
       {error && <div className="rh-error">{error}</div>}
     </div>
   );
@@ -2098,8 +2329,8 @@ function SideDrawer(props: {
         <strong>{drawerTitle[props.panel]}</strong>
         <button type="button" onClick={props.onClose}><PanelLeftClose /></button>
       </div>
-      {props.panel === "projects" && <ProjectPanel frames={props.frames} brands={props.brands} activeBrand={props.activeBrand} selectedFrameId={props.selectedFrameId} onSelect={props.onSelectFrame} onCreate={props.onCreateProject} onUpdateFrame={props.onUpdateFrame} />}
-      {props.panel === "assets" && <AssetPanel assets={props.assets} brands={props.brands} activeBrand={props.activeBrand} selection={props.assetSelection} onSelect={props.onSelectAsset} onAddAssets={props.onAddAssets} onUpload={props.onUpload} onUpdate={props.onUpdateAsset} onDelete={props.onDeleteAsset} />}
+      {props.panel === "projects" && <ProjectPanel locale={props.locale} frames={props.frames} brands={props.brands} selectedFrameId={props.selectedFrameId} onSelect={props.onSelectFrame} onCreate={props.onCreateProject} onUpdateFrame={props.onUpdateFrame} />}
+      {props.panel === "assets" && <AssetPanel locale={props.locale} assets={props.assets} brands={props.brands} activeBrand={props.activeBrand} selection={props.assetSelection} onSelect={props.onSelectAsset} onAddAssets={props.onAddAssets} onUpload={props.onUpload} onUpdate={props.onUpdateAsset} onDelete={props.onDeleteAsset} />}
       {props.panel === "brand" && props.activeBrand && <BrandPanel brands={props.brands} brand={props.activeBrand} assets={props.assets} onCreate={props.onCreateBrand} onSelect={props.onSelectBrand} onSave={props.onSaveBrand} onUpload={props.onUpload} onUpdateAsset={props.onUpdateAsset} onDeleteAsset={props.onDeleteAsset} />}
       {props.panel === "templates" && <TemplatePanel templates={props.templates} onUse={props.onUseTemplate} />}
       {props.panel === "history" && <HistoryPanel frames={props.frames} selectedFrameId={props.selectedFrameId} onSelect={props.onSelectFrame} />}
@@ -2109,30 +2340,65 @@ function SideDrawer(props: {
 }
 
 function ProjectPanel({
+  locale,
   frames,
   brands,
-  activeBrand,
   selectedFrameId,
   onSelect,
   onCreate,
   onUpdateFrame
 }: {
+  locale: Locale;
   frames: Frame[];
   brands: Brand[];
-  activeBrand?: Brand;
   selectedFrameId?: string;
   onSelect: (id: string) => void;
   onCreate: (options?: { title?: string; brandId?: string | null }) => void;
   onUpdateFrame: (frameId: string, patch: Pick<FramePatch, "title" | "settings" | "brandId" | "brandInject">) => void;
 }) {
+  const copy = {
+    zh: {
+      createTitle: "新建项目 / 流程",
+      unnamed: "未命名画布",
+      noBrandProject: "无品牌项目",
+      create: "创建空画布",
+      current: "当前项目",
+      noBrand: "无品牌",
+      boundNote: "项目属于该品牌；生成时可选择是否注入品牌上下文。",
+      unboundNote: "无品牌项目不会自动注入品牌；仍可用 $xmanx.logo 跨品牌引用。",
+      brandLabel: "项目品牌"
+    },
+    en: {
+      createTitle: "New project / workflow",
+      unnamed: "Untitled canvas",
+      noBrandProject: "No-brand project",
+      create: "Create empty canvas",
+      current: "Current project",
+      noBrand: "No brand",
+      boundNote: "This project belongs to the selected brand. Brand injection remains optional during generation.",
+      unboundNote: "No-brand projects do not auto-inject a brand. You can still use explicit refs like $xmanx.logo.",
+      brandLabel: "Project brand"
+    },
+    th: {
+      createTitle: "โปรเจกต์ / เวิร์กโฟลว์ใหม่",
+      unnamed: "แคนวาสยังไม่ตั้งชื่อ",
+      noBrandProject: "โปรเจกต์ไม่มีแบรนด์",
+      create: "สร้างแคนวาสเปล่า",
+      current: "โปรเจกต์ปัจจุบัน",
+      noBrand: "ไม่มีแบรนด์",
+      boundNote: "โปรเจกต์นี้ผูกกับแบรนด์ที่เลือก และยังเลือกได้ว่าจะฉีดบริบทแบรนด์ตอนสร้างงานหรือไม่",
+      unboundNote: "โปรเจกต์ไม่มีแบรนด์จะไม่ฉีดแบรนด์อัตโนมัติ แต่ยังใช้ $xmanx.logo แบบระบุแบรนด์ได้",
+      brandLabel: "แบรนด์ของโปรเจกต์"
+    }
+  }[locale];
   const selectedFrame = frames.find((frame) => frame.id === selectedFrameId);
   const [newTitle, setNewTitle] = useState("");
-  const [newBrandId, setNewBrandId] = useState<string | null>(activeBrand?.id ?? null);
+  const [newBrandId, setNewBrandId] = useState<string | null>(null);
   const projectCount = frames.length + 1;
   const selectedBrandId = selectedFrame?.brandId || "";
   function createNamedProject() {
     onCreate({
-      title: newTitle.trim() || `未命名画布 ${projectCount}`,
+      title: newTitle.trim() || `${copy.unnamed} ${projectCount}`,
       brandId: newBrandId
     });
     setNewTitle("");
@@ -2146,32 +2412,33 @@ function ProjectPanel({
       brandInject: Boolean(nextBrandId && selectedFrame.settings.brandInject)
     });
   }
+  const displayFrameBrand = (frame: Frame) => frame.brandId ? frame.brandName : copy.noBrand;
   return (
     <div className="rh-panel-list">
       <section className="rh-project-create">
-        <div className="rh-project-create-head"><Plus /><strong>新建项目 / 流程</strong></div>
-        <input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder={`未命名画布 ${projectCount}`} />
-        <select value={newBrandId ?? ""} onChange={(event) => setNewBrandId(event.target.value || null)}>
-          <option value="">无品牌项目</option>
+        <div className="rh-project-create-head"><Plus /><strong>{copy.createTitle}</strong></div>
+        <input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder={`${copy.unnamed} ${projectCount}`} />
+        <select value={newBrandId ?? ""} onChange={(event) => setNewBrandId(event.target.value || null)} title={copy.brandLabel}>
+          <option value="">{copy.noBrandProject}</option>
           {brands.map((brand) => <option value={brand.id} key={brand.id}>{brand.name}</option>)}
         </select>
-        <button className="rh-create-project" type="button" onClick={createNamedProject}>创建空画布</button>
+        <button className="rh-create-project" type="button" onClick={createNamedProject}>{copy.create}</button>
       </section>
       {selectedFrame && (
         <section className="rh-project-settings">
-          <strong>当前项目</strong>
-          <input value={selectedFrame.title} onChange={(event) => onUpdateFrame(selectedFrame.id, { title: event.target.value })} aria-label="项目名称" />
-          <select value={selectedBrandId} onChange={(event) => updateProjectBrand(event.target.value)}>
-            <option value="">无品牌</option>
+          <strong>{copy.current}</strong>
+          <input value={selectedFrame.title} onChange={(event) => onUpdateFrame(selectedFrame.id, { title: event.target.value })} aria-label={copy.current} />
+          <select value={selectedBrandId} onChange={(event) => updateProjectBrand(event.target.value)} title={copy.brandLabel}>
+            <option value="">{copy.noBrand}</option>
             {brands.map((brand) => <option value={brand.id} key={brand.id}>{brand.name}</option>)}
           </select>
-          <small>{selectedBrandId ? "项目属于该品牌；生成时可选择是否注入品牌上下文。" : "无品牌项目不会自动注入品牌；仍可用 $xmanx.logo 跨品牌引用。"}</small>
+          <small>{selectedBrandId ? copy.boundNote : copy.unboundNote}</small>
         </section>
       )}
       {frames.map((frame) => (
         <button className={frame.id === selectedFrameId ? "active" : ""} type="button" key={frame.id} onClick={() => onSelect(frame.id)}>
           <span>{frame.status === "generating" ? <Loader2 className="spin" /> : <FolderKanban />}</span>
-          <div><strong>{frame.title}</strong><small>{frame.brandName || "无品牌"} · {frame.modelName} · {frame.progress}%</small></div>
+          <div><strong>{frame.title}</strong><small>{displayFrameBrand(frame)} · {frame.modelName} · {frame.progress}%</small></div>
         </button>
       ))}
     </div>
@@ -2179,6 +2446,7 @@ function ProjectPanel({
 }
 
 function AssetPanel(props: {
+  locale: Locale;
   assets: Asset[];
   brands: Brand[];
   activeBrand?: Brand;
@@ -2189,6 +2457,11 @@ function AssetPanel(props: {
   onUpdate: (id: string, patch: Partial<Pick<Asset, "title" | "type" | "meta" | "color" | "imageUrl">>) => void;
   onDelete: (id: string) => void;
 }) {
+  const copy = {
+    zh: { brand: "品牌", allBrands: "全部品牌", type: "类型", upload: "上传", add: "加入当前画布参考", token: "引用标签", name: "素材名称", purpose: "素材用途", assetType: "素材类型", scene: "Scene" },
+    en: { brand: "Brand", allBrands: "All brands", type: "Type", upload: "Upload", add: "Add to current canvas refs", token: "Reference token", name: "Asset name", purpose: "Asset usage", assetType: "Asset type", scene: "Scene" },
+    th: { brand: "แบรนด์", allBrands: "ทุกแบรนด์", type: "ประเภท", upload: "อัปโหลด", add: "เพิ่มเป็นภาพอ้างอิงในแคนวาส", token: "โทเคนอ้างอิง", name: "ชื่อแอสเซ็ต", purpose: "การใช้งานแอสเซ็ต", assetType: "ประเภทแอสเซ็ต", scene: "Scene" }
+  }[props.locale];
   const [uploadType, setUploadType] = useState<Asset["type"]>("upload");
   const [brandFilter, setBrandFilter] = useState(props.activeBrand?.id ?? "all");
   useEffect(() => {
@@ -2200,14 +2473,14 @@ function AssetPanel(props: {
     <div className="rh-assets">
       <div className="rh-assets-toolbar">
         <label>
-          品牌
+          {copy.brand}
           <select value={brandFilter} onChange={(event) => setBrandFilter(event.target.value)}>
-            <option value="all">全部品牌</option>
+            <option value="all">{copy.allBrands}</option>
             {props.brands.map((brand) => <option value={brand.id} key={brand.id}>{brand.name}</option>)}
           </select>
         </label>
         <label>
-          类型
+          {copy.type}
           <select value={uploadType} onChange={(event) => setUploadType(event.target.value as Asset["type"])}>
             <option value="logo">Logo</option>
             <option value="product">Product</option>
@@ -2215,9 +2488,9 @@ function AssetPanel(props: {
             <option value="upload">Menu / Scene</option>
           </select>
         </label>
-        <label className="rh-upload-inline"><Upload />上传<input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && props.onUpload(event.target.files[0], uploadType, { brandId: uploadBrandId })} /></label>
+        <label className="rh-upload-inline"><Upload />{copy.upload}<input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && props.onUpload(event.target.files[0], uploadType, { brandId: uploadBrandId })} /></label>
       </div>
-      <button className="rh-primary-wide" type="button" onClick={props.onAddAssets} disabled={props.selection.length === 0}>加入当前画布参考 ({props.selection.length})</button>
+      <button className="rh-primary-wide" type="button" onClick={props.onAddAssets} disabled={props.selection.length === 0}>{copy.add} ({props.selection.length})</button>
       <div className="rh-asset-grid">
         {filteredAssets.map((asset) => (
           <article className={props.selection.includes(asset.id) ? "selected" : ""} key={asset.id}>
@@ -2230,20 +2503,20 @@ function AssetPanel(props: {
                   <button type="button" className="rh-asset-thumb" onClick={() => props.onSelect(asset.id)} style={asset.imageUrl ? { backgroundImage: `url(${asset.imageUrl})` } : { background: asset.color }}>
                     {!asset.imageUrl && <Image />}
                   </button>
-                  <input value={asset.title} onChange={(event) => props.onUpdate(asset.id, { title: event.target.value })} aria-label="素材名称" />
+                  <input value={asset.title} onChange={(event) => props.onUpdate(asset.id, { title: event.target.value })} aria-label={copy.name} />
                   <label className="rh-asset-token">
-                    引用标签
-                    <input value={displayToken} onChange={(event) => props.onUpdate(asset.id, { meta: updateAssetMetaToken(asset.meta, event.target.value) })} aria-label="素材引用标签" />
+                    {copy.token}
+                    <input value={displayToken} onChange={(event) => props.onUpdate(asset.id, { meta: updateAssetMetaToken(asset.meta, event.target.value) })} aria-label={copy.token} />
                   </label>
                 </>
               );
             })()}
-            <textarea value={asset.meta} onChange={(event) => props.onUpdate(asset.id, { meta: event.target.value })} aria-label="素材用途" />
-            <select value={asset.type} onChange={(event) => props.onUpdate(asset.id, { type: event.target.value as Asset["type"] })} aria-label="素材类型">
+            <textarea value={asset.meta} onChange={(event) => props.onUpdate(asset.id, { meta: event.target.value })} aria-label={copy.purpose} />
+            <select value={asset.type} onChange={(event) => props.onUpdate(asset.id, { type: event.target.value as Asset["type"] })} aria-label={copy.assetType}>
               <option value="logo">Logo</option>
               <option value="product">Product</option>
               <option value="model">IP / Model</option>
-              <option value="upload">Scene</option>
+              <option value="upload">{copy.scene}</option>
             </select>
             <div>
               {asset.imageUrl && <button type="button" onClick={() => downloadImage(asset.imageUrl, asset.title)}><Download /></button>}
@@ -2376,7 +2649,7 @@ function BrandPanel({
       <div className="rh-brand-assets">
         {brandAssets.filter((asset) => asset.imageUrl).map((asset) => (
           <article key={asset.id}>
-            <button type="button" className="rh-brand-asset-thumb" title={asset.title} style={{ backgroundImage: `url(${asset.imageUrl})` }} />
+            <span className="rh-brand-asset-thumb" title={asset.title} style={{ backgroundImage: `url(${asset.imageUrl})` }} />
             <div className="rh-brand-asset-fields">
               <code>{assetReferenceToken(asset, brand)}</code>
               <input value={assetReferenceToken(asset, brand)} onChange={(event) => onUpdateAsset(asset.id, { meta: updateAssetMetaToken(asset.meta, event.target.value) })} aria-label="品牌素材引用标签" />
@@ -2435,10 +2708,10 @@ function TutorialPanel({ locale }: { locale: Locale }) {
   return (
     <div className="rh-panel-list rh-tutorial-panel">
       {lessons.map(([title, copy]) => (
-        <button type="button" key={title}>
+        <article key={title}>
           <HelpCircle />
           <div><strong>{title}</strong><small>{copy}</small></div>
-        </button>
+        </article>
       ))}
       <section className="rh-cal-cheatsheet">
         {i18n[locale].login.syntax.map(([token, body]) => (
@@ -2455,6 +2728,7 @@ function TutorialPanel({ locale }: { locale: Locale }) {
 function Canvas(props: {
   frame?: Frame;
   assets: Asset[];
+  brands: Brand[];
   activeBrand?: Brand;
   model?: ModelOption;
   models: ModelOption[];
@@ -2796,7 +3070,78 @@ function Canvas(props: {
 
   const edges = graphEdges(visibleNodes);
   const outputNodes = visibleNodes.filter((node) => node.type === "output");
+  const videoOutput = props.frame?.outputs.find((output) => output.kind === "video");
   const refs = nodes.find((node) => node.id === "input-image")?.refs ?? [];
+  const explicitBrandNames = referencedBrandNames(props.frame?.prompt ?? "", props.brands);
+  const canvasCopy = {
+    zh: {
+      projectBrand: "项目品牌",
+      autoInject: "自动注入",
+      explicitOnly: "仅显式引用",
+      noBoundBrand: "无绑定品牌",
+      explicitRefs: "显式引用",
+      ready: "Ready",
+      hint: "拖动画布 · 滚轮缩放 · 点击节点编辑",
+      selectionTitle: "元素选择模式",
+      selectionMedia: "点击图片预览，底部编辑生成参数",
+      selectionEdit: "底部固定面板可编辑当前节点",
+      runWorkflow: "运行工作流",
+      returnNode: "返回节点",
+      exit: "退出",
+      emptyTitle: "空画布",
+      emptyBody: "从底部输入一句话生成工作流，或先放入图片、文本、视频节点。无品牌项目不会自动注入 XMANX。",
+      image: "图片",
+      text: "文本",
+      video: "视频"
+    },
+    en: {
+      projectBrand: "Project brand",
+      autoInject: "auto inject",
+      explicitOnly: "explicit refs only",
+      noBoundBrand: "No bound brand",
+      explicitRefs: "explicit refs",
+      ready: "Ready",
+      hint: "Drag canvas · scroll to zoom · click nodes to edit",
+      selectionTitle: "Element selection mode",
+      selectionMedia: "Click images to preview; edit generation settings in the bottom panel",
+      selectionEdit: "Edit the selected node in the fixed bottom panel",
+      runWorkflow: "Run workflow",
+      returnNode: "Return to node",
+      exit: "Exit",
+      emptyTitle: "Empty canvas",
+      emptyBody: "Type one sentence in the bottom composer to generate a workflow, or add image, text, and video nodes first. No-brand projects never auto-inject XMANX.",
+      image: "Image",
+      text: "Text",
+      video: "Video"
+    },
+    th: {
+      projectBrand: "แบรนด์ของโปรเจกต์",
+      autoInject: "ใส่แบรนด์อัตโนมัติ",
+      explicitOnly: "ใช้เฉพาะที่อ้างอิง",
+      noBoundBrand: "ยังไม่ผูกแบรนด์",
+      explicitRefs: "อ้างอิงแบบระบุ",
+      ready: "Ready",
+      hint: "ลากแคนวาส · เลื่อนเพื่อซูม · คลิกโหนดเพื่อแก้ไข",
+      selectionTitle: "โหมดเลือกองค์ประกอบ",
+      selectionMedia: "คลิกรูปเพื่อพรีวิว แล้วแก้ค่าการสร้างที่แผงล่าง",
+      selectionEdit: "แก้ไขโหนดที่เลือกในแผงล่าง",
+      runWorkflow: "รันเวิร์กโฟลว์",
+      returnNode: "กลับไปที่โหนด",
+      exit: "ออก",
+      emptyTitle: "แคนวาสเปล่า",
+      emptyBody: "พิมพ์หนึ่งประโยคด้านล่างเพื่อสร้างเวิร์กโฟลว์ หรือเพิ่มโหนดรูปภาพ ข้อความ และวิดีโอก่อน โปรเจกต์ไม่มีแบรนด์จะไม่ใส่ XMANX อัตโนมัติ",
+      image: "Image",
+      text: "Text",
+      video: "Video"
+    }
+  }[props.locale];
+  const projectBrandStatus = props.frame?.status === "generating"
+    ? generationStatusText(props.frame)
+    : props.frame?.brandId
+      ? `${canvasCopy.projectBrand}: ${props.frame.brandName || props.activeBrand?.name || "Brand"} · ${props.frame.settings?.brandInject ? canvasCopy.autoInject : canvasCopy.explicitOnly} · ${canvasCopy.ready}`
+      : explicitBrandNames.length
+        ? `${canvasCopy.noBoundBrand} · ${canvasCopy.explicitRefs}: ${explicitBrandNames.join(" / ")} · ${canvasCopy.ready}`
+        : `${canvasCopy.noBoundBrand} · ${canvasCopy.explicitOnly} · ${canvasCopy.ready}`;
   const worldSize = useMemo(() => {
     const maxX = Math.max(2200, ...visibleNodes.map((node) => (node.x ?? 0) + (node.w ?? 230) + 180));
     const maxY = Math.max(900, ...visibleNodes.map((node) => (node.y ?? 0) + (node.h ?? 238) + 180));
@@ -2885,32 +3230,32 @@ function Canvas(props: {
       }}
     >
       <div className="rh-grid" />
-      <div className="rh-canvas-hint"><MousePointer2 />拖动画布 · 滚轮缩放 · 点击节点编辑</div>
+      <div className="rh-canvas-hint"><MousePointer2 />{canvasCopy.hint}</div>
       {activeSelectedNode && (
         <div className="rh-selection-pill">
           <Wand2 />
-          <div><strong>元素选择模式</strong><small>{activeSelectedNode.type === "reference" || activeSelectedNode.type === "image" || activeSelectedNode.type === "output" ? "点击图片预览，底部编辑生成参数" : "底部固定面板可编辑当前节点"}</small></div>
-          <button type="button" className="primary" onClick={props.onRunWorkflow} disabled={props.frame?.status === "generating"} title="运行当前画布工作流"><Play />运行工作流</button>
-          <button type="button" onClick={() => props.setEditingNodeId(activeSelectedNode.id)}><Route />返回节点</button>
-          <button type="button" onClick={closeNodeEditor}><X />退出</button>
+          <div><strong>{canvasCopy.selectionTitle}</strong><small>{activeSelectedNode.type === "reference" || activeSelectedNode.type === "image" || activeSelectedNode.type === "output" ? canvasCopy.selectionMedia : canvasCopy.selectionEdit}</small></div>
+          <button type="button" className="primary" onClick={props.onRunWorkflow} disabled={props.frame?.status === "generating"} title={canvasCopy.runWorkflow}><Play />{canvasCopy.runWorkflow}</button>
+          <button type="button" onClick={() => props.setEditingNodeId(activeSelectedNode.id)}><Route />{canvasCopy.returnNode}</button>
+          <button type="button" onClick={closeNodeEditor}><X />{canvasCopy.exit}</button>
         </div>
       )}
       <section className="rh-world" style={{ transform: `translate(${props.viewport.x}px, ${props.viewport.y}px) scale(${props.viewport.scale})` }}>
         {props.frame && (
           <div className="rh-project-title">
             <strong>{props.frame.title}</strong>
-            <small>{props.frame.status === "generating" ? generationStatusText(props.frame) : `品牌: ${props.frame.brandName || props.activeBrand?.name || "无"} · ${props.frame.settings?.brandInject ? "自动注入" : "仅显式引用"} · Ready`}</small>
+            <small>{projectBrandStatus}</small>
           </div>
         )}
         {props.frame && visibleNodes.length === 0 && (
           <div className="rh-canvas-empty">
             <Sparkles />
-            <strong>空画布</strong>
-            <small>从底部输入一句话生成工作流，或先放入图片、文本、视频节点。无品牌项目不会自动注入 XMANX。</small>
+            <strong>{canvasCopy.emptyTitle}</strong>
+            <small>{canvasCopy.emptyBody}</small>
             <div>
-              <button type="button" onClick={() => addCanvasNode("reference", 140, 210)}><ImagePlus />图片</button>
-              <button type="button" onClick={() => addCanvasNode("process", 140, 210)}><List />文本</button>
-              <button type="button" onClick={() => addCanvasNode("video", 140, 210)}><Play />视频</button>
+              <button type="button" onClick={() => addCanvasNode("reference", 140, 210)}><ImagePlus />{canvasCopy.image}</button>
+              <button type="button" onClick={() => addCanvasNode("process", 140, 210)}><List />{canvasCopy.text}</button>
+              <button type="button" onClick={() => addCanvasNode("video", 140, 210)}><Play />{canvasCopy.video}</button>
             </div>
           </div>
         )}
@@ -2951,7 +3296,7 @@ function Canvas(props: {
                 <button type="button" onClick={() => addNode(node.id, "reference")}><ImagePlus />图片</button>
                 <button type="button" onClick={() => addNode(node.id, "video")}><Play />视频</button>
                 <button type="button" onClick={() => addNode(node.id, "compose")}><Scissors />视频合成 <small>Beta</small></button>
-                <button type="button" onClick={() => addNode(node.id, "audio")}><Music2 />音频/配乐</button>
+                <button type="button" onClick={() => addNode(node.id, "audio")}><Music2 />音频配置</button>
                 <button type="button" onClick={() => addNode(node.id, "script")}><Sparkles />脚本 <small>Beta</small></button>
                 <strong>添加资源</strong>
                 <label>
@@ -2983,7 +3328,7 @@ function Canvas(props: {
           <NodeCard
             key={node.id}
             node={node.type === "model" ? { ...node, body: props.model?.name ?? "@imgen · image skill" } : node}
-            output={node.type === "output" ? outputForNode(props.frame, outputNodes, node.id) : undefined}
+            output={node.type === "output" ? outputForNode(props.frame, outputNodes, node.id) : (node.type === "video" || node.type === "compose") ? videoOutput : undefined}
             refs={node.id === "input-image" ? refs : node.refs ?? []}
             selected={selectedNode === node.id || props.editingNodeId === node.id}
             generationProgress={nodeGeneration?.nodeId === node.id ? nodeGeneration.progress : undefined}
@@ -3015,7 +3360,7 @@ function Canvas(props: {
           <button type="button" onClick={() => addCanvasNode("reference", canvasMenu.worldX, canvasMenu.worldY)}><ImagePlus />添加图片节点</button>
           <button type="button" onClick={() => addCanvasNode("video", canvasMenu.worldX, canvasMenu.worldY)}><Play />添加视频节点</button>
           <button type="button" onClick={() => addCanvasNode("compose", canvasMenu.worldX, canvasMenu.worldY)}><Scissors />视频合成 <small>Beta</small></button>
-          <button type="button" onClick={() => addCanvasNode("audio", canvasMenu.worldX, canvasMenu.worldY)}><Music2 />添加音频/配乐</button>
+          <button type="button" onClick={() => addCanvasNode("audio", canvasMenu.worldX, canvasMenu.worldY)}><Music2 />添加音频配置</button>
           <button type="button" onClick={() => addCanvasNode("script", canvasMenu.worldX, canvasMenu.worldY)}><Sparkles />添加脚本 <small>Beta</small></button>
           <strong>添加资源</strong>
           <label><Upload />上传图片<input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImageAt(file, canvasMenu.worldX, canvasMenu.worldY); event.currentTarget.value = ""; }} /></label>
@@ -3056,7 +3401,13 @@ function Canvas(props: {
             frameSettings={props.frame?.settings ?? defaultSettings}
             framePrompt={props.frame?.prompt ?? ""}
             locale={props.locale}
-            output={nodes.find((node) => node.id === props.editingNodeId)?.type === "output" && props.editingNodeId ? outputForNode(props.frame, outputNodes, props.editingNodeId) : undefined}
+            output={(() => {
+              const editingNode = nodes.find((node) => node.id === props.editingNodeId);
+              if (!editingNode || !props.editingNodeId) return undefined;
+              if (editingNode.type === "output") return outputForNode(props.frame, outputNodes, props.editingNodeId);
+              if (editingNode.type === "video" || editingNode.type === "compose") return videoOutput;
+              return undefined;
+            })()}
             onClose={closeNodeEditor}
             onSave={(patch) => props.editingNodeId && saveNode(props.editingNodeId, patch)}
             onGenerate={(nodePrompt, modelId, settings) => {
@@ -3139,6 +3490,11 @@ function NodeCard(props: {
     ? (nodeVideoUrl ? nodePosterUrl : undefined)
     : props.output?.imageUrl ?? firstRef?.imageUrl;
   const title = props.output?.title ?? firstRef?.title ?? props.node.title;
+  const visualLabel = props.node.type === "output"
+    ? (isVideoOutput ? nodeVideoUrl ? "MP4 已生成" : nodeVideoId ? "MP4 生成中" : "空输出" : imageUrl ? "预览输出" : "空输出")
+    : props.refs.length
+      ? `${firstRef?.title ?? props.refs[0]?.title ?? props.node.title}${props.refs.length > 1 ? ` · ${props.refs.length} refs` : ""}`
+      : "添加图片";
   const canPreview = isVideoOutput ? Boolean(nodeVideoUrl) : Boolean(imageUrl);
   const downloadUrl = props.output?.kind === "document"
     ? props.output.fileUrl
@@ -3147,6 +3503,14 @@ function NodeCard(props: {
       : imageUrl;
   const downloadExt = props.output?.kind === "document" ? "pdf" : props.output?.kind === "video" ? "mp4" : "png";
   const downloadTitle = props.output?.title ?? title;
+  const outputActionLabel = isOutputNode
+    ? props.output?.kind === "video"
+      ? nodeVideoUrl ? "重生成" : nodeVideoId ? "查看任务" : "生成MP4"
+      : props.output?.kind === "document"
+        ? props.output.fileUrl ? "查看PDF" : "生成PDF"
+        : imageUrl ? "重生成" : "生成图片"
+    : "编辑";
+  const videoActionLabel = nodeVideoUrl ? "重生成" : nodeVideoId ? "查看任务" : "生成";
   return (
     <article
       className={`rh-node ${props.node.type} ${props.selected ? "selected" : ""}`}
@@ -3170,10 +3534,10 @@ function NodeCard(props: {
           style={imageUrl ? { backgroundImage: `url(${imageUrl})` } : { background: `linear-gradient(135deg, ${props.node.preview ?? "#f97316"}, #10131a)` }}
         >
           {!imageUrl && <Image />}
-          <span>{props.node.type === "output" ? (isVideoOutput ? nodeVideoUrl ? "MP4 ready" : nodeVideoId ? "MP4 pending" : "Empty output" : imageUrl ? "Preview output" : "Empty output") : props.refs.length ? `${props.refs.length} refs` : "Add image"}</span>
+          <span>{visualLabel}</span>
           {typeof props.generationProgress === "number" && <div className="rh-node-generating"><b>生成中 {props.generationProgress}%</b><i><em style={{ width: `${props.generationProgress}%` }} /></i></div>}
           <div className="rh-image-node-actions" onClick={(event) => event.stopPropagation()}>
-            <button type="button" className="primary-action" title="编辑/生成" onClick={props.onEdit}><Wand2 /><span>{props.node.type === "output" ? "生成" : "编辑"}</span></button>
+            <button type="button" className="primary-action" title="打开节点面板" onClick={props.onEdit}><Wand2 /><span>{outputActionLabel}</span></button>
             <button type="button" title="预览" onClick={() => canPreview && props.onPreview({ title, subtitle: props.output?.copy ?? props.node.body, imageUrl, videoUrl: nodeVideoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!canPreview}><Expand /></button>
             <button type="button" title={props.output?.kind === "document" ? "下载PDF" : props.output?.kind === "video" ? "下载MP4" : "下载图片"} onClick={() => downloadFile(downloadUrl, downloadTitle, downloadExt)} disabled={!downloadUrl}><Download /></button>
           </div>
@@ -3227,7 +3591,7 @@ function NodeCard(props: {
             <em>{executionSummary.chips.length ? executionSummary.chips.join(" · ") : "模型固定 10s"}</em>
           </div>
           <div className="rh-image-node-actions" onClick={(event) => event.stopPropagation()}>
-            <button type="button" className="primary-action" title="编辑/生成" onClick={props.onEdit}><Wand2 /><span>生成</span></button>
+            <button type="button" className="primary-action" title="打开视频节点面板" onClick={props.onEdit}><Wand2 /><span>{videoActionLabel}</span></button>
             <button type="button" title="预览" onClick={() => nodeVideoUrl && props.onPreview({ title, subtitle: props.node.body, imageUrl: nodePosterUrl, videoUrl: nodeVideoUrl, color: props.node.preview, nodeId: props.node.id })} disabled={!nodeVideoUrl}><Expand /></button>
             <button type="button" title="下载MP4" onClick={() => downloadFile(nodeVideoUrl, downloadTitle, "mp4")} disabled={!nodeVideoUrl}><Download /></button>
           </div>
@@ -3244,7 +3608,7 @@ function NodeCard(props: {
       ) : props.node.type === "audio" ? (
         <button type="button" className="rh-audio-tile" onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
           <Music2 />
-          <span>{props.node.body || "添加音频提示词或连接视频节点"}</span>
+          <span>{props.node.body || "添加音频配置提示词或连接视频节点"}</span>
         </button>
       ) : props.node.type === "brand" || props.node.type === "prompt" ? (
         <button type="button" className="rh-context-tile" onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
@@ -3400,7 +3764,7 @@ function NodeEditor({
   const currentVideoPoster = draft.imageUrl ?? output?.imageUrl;
   const canGenerateImage = draft.type === "image" || draft.type === "reference" || (draft.type === "output" && !isVideoOutput && !isDocumentOutput);
   const promptPlaceholder = promptTemplateForNode(draft.type, output?.kind);
-  const mentionItems = buildMentionItems(activeBrand, assets);
+  const mentionItems = buildMentionItems(activeBrand, assets, [], locale);
   const activeDraftQuery = activeReferenceQuery(draft.body);
   const filteredDraftMentionItems = filterMentionItems(mentionItems, draft.body);
 
@@ -3558,7 +3922,7 @@ function NodeEditor({
       const result = await api.post<TransformTextResponse>("/ai/transform-text", {
         text: currentDraft.body,
         action,
-        brandId: activeBrand?.id,
+        brandId: activeBrand?.id ?? null,
         model: textModel,
         contentLanguage,
         outputTarget: draft.type === "video" || isVideoOutput ? "mp4" : isDocumentOutput ? "pdf" : "jpg",
@@ -3579,10 +3943,7 @@ function NodeEditor({
     return (
       <aside className="rh-node-editor rh-image-editor" onPointerDown={(event) => event.stopPropagation()}>
         <div className="rh-image-editor-toolbar">
-          <button type="button" title="风格"><Box /><span>风格</span></button>
           <button type="button" title="优化 CAL" onClick={() => void handleTransformDraft("optimize")}><Sparkles /><span>优化</span></button>
-          <button type="button" title="聚焦"><Camera /><span>聚焦</span></button>
-          <button type="button" className="active" title="列表"><Layers3 /><b>1</b></button>
           <button type="button" className="rh-regenerate-primary" title={imageUrl ? "不满意时重新调用 @imgen 生成当前节点图片" : "调用 @imgen 生成图片"} onClick={() => void handleGenerate()} disabled={generating || !imagePromptReady}>
             {generating ? <Loader2 className="spin" /> : <Play />}
             <span>{imageUrl ? "重新生成图片" : "生成图片"}</span>
@@ -3626,7 +3987,6 @@ function NodeEditor({
           <select value={imageRatio} onChange={(event) => setImageRatio(event.target.value)}>
             <option>1:1</option><option>3:4</option><option>4:5</option><option>9:16</option><option>16:9</option>
           </select>
-          <button type="button"><Camera />摄像机</button>
           <span />
           <button type="button" title="调用文本模型翻译" onClick={() => void handleTransformDraft("translate")}><Languages /></button>
           <select value={imageQuality} onChange={(event) => setImageQuality(event.target.value as GenerationSettings["quality"])} title="质量">
@@ -3843,9 +4203,7 @@ function NodeEditor({
           <button type="button" className="ghost" title="关闭" onClick={onClose}><X /></button>
         </div>
         <div className="rh-audio-editor-toolbar">
-          <button type="button"><Music2 />情绪</button>
-          <button type="button"><Volume2 />节奏</button>
-          <button type="button"><Layers3 />引用</button>
+          <span><Music2 />当前音频只生成可编辑配置，真实音频 Skill 接入后再开放执行</span>
         </div>
         <input className="rh-audio-node-title" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} onBlur={() => onSave({ title: draft.title })} />
         <textarea
@@ -3997,10 +4355,7 @@ function NodeEditor({
           <button type="button" className="ghost" title="关闭" onClick={onClose}><X /></button>
         </div>
         <div className="rh-video-editor-toolbar">
-          <button type="button"><Sparkles />标记</button>
-          <button type="button"><Camera />运镜</button>
-          <button type="button"><Layers3 />角色库</button>
-          <button type="button" className="active"><Layers3 /><b>1</b></button>
+          <span><Layers3 />视频会先生成分镜/关键帧，再提交图生视频模型</span>
         </div>
         <input className="rh-video-node-title" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} onBlur={() => onSave({ title: draft.title })} />
         <textarea
@@ -4040,8 +4395,6 @@ function NodeEditor({
           <span />
           <button type="button" onClick={() => void handleTransformDraft("optimize")} title="优化 CAL"><Wand2 /></button>
           <button type="button" className={translateVideo ? "active" : ""} onClick={() => void handleTransformDraft("translate")} title="调用文本模型翻译"><Languages /></button>
-          <button type="button" title="参数"><SlidersHorizontal /></button>
-          <button type="button">1个</button>
           <small>♦ 135</small>
           {currentVideoUrl && <button type="button" onClick={() => downloadFile(currentVideoUrl, draft.title, "mp4")}><ArrowDownToLine />下载MP4</button>}
           {currentVideoUrl && <button type="button" onClick={() => onPreview({ title: draft.title, subtitle: draft.body, imageUrl: currentVideoPoster, videoUrl: currentVideoUrl, color: draft.preview, nodeId: draft.id })}><Expand />预览</button>}
@@ -4177,16 +4530,19 @@ function BottomComposer(props: {
   const isUsingFramePrompt = !props.prompt.trim() && Boolean(props.frame?.prompt?.trim());
   function applyPresetToCal(text: string) {
     const clean = text.replace(/\s+用途:[^-\n]+(?=\s->|$)/, "").replace(/\s+尺寸:[^-\n]+(?=\s->|$)/, "");
-    const marker = `用途: ${currentPreset.label} 尺寸: ${currentPreset.size}`;
+    const marker = `用途: ${workflowPresetLabel(currentPreset, props.locale)} 尺寸: ${currentPreset.size}`;
     return clean.includes("->") ? clean.replace(/\s*->\s*/, ` ${marker} -> `) : `${clean} ${marker}`;
   }
-  const mentionItems = buildMentionItems(props.activeBrand, props.assets, props.brands);
+  const mentionItems = buildMentionItems(props.activeBrand, props.assets, props.brands, props.locale);
   const referencePreview = buildPromptReferencePreview(props.prompt, mentionItems);
   const filteredMentionItems = filterMentionItems(mentionItems, props.prompt).slice(0, 10);
   const activeQuery = activeReferenceQuery(props.prompt);
   const selectedBrandName = props.frame?.brandId
     ? props.brands.find((brand) => brand.id === props.frame?.brandId)?.name ?? props.activeBrand?.name ?? "Brand"
     : "无品牌";
+  const brandInjectionTitle = props.frame?.brandId
+    ? `${t.projectBrand}: ${selectedBrandName}. ${settings.brandInject ? t.brandInjectFull : t.brandExplicitOnly}`
+    : t.noProjectBrand;
   const hasPrompt = Boolean(effectivePrompt);
   const isGenerating = props.frame?.status === "generating";
   const generateBlockReason = !hasPrompt
@@ -4222,7 +4578,7 @@ function BottomComposer(props: {
       const result = await api.post<{ text: string }>("/ai/transform-text", {
         text: props.prompt,
         action: "optimize",
-        brandId: props.frame?.brandId || props.activeBrand?.id,
+        brandId: props.frame?.brandId || null,
         model: props.model?.model ?? props.model?.id,
         outputTarget,
         orientation,
@@ -4273,9 +4629,9 @@ function BottomComposer(props: {
       <div className="rh-composer-row">
         {workflowMode && <span className="rh-workflow-pill"><Route />CAL</span>}
         <select value={props.model?.id ?? "imgen-skill"} onChange={(event) => props.onUpdateFrame({ modelId: event.target.value })}>
-          {props.models.filter((item) => item.type === "image").map((item) => <option value={item.id} key={item.id}>{modelOptionLabel(item)}</option>)}
+          {props.models.filter((item) => item.type === "image").map((item) => <option value={item.id} key={item.id}>{modelOptionLabel(item, props.locale)}</option>)}
         </select>
-        <select className="rh-brand-select" value={props.frame?.brandId ?? ""} onChange={(event) => updateProjectBrand(event.target.value)} title="项目品牌">
+        <select className="rh-brand-select" value={props.frame?.brandId ?? ""} onChange={(event) => updateProjectBrand(event.target.value)} title={t.projectBrand}>
           <option value="">{t.brandNone}</option>
           {props.brands.map((brand) => <option value={brand.id} key={brand.id}>{brand.name}</option>)}
         </select>
@@ -4284,7 +4640,7 @@ function BottomComposer(props: {
           className={`rh-brand-inject ${settings.brandInject ? "active" : ""}`}
           onClick={() => updateBrandInject(!settings.brandInject)}
           disabled={!props.frame?.brandId}
-          title={props.frame?.brandId ? `项目品牌：${selectedBrandName}。${settings.brandInject ? "生成时自动注入完整品牌上下文" : "只使用提示词里显式 $ 引用的品牌素材"}` : "未绑定项目品牌"}
+          title={brandInjectionTitle}
         >
           <Palette />{settings.brandInject ? t.injectOn : t.injectOff}
         </button>
@@ -4296,10 +4652,10 @@ function BottomComposer(props: {
           <option value="png">PNG</option>
           <option value="pdf">PDF</option>
           <option value="mp4">MP4</option>
-          <option value="kit">套装</option>
+          <option value="kit">{t.kit}</option>
         </select>
         <select className="rh-preset-select" value={currentPreset.id} onChange={(event) => updatePreset(event.target.value as WorkflowPresetId)} title={t.preset}>
-          {presetOptions.map((preset) => <option value={preset.id} key={preset.id}>{preset.label} · {preset.size}</option>)}
+          {presetOptions.map((preset) => <option value={preset.id} key={preset.id}>{workflowPresetLabel(preset, props.locale)} · {preset.size}</option>)}
         </select>
         <button type="button" className="rh-optimize" onClick={() => void optimizeCurrentPrompt()} disabled={optimizing || !props.prompt.trim()} title="CAL"><Wand2 />{optimizing ? t.optimizing : t.optimize}</button>
         <button type="button" className="rh-advanced-toggle" onClick={() => setAdvancedOpen((value) => !value)} title={t.advanced}><SlidersHorizontal /></button>
@@ -4307,7 +4663,7 @@ function BottomComposer(props: {
       </div>
       {advancedOpen && (
         <div className="rh-composer-advanced">
-          <span>{currentPreset.note} · {currentPreset.size} · {t.contentLanguage}: {contentLanguageLabel(settings.contentLanguage, props.locale)}</span>
+          <span>{workflowPresetNote(currentPreset, props.locale)} · {currentPreset.size} · {t.contentLanguage}: {contentLanguageLabel(settings.contentLanguage, props.locale)}</span>
           <label className="rh-composer-size">{t.width}<input type="number" min={256} max={4096} step={8} value={settings.width || dimensionsFromPreset(currentPreset).width} onChange={(event) => updateSetting("width", Number(event.target.value))} /></label>
           <label className="rh-composer-size">{t.height}<input type="number" min={256} max={4096} step={8} value={settings.height || dimensionsFromPreset(currentPreset).height} onChange={(event) => updateSetting("height", Number(event.target.value))} /></label>
           <select value={settings.quality} onChange={(event) => updateSetting("quality", event.target.value as GenerationSettings["quality"])}><option value="standard">standard</option><option value="hd">hd</option><option value="ultra">ultra</option></select>
@@ -4327,9 +4683,9 @@ function BottomComposer(props: {
             : props.frame?.outputs?.some((output) => output.imageUrl)
               ? t.generatedOnCanvas
             : props.aiDiagnostics?.runtime.helpOk
-              ? props.aiDiagnostics.runtime.canAttemptGeneration ? t.ready : "Skill runtime ok · key missing"
+              ? props.aiDiagnostics.runtime.canAttemptGeneration ? t.ready : t.runtimeKeyMissing
             : props.aiStatus?.imageGeneration.configured
-              ? `Skill ready · ${props.aiStatus.imageGeneration.keySource}`
+              ? `${t.skillReady} · ${props.aiStatus.imageGeneration.keySource}`
               : t.keyMissing}
         </span>
         <i><b style={{ width: `${props.frame?.progress ?? 0}%` }} /></i>
@@ -4338,7 +4694,18 @@ function BottomComposer(props: {
   );
 }
 
-function ImagePreview({ preview, onClose, onSaveAsset }: { preview: PreviewTarget; onClose: () => void; onSaveAsset: (preview: PreviewTarget) => void }) {
+function ImagePreview({
+  preview,
+  onClose,
+  onInsert,
+  onSaveAsset
+}: {
+  preview: PreviewTarget;
+  onClose: () => void;
+  onInsert: (preview: PreviewTarget, position: "before" | "after") => void;
+  onSaveAsset: (preview: PreviewTarget) => void;
+}) {
+  const canInsert = Boolean(preview.imageUrl || preview.videoUrl);
   return (
     <div className="rh-preview-backdrop" onClick={onClose}>
       <section className="rh-preview" onClick={(event) => event.stopPropagation()}>
@@ -4352,8 +4719,8 @@ function ImagePreview({ preview, onClose, onSaveAsset }: { preview: PreviewTarge
           <div className="rh-preview-image" style={preview.imageUrl ? { backgroundImage: `url(${preview.imageUrl})` } : { background: preview.color ?? "#111827" }}>{!preview.imageUrl && <Image />}</div>
         )}
         <div className="rh-preview-actions">
-          <button type="button" disabled><ChevronLeft />前插</button>
-          <button type="button" disabled><Plus />后插</button>
+          <button type="button" onClick={() => onInsert(preview, "before")} disabled={!canInsert}><ChevronLeft />插到前面</button>
+          <button type="button" onClick={() => onInsert(preview, "after")} disabled={!canInsert}><Plus />接到后面</button>
           <button type="button" onClick={() => preview.videoUrl ? downloadFile(preview.videoUrl, preview.title, "mp4") : downloadImage(preview.imageUrl, preview.title)} disabled={!preview.imageUrl && !preview.videoUrl}><ArrowDownToLine />下载</button>
           <button type="button" onClick={() => { onSaveAsset(preview); onClose(); }} disabled={!preview.imageUrl || Boolean(preview.videoUrl)}><Upload />保存到素材</button>
         </div>

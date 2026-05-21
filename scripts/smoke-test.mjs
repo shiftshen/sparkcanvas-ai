@@ -268,18 +268,32 @@ try {
     method: "POST",
     body: JSON.stringify({ title: "DAPOT Buffet Menu 299 399 499", type: "upload", brandId: dapotBrand.id, color: "#E60012", meta: "$menu.buffet · self-service buffet menu sets 299 399 499 drinks desserts sauce station", imageUrl: "/brand-assets/generated/xmanx-product.png" })
   });
+  await request("/assets", {
+    method: "POST",
+    body: JSON.stringify({ title: "DAPOT Custom Sauce Station", type: "upload", brandId: dapotBrand.id, color: "#FFB400", meta: "$dapot.special_sauce · custom edited qualified tag", imageUrl: "/brand-assets/generated/xmanx-storefront.png" })
+  });
   const dapotRefs = await request("/ai/resolve-references", {
     method: "POST",
     body: JSON.stringify({
-      prompt: "@imgen /生成海报 使用 $dapot $dapot.logo $dapot.ip $dapot.product $dapot.menu.buffet，显示 $copy.slogan -> JPG",
+      prompt: "@imgen /生成海报 使用 $dapot $dapot.logo $dapot.ip $dapot.product $dapot.menu.buffet $dapot.special_sauce，显示 $copy.slogan -> JPG",
       brandId: dapotBrand.id,
       brandInject: true
     })
   });
   assert(dapotRefs.brandKey === "dapot", "brand key should prefer brand name over market first word");
   assert(["logo", "ip", "product", "menu"].every((role) => dapotRefs.imageReferences.some((reference) => reference.role === role && reference.imageUrl)), "$dapot.* references should resolve to real DAPOT logo/IP/product/menu image assets");
+  assert(dapotRefs.imageReferences.some((reference) => reference.title === "DAPOT Custom Sauce Station"), "custom qualified asset tags like $dapot.special_sauce should resolve to the edited asset meta token");
   assert(dapotRefs.finalPrompt.includes("Eat the World in One Hot Pot") && dapotRefs.finalPrompt.includes("DAPOT"), "DAPOT resolved prompt should include brand text context");
   assert(dapotRefs.warnings.length === 0, `DAPOT CAL references should resolve without warnings: ${dapotRefs.warnings.join("; ")}`);
+  const ratioParamRefs = await request("/ai/resolve-references", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "@imgen /生成视频 使用 $dapot.logo，为 DAPOT 生成 20 秒 9:16 促销短视频 语言: Thai -> mp4",
+      brandId: dapotBrand.id,
+      brandInject: false
+    })
+  });
+  assert(!("9" in ratioParamRefs.params) && ratioParamRefs.params["语言"] === "Thai", "CAL parser should keep language params but not misread 9:16 aspect ratio as a numeric parameter");
 
   const asset = await request("/assets", {
     method: "POST",
@@ -367,6 +381,35 @@ try {
     })
   });
   assert(prefixRefs.prompt.includes("参考图片") && prefixRefs.prompt.includes("$logo.hero"), "CAL token replacement should not let $logo corrupt $logo.hero");
+  const unbrandedRefs = await request("/ai/resolve-references", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "参考 $logo 生成一张无品牌测试图",
+      brandId: null,
+      brandInject: false
+    })
+  });
+  assert(unbrandedRefs.brandId === "" && unbrandedRefs.imageReferences.length === 0 && unbrandedRefs.warnings.some((warning) => warning.includes("当前项目未绑定品牌")), "brandId null should not fall back to the active brand for unqualified $ refs");
+  const unbrandedOptimized = await request("/ai/transform-text", {
+    method: "POST",
+    body: JSON.stringify({
+      text: "马",
+      action: "optimize",
+      brandId: null,
+      outputTarget: "jpg",
+      contentLanguage: "none"
+    })
+  });
+  assert(!/XMANX|xmanx|AI launch kit/i.test(unbrandedOptimized.text), "brandId null prompt optimization should stay prompt-only and not inject the active brand");
+  const explicitUnbrandedRefs = await request("/ai/resolve-references", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "参考 $xmanx.logo 生成一张跨品牌测试图",
+      brandId: null,
+      brandInject: false
+    })
+  });
+  assert(explicitUnbrandedRefs.imageReferences.some((reference) => reference.role === "logo" && reference.imageUrl), "brandId null should still resolve explicit cross-brand $brand.asset refs");
   const storefrontRefs = await request("/ai/resolve-references", {
     method: "POST",
     body: JSON.stringify({
@@ -394,6 +437,11 @@ try {
     body: JSON.stringify({ brandId: brand.id })
   });
   assert(emptyFrame.workflowNodes.length === 0 && emptyFrame.outputs.length === 0 && emptyFrame.prompt === "", "new canvas should start from a truly empty frame");
+  const unbrandedEmptyFrame = await request("/canvas/frames", {
+    method: "POST",
+    body: JSON.stringify({ title: "Unbranded Empty Canvas" })
+  });
+  assert(unbrandedEmptyFrame.brandId === "" && unbrandedEmptyFrame.brandName === "无品牌" && unbrandedEmptyFrame.workflowNodes.length === 0, "new canvas without an explicit brand should stay unbranded and empty");
   const emptyFrameSettings = await request(`/canvas/frames/${emptyFrame.id}`, {
     method: "PATCH",
     body: JSON.stringify({ settings: { ratio: "4:5", count: 1, quality: "hd", strength: 72, brandInject: true, contentLanguage: "zh-th" } })
@@ -812,7 +860,19 @@ try {
       body: JSON.stringify({ prompt: "用历史生成视频裁切合并 5 秒成片", settings: { duration: "5s", ratio: "16:9 · 720P", contentLanguage: "zh-en", transition: "硬切", audioMode: "统一混音" } })
     });
     assert(mergedComposeNode.mergedUrl?.startsWith("/generated/") && mergedComposeNode.composePlan.includes("已用 ffmpeg 完成裁切/合成"), "compose node should trim and merge historical generated MP4 files into a final local MP4");
+    const staleStatusOutputs = longVideoCompleted.frame.outputs.map((output) => output.kind === "video"
+      ? { ...output, videoUrl: smokeVideoA, copy: `${output.copy} · 本地 MP4 文件无有效视频内容，已恢复为等待状态。` }
+      : output);
+    await request(`/canvas/frames/${longVideoCompleted.frame.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ outputs: staleStatusOutputs })
+    });
+    const cleanedVideoWorkspace = await request("/workspace");
+    const cleanedVideoFrame = cleanedVideoWorkspace.frames.find((frame) => frame.id === longVideoCompleted.frame.id);
+    const cleanedVideoOutput = cleanedVideoFrame.outputs.find((output) => output.kind === "video");
+    assert(cleanedVideoOutput?.videoUrl === smokeVideoA && !cleanedVideoOutput.copy.includes("本地 MP4 文件无有效视频内容"), "valid local MP4 outputs should remove stale invalid-video status notes on workspace reload");
     optionalChecks.push("compose-local-mp4");
+    optionalChecks.push("video-status-cleanup");
   } else {
     optionalChecks.push("compose-local-mp4-skipped-no-ffmpeg");
   }
@@ -840,7 +900,7 @@ try {
   const reloadedInputRefs = reloadedSavedFrame?.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [];
   assert(reloadedInputRefs.some((ref) => ref.id === "ref_smoke_png_upload" && ref.imageUrl?.startsWith("/generated/brand-assets/")), "materialized uploaded PNG reference should survive workspace reload without base64");
   assert(migratedEmptyFrame?.workflowNodes.some((node) => node.id === plainImageNode.id && node.refs?.length), "workspace should keep generated image nodes on canvas");
-  assert(after.assets.length === initial.assets.length + 10, "only manually created brand materials should be added to assets");
+  assert(after.assets.length === initial.assets.length + 11, "only manually created brand materials should be added to assets");
   assert(after.frames[0].status === "success", "latest frame should be successful");
 
   const exported = await request("/workspace/export");
@@ -851,7 +911,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "brand-lifecycle", "dapot-brand-profile", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "legacy-text-mode", "script", "video", "compose", "audio", "generate", "task", "canvas", "export", "export-structure", ...optionalChecks],
+    checked: ["auth-gate", "login", "bad-login", "json-validation", "api-boundaries", "demo-credit-refill", "brand", "brand-lifecycle", "dapot-brand-profile", "brand-image-upload", "brand-image-replace", "asset", "asset-edit", "asset-delete-cleanup", "ai-status", "ai-diagnostics", "model-diagnostics", "resolve-references", "custom-qualified-asset-tag", "cal-token-boundary", "legacy-reference-alias", "content-language", "model", "model-type-guard", "parameters", "workflow-nodes", "workflow-upload-materialization", "workflow-rerun", "node-resize", "line-offset", "output-presets", "pdf-artifact", "video-output-node", "text", "legacy-text-mode", "script", "video", "compose", "audio", "generate", "task", "canvas", "export", "export-structure", ...optionalChecks],
     latestFrame: after.frames[0].title,
     credits: after.user.credits
   }, null, 2));
