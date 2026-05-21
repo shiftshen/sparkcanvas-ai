@@ -931,6 +931,24 @@ function updateAssetMetaToken(meta: string, nextToken: string) {
     : `${normalized} · ${meta || "manual asset"}`;
 }
 
+function slugForAssetToken(value: string) {
+  return normalizeBrandKey(value).replace(/_{2,}/g, "_").slice(0, 40) || "reference";
+}
+
+function defaultAssetMeta(title: string, type: Asset["type"]) {
+  const slug = slugForAssetToken(title);
+  if (type === "logo") return "$logo · brand logo reference";
+  if (type === "product") return "$product · product reference";
+  if (type === "model") return /(^|[_\s-])ip([_\s-]|$)|buddy|mascot|角色|吉祥物/i.test(title)
+    ? "$ip · IP character reference"
+    : "$model · model reference";
+  if (/menu|菜单|soup|汤底|buffet|price|299|399|499/i.test(title)) return `$menu.${slug} · menu reference`;
+  if (/drink|sauce|equipment|饮料|酱料|设备/i.test(title)) return `$equipment.${slug} · equipment reference`;
+  if (/store|front|店铺|门店|restaurant|餐厅/i.test(title)) return `$storefront.${slug} · storefront reference`;
+  if (/scene|background|environment|环境|场景|背景/i.test(title)) return `$environment.${slug} · environment reference`;
+  return `$asset.${slug} · uploaded reference`;
+}
+
 function normalizeBrandKey(value = "") {
   return value
     .toLowerCase()
@@ -1642,7 +1660,7 @@ function App() {
       type,
       brandId: targetBrand.id,
       color: options.color ?? targetBrand.accentColor,
-      meta: options.meta ?? "uploaded reference"
+      meta: options.meta ?? defaultAssetMeta(title, type)
     });
     if (options.assetId) params.set("assetId", options.assetId);
     try {
@@ -2203,15 +2221,23 @@ function AssetPanel(props: {
       <div className="rh-asset-grid">
         {filteredAssets.map((asset) => (
           <article className={props.selection.includes(asset.id) ? "selected" : ""} key={asset.id}>
-            <code className="rh-asset-code">{assetReferenceToken(asset, props.brands.find((brand) => brand.id === asset.brandId))}</code>
-            <button type="button" className="rh-asset-thumb" onClick={() => props.onSelect(asset.id)} style={asset.imageUrl ? { backgroundImage: `url(${asset.imageUrl})` } : { background: asset.color }}>
-              {!asset.imageUrl && <Image />}
-            </button>
-            <input value={asset.title} onChange={(event) => props.onUpdate(asset.id, { title: event.target.value })} aria-label="素材名称" />
-            <label className="rh-asset-token">
-              引用标签
-              <input value={assetReferenceToken(asset)} onChange={(event) => props.onUpdate(asset.id, { meta: updateAssetMetaToken(asset.meta, event.target.value) })} aria-label="素材引用标签" />
-            </label>
+            {(() => {
+              const assetBrand = props.brands.find((brand) => brand.id === asset.brandId);
+              const displayToken = brandFilter === "all" ? assetQualifiedReferenceToken(asset, assetBrand) : assetReferenceToken(asset, assetBrand);
+              return (
+                <>
+                  <code className="rh-asset-code">{displayToken}</code>
+                  <button type="button" className="rh-asset-thumb" onClick={() => props.onSelect(asset.id)} style={asset.imageUrl ? { backgroundImage: `url(${asset.imageUrl})` } : { background: asset.color }}>
+                    {!asset.imageUrl && <Image />}
+                  </button>
+                  <input value={asset.title} onChange={(event) => props.onUpdate(asset.id, { title: event.target.value })} aria-label="素材名称" />
+                  <label className="rh-asset-token">
+                    引用标签
+                    <input value={displayToken} onChange={(event) => props.onUpdate(asset.id, { meta: updateAssetMetaToken(asset.meta, event.target.value) })} aria-label="素材引用标签" />
+                  </label>
+                </>
+              );
+            })()}
             <textarea value={asset.meta} onChange={(event) => props.onUpdate(asset.id, { meta: event.target.value })} aria-label="素材用途" />
             <select value={asset.type} onChange={(event) => props.onUpdate(asset.id, { type: event.target.value as Asset["type"] })} aria-label="素材类型">
               <option value="logo">Logo</option>
@@ -2346,7 +2372,7 @@ function BrandPanel({
         <label>强调<input type="color" value={draft.accentColor} onChange={(event) => setDraft({ ...draft, accentColor: event.target.value })} /></label>
       </div>
       <button className="rh-primary-wide" type="button" onClick={() => onSave(draft)}><RefreshCw />保存品牌</button>
-      <label className="rh-brand-upload"><Upload />上传补充素材<input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && onUpload(event.target.files[0], "upload", { brandId: brand.id, meta: "$asset · supplemental brand reference", color: draft.accentColor })} /></label>
+      <label className="rh-brand-upload"><Upload />上传补充素材<input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && onUpload(event.target.files[0], "upload", { brandId: brand.id, color: draft.accentColor })} /></label>
       <div className="rh-brand-assets">
         {brandAssets.filter((asset) => asset.imageUrl).map((asset) => (
           <article key={asset.id}>

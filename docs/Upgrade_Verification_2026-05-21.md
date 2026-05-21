@@ -29,6 +29,9 @@ Source plan: `/Users/shift/Downloads/SparkCanvas 升级完善方案.md`
 - CAL composer UX:
   - The bottom composer now offers qualified cross-brand `$brand.asset` suggestions even when the current canvas is unbranded.
   - Browser validation confirmed `$dapot.` lists DAPOT assets and clicking `$dapot.logo` inserts the token into the composer.
+- Asset reference management:
+  - New supplemental uploads now receive deterministic editable CAL tags such as `$asset.filename`, `$menu.filename`, `$storefront.filename`, or `$environment.filename` instead of every upload falling back to `$asset`.
+  - The Assets panel uses the same visible token in the card header and editable reference-tag field, reducing accidental tag drift.
 
 ## Verified Commands
 
