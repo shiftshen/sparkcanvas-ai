@@ -21,6 +21,7 @@ rsync -az --delete \
   --exclude 'auth.json' \
   --exclude 'config/auth.json' \
   --exclude '.env' \
+  --exclude '.env.production' \
   --exclude '.env.local' \
   --exclude '.env.*.local' \
   --exclude '*.tsbuildinfo' \
