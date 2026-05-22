@@ -489,7 +489,7 @@ const i18n = {
       badge: "CAL 1.0 · Prompt Asset Reference System",
       title: "像写代码一样用 AI 设计品牌内容",
       subtitle: "SparkCanvas 把品牌 Logo、IP、产品、模特和文案变成可引用变量，在可见即所得画布中生成图片、文本、脚本、视频和音频配置。现在支持邮箱密码登录、注册和 Google 登录。",
-      cta: "进入工作台",
+      cta: "登录 / 注册",
       secondary: "查看 CAL 教材",
       note: "默认账号可直接登录，也可以注册新邮箱账号。Google 登录需先配置客户端 ID。",
       prompt: "@imgen /生成海报 使用 $logo $ip $product，生成 5.1 活动教材和短视频 -> pdf 和 mp4",
@@ -567,7 +567,7 @@ const i18n = {
       badge: "CAL 1.0 · Prompt Asset Reference System",
       title: "Design with AI like writing code",
       subtitle: "SparkCanvas turns logos, IP characters, products, models, and copy into reference variables on a WYSIWYG canvas for images, text, scripts, video, and audio plans. It now supports email/password login, registration, and Google login.",
-      cta: "Enter workspace",
+      cta: "Sign in / Register",
       secondary: "Read CAL guide",
       note: "Use the default account to sign in or register a new email account. Google login requires a configured client ID.",
       prompt: "@imgen /generate-poster use $logo $ip $product, create a 5.1 campaign guide and short video -> pdf and mp4",
@@ -645,7 +645,7 @@ const i18n = {
       badge: "CAL 1.0 · ระบบอ้างอิงทรัพยากรในพรอมป์",
       title: "ออกแบบด้วย AI ให้เหมือนเขียนโค้ด",
       subtitle: "SparkCanvas เปลี่ยนโลโก้ คาแรกเตอร์ สินค้า โมเดล และข้อความแบรนด์ให้เป็นตัวแปรบนแคนวาสแบบเห็นผลลัพธ์ทันที ตอนนี้รองรับล็อกอินด้วยอีเมล รหัสผ่าน สมัครสมาชิก และ Google",
-      cta: "เข้าเวิร์กสเปซ",
+      cta: "เข้าสู่ระบบ / สมัครสมาชิก",
       secondary: "อ่านคู่มือ CAL",
       note: "ใช้บัญชีเริ่มต้นเพื่อเข้าสู่ระบบ หรือสมัครบัญชีอีเมลใหม่ได้ Google login ต้องตั้งค่า client ID ก่อน",
       prompt: "@imgen /generate-poster use $logo $ip $product, create a 5.1 campaign guide and short video -> pdf and mp4",
@@ -1753,7 +1753,7 @@ function App() {
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [panel, setPanel] = useState<PanelKey>(null);
   const [locale, setLocaleState] = useState<Locale>(defaultLocale in i18n ? defaultLocale : "zh");
-  const [siteMode, setSiteMode] = useState(() => new URLSearchParams(window.location.search).get("site") === "1");
+  const [siteMode] = useState(() => window.location.pathname.startsWith("/site") || new URLSearchParams(window.location.search).get("site") === "1");
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1776,8 +1776,7 @@ function App() {
   }
 
   function openSiteMode() {
-    setSiteMode(true);
-    window.history.replaceState(null, "", "/?site=1");
+    window.location.assign("/site");
   }
 
   async function loadWorkspace() {
@@ -1830,10 +1829,7 @@ function App() {
 
   async function completeAuth(result: { token: string; user: User }) {
     window.localStorage.setItem("sparkcanvas.token", result.token);
-    setSiteMode(false);
-    window.history.replaceState(null, "", "/");
-    setUser(result.user);
-    await loadWorkspace();
+    window.location.assign("/");
   }
 
   async function login(account: string, password: string) {
@@ -1888,22 +1884,7 @@ function App() {
       }
     }
     window.localStorage.removeItem("sparkcanvas.token");
-    setUser(null);
-    setBrands([]);
-    setAssets([]);
-    setTemplates([]);
-    setModels([]);
-    setFrames([]);
-    setTasks([]);
-    setAiStatus(null);
-    setAiDiagnostics(null);
-    setSelectedFrameId(null);
-    setPanel(null);
-    setPrompt("");
-    setError("");
-    setPreview(null);
-    setEditingNodeId(null);
-    setLoading(false);
+    window.location.assign("/site");
   }
 
   async function checkAiDiagnostics() {
@@ -2569,6 +2550,10 @@ function LoginScreen({
           <img src="/site-assets/sparkcanvas-logo-skill.png" alt="SparkCanvas logo" />
           <strong>SparkCanvas</strong>
         </div>
+        <div className="rh-site-nav-actions">
+          <a className="rh-site-nav-link" href="#auth-panel">{copy.cta}</a>
+          <a className="rh-site-nav-link subtle" href="#cal-guide">{copy.secondary}</a>
+        </div>
         <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)} aria-label="Language">
           {localeOptions.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}
         </select>
@@ -2580,12 +2565,17 @@ function LoginScreen({
           <p>{copy.subtitle}</p>
           <div className="rh-site-prompt"><code>{copy.prompt}</code></div>
           <div className="rh-site-actions">
+            <a className="rh-site-primary" href="#auth-panel">{copy.cta}</a>
             <a className="rh-site-secondary" href="#cal-guide">{copy.secondary}</a>
           </div>
           <p className="rh-site-access-note">{copy.note}</p>
           {error && <small>{error}</small>}
         </div>
-        <div className="rh-auth-card">
+        <div id="auth-panel" className="rh-auth-card">
+          <div className="rh-auth-head">
+            <span className="rh-site-badge">{copy.cta}</span>
+            <small>{locale === "zh" ? "默认账号、邮箱注册和 Google 登录都在这里。" : locale === "th" ? "บัญชีเริ่มต้น สมัครอีเมล และ Google login อยู่ตรงนี้" : "Default login, email registration, and Google sign-in all live here."}</small>
+          </div>
           <div className="rh-auth-tabs">
             <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>{labels.login}</button>
             <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")} disabled={!authConfig?.registrationEnabled}>{labels.register}</button>

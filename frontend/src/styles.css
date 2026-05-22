@@ -367,6 +367,34 @@ svg {
   padding: 18px 0 22px;
 }
 
+.rh-site-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  justify-content: center;
+  min-width: 0;
+}
+
+.rh-site-nav-link {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--sc-color-accent) 24%, transparent);
+  border-radius: 999px;
+  color: var(--sc-color-text);
+  background: color-mix(in srgb, var(--sc-color-accent) 8%, transparent);
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.rh-site-nav-link.subtle {
+  color: var(--sc-color-text-muted);
+  background: transparent;
+}
+
 .rh-site-brand {
   display: flex;
   align-items: center;
@@ -476,6 +504,19 @@ svg {
   flex: 0 0 auto;
 }
 
+.rh-site-primary {
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18px;
+  border-radius: 12px;
+  color: var(--sc-color-surface);
+  background: var(--sc-color-success);
+  font-weight: 900;
+  box-shadow: 0 14px 28px rgba(2, 6, 23, 0.22);
+}
+
 .rh-login-mark,
 .rh-logo span,
 .rh-brand-card span {
@@ -519,7 +560,7 @@ svg {
   box-shadow: 0 14px 28px rgba(2, 6, 23, 0.22);
 }
 
-.rh-site-actions a {
+.rh-site-actions a:not(.rh-site-primary) {
   min-height: 46px;
   display: inline-flex;
   align-items: center;
@@ -556,6 +597,17 @@ svg {
   border-radius: 16px;
   background: rgba(7, 11, 20, 0.9);
   box-shadow: 0 28px 100px rgba(0, 0, 0, 0.44);
+  scroll-margin-top: 84px;
+}
+
+.rh-auth-head {
+  display: grid;
+  gap: 6px;
+}
+
+.rh-auth-head small {
+  color: var(--sc-color-text-muted);
+  line-height: 1.5;
 }
 
 .rh-auth-tabs {
@@ -4203,6 +4255,12 @@ svg {
     padding: 16px 0 8px;
   }
 
+  .rh-site-nav-actions {
+    order: 3;
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+
   .rh-site-nav select {
     width: 100%;
   }
@@ -4309,6 +4367,10 @@ svg {
   .rh-site-nav {
     padding: 14px 0 10px;
     gap: 12px;
+  }
+
+  .rh-site-nav-actions {
+    gap: 8px;
   }
 
   .rh-site-brand strong {
