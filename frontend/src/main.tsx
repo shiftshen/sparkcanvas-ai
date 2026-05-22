@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { colors, typography } from "@sparkcanvas/ai-design-language";
+import { ThemeProvider, initializeThemeVariables, useTokens } from "./theme";
 import {
   ArrowDownToLine,
   ChevronLeft,
@@ -40,6 +42,11 @@ import {
   ZoomOut
 } from "lucide-react";
 import "./styles.css";
+
+const appDesignLanguagePreview = {
+  colors,
+  typography
+} as const;
 
 type Brand = {
   id: string;
@@ -239,6 +246,16 @@ type AiStatus = {
   };
   textGeneration?: { configured: boolean; baseUrl: string; model: string; provider: string };
   videoGeneration?: { configured: boolean; baseUrl: string; model: string; provider: string };
+  publicReference?: {
+    configured: boolean;
+    baseUrl: string;
+    baseUrlSource: string;
+    signedGeneratedUrls: boolean;
+    hostKind: string;
+    canUseLocalGeneratedAssets: boolean;
+    productionReady: boolean;
+    message: string;
+  };
 };
 type AiDiagnostics = AiStatus & {
   runtime: {
@@ -296,6 +313,40 @@ function contentLanguageLabel(language: ContentLanguage | undefined, locale: Loc
   return compact ? item.short[locale] : item.labels[locale];
 }
 
+function nodeTypeTitle(type: WorkflowNode["type"], locale: Locale) {
+  if (locale === "en") {
+    if (type === "reference") return "Image";
+    if (type === "process") return "Text";
+    if (type === "script") return "Script";
+    if (type === "video") return "Video";
+    if (type === "compose") return "Video Compose";
+    if (type === "audio") return "Audio";
+    return "Output";
+  }
+  if (locale === "th") {
+    if (type === "reference") return "ภาพ";
+    if (type === "process") return "ข้อความ";
+    if (type === "script") return "สคริปต์";
+    if (type === "video") return "วิดีโอ";
+    if (type === "compose") return "ตัดต่อวิดีโอ";
+    if (type === "audio") return "เสียง";
+    return "ผลลัพธ์";
+  }
+  if (type === "reference") return "图片";
+  if (type === "process") return "文本";
+  if (type === "script") return "脚本";
+  if (type === "video") return "视频";
+  if (type === "compose") return "视频合成";
+  if (type === "audio") return "音频";
+  return "输出";
+}
+
+function nodeEditorLanguageTitle(locale: Locale, kind: "content" | "voiceover") {
+  if (locale === "en") return kind === "voiceover" ? "Voice-over / subtitle language" : "Content language";
+  if (locale === "th") return kind === "voiceover" ? "ภาษาพากย์ / คำบรรยาย" : "ภาษาคอนเทนต์";
+  return kind === "voiceover" ? "旁白/字幕语言" : "内容语言";
+}
+
 function composerPlaceholderForBrand(brand: Brand | undefined, locale: Locale) {
   if (!brand) {
     if (locale === "en") return "@imgen /generate-poster use $brand.logo $brand.ip -> JPG";
@@ -316,6 +367,12 @@ const i18n = {
     topStatus: "在底部 CAL 输入框编写提示词，$ 图片资源会作为真实参考图传入 skill",
     generate: "生成",
     check: "检查",
+    topbar: {
+      website: "SparkCanvas 官网",
+      diagnostics: "检查本地图片生成 Skill",
+      refillCredits: "恢复本地演示积分",
+      refill: "恢复积分"
+    },
     composer: {
       placeholder: "为 xmanx 生成 5.1 活动投放画面",
       contentLanguage: "内容语言",
@@ -387,6 +444,12 @@ const i18n = {
     topStatus: "Write CAL prompts in the bottom composer. $ image resources are sent to the skill as real references.",
     generate: "Generate",
     check: "Check",
+    topbar: {
+      website: "SparkCanvas website",
+      diagnostics: "Check local image-generation skill",
+      refillCredits: "Restore local demo credits",
+      refill: "Refill"
+    },
     composer: {
       placeholder: "Create a 5.1 campaign visual for xmanx",
       contentLanguage: "Content language",
@@ -458,6 +521,12 @@ const i18n = {
     topStatus: "เขียนพรอมป์ CAL ด้านล่าง โดยรูปภาพ $ จะถูกส่งให้ skill เป็นภาพอ้างอิงจริง",
     generate: "สร้าง",
     check: "ตรวจสอบ",
+    topbar: {
+      website: "เว็บไซต์ SparkCanvas",
+      diagnostics: "ตรวจสอบสกิลสร้างภาพในเครื่อง",
+      refillCredits: "กู้เครดิตเดโมในเครื่อง",
+      refill: "เติมเครดิต"
+    },
     composer: {
       placeholder: "สร้างภาพแคมเปญ 5.1 สำหรับ xmanx",
       contentLanguage: "ภาษาคอนเทนต์",
@@ -529,6 +598,12 @@ const i18n = {
   topStatus: string;
   generate: string;
   check: string;
+  topbar: {
+    website: string;
+    diagnostics: string;
+    refillCredits: string;
+    refill: string;
+  };
   composer: {
     placeholder: string;
     contentLanguage: string;
@@ -897,7 +972,8 @@ function normalizeWorkflowNodes(nodes: WorkflowNode[] = [], withDefaults = true)
 }
 
 function shouldUseDefaultWorkflow(nodes: WorkflowNode[] = []) {
-  return nodes.length > 0 && coreNodeIds.some((id) => nodes.some((node) => node.id === id));
+  if (nodes.length === 0) return true;
+  return coreNodeIds.some((id) => nodes.some((node) => node.id === id));
 }
 
 function displayNodes(nodes: WorkflowNode[], withDefaults = true) {
@@ -1582,6 +1658,10 @@ function readFileAsDataUrl(file: File) {
 }
 
 function App() {
+  void appDesignLanguagePreview;
+
+  const { themeMode, toggleThemeMode, getTokenVar, getTokenValue } = useTokens();
+
   const [user, setUser] = useState<User | null>(null);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -1609,6 +1689,7 @@ function App() {
   const projectBrand = activeFrame ? frameBrand : activeBrand;
   const model = models.find((item) => item.id === activeFrame?.modelId) ?? models[0];
   const t = i18n[locale];
+  const themeAccent = getTokenValue("color", "accent") || activeBrand?.accentColor || getTokenValue("color", "primary");
 
   function setLocale(nextLocale: Locale) {
     setLocaleState(nextLocale);
@@ -1802,7 +1883,11 @@ function App() {
   }
 
   async function createBrand() {
-    const nextName = `新品牌 ${brands.length + 1}`;
+    const nextName = locale === "en"
+      ? `New Brand ${brands.length + 1}`
+      : locale === "th"
+        ? `แบรนด์ใหม่ ${brands.length + 1}`
+        : `新品牌 ${brands.length + 1}`;
     const created = await api.post<Brand>("/brands", {
       name: nextName,
       logoText: "NB",
@@ -2040,9 +2125,9 @@ function App() {
   if (siteMode || !user) return <LoginScreen locale={locale} setLocale={setLocale} error={error} onLogin={enterWorkspace} />;
 
   return (
-    <div className="rh-app">
-      <header className="rh-topbar">
-        <button type="button" className="rh-logo" onClick={openSiteMode} title="SparkCanvas website">
+    <div className="rh-app" data-theme-mode={themeMode}>
+      <header className="rh-topbar" style={{ borderBottomColor: getTokenVar("color", "border") }}>
+        <button type="button" className="rh-logo" onClick={openSiteMode} title={t.topbar.website}>
           <span>SC</span><div><strong>SparkCanvas</strong><small>{activeBrand?.name ?? "XMANX"}</small></div>
         </button>
         <div className="rh-top-prompt rh-top-status">
@@ -2054,13 +2139,21 @@ function App() {
           <em className={aiStatus?.imageGeneration.configured ? "ready" : "missing"}>
             {aiStatus?.imageGeneration.configured ? `Skill · ${aiStatus.imageGeneration.model}` : "Skill key missing"}
           </em>
-          <button type="button" onClick={() => void checkAiDiagnostics()} title={aiDiagnostics?.runtime.message ?? "检查本地图片生成 Skill"}>
+          <button type="button" onClick={() => void checkAiDiagnostics()} title={aiDiagnostics?.runtime.message ?? t.topbar.diagnostics}>
             <RefreshCw />{t.check}
+          </button>
+          <button
+            type="button"
+            onClick={toggleThemeMode}
+            title={themeMode === "dark" ? "切换到浅色主题" : "切换到深色主题"}
+            aria-label={themeMode === "dark" ? "切换到浅色主题" : "切换到深色主题"}
+          >
+            <Palette />{themeMode === "dark" ? "Dark" : "Light"}
           </button>
           <select className="rh-lang-select" value={locale} onChange={(event) => setLocale(event.target.value as Locale)} aria-label="Language">
             {localeOptions.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}
           </select>
-          {user.credits <= 0 ? <button type="button" className="rh-credit-refill" onClick={() => void refillDemoCredits()} title="恢复本地演示积分">Refill</button> : <strong>{user.credits}</strong>}
+          {user.credits <= 0 ? <button type="button" className="rh-credit-refill" onClick={() => void refillDemoCredits()} title={t.topbar.refillCredits}>{t.topbar.refill}</button> : <strong>{user.credits}</strong>}
         </div>
       </header>
 
@@ -2749,6 +2842,7 @@ function Canvas(props: {
   onUpload: (file: File, type: Asset["type"], options?: AssetUploadOptions) => Promise<Asset | undefined>;
   onRunWorkflow: () => void;
 }) {
+  const { getTokenVar } = useTokens();
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   const [nodes, setNodes] = useState<WorkflowNode[]>(() => props.frame ? normalizeWorkflowNodes(props.frame.workflowNodes, shouldUseDefaultWorkflow(props.frame.workflowNodes)) : []);
   const [openEdge, setOpenEdge] = useState<string | null>(null);
@@ -2766,6 +2860,7 @@ function Canvas(props: {
   const lastAutoFitKeyRef = useRef<string | undefined>(undefined);
   const activeSelectedNode = visibleNodes.find((node) => node.id === selectedNode || node.id === props.editingNodeId);
   const imageAssets = props.assets.filter((asset) => asset.imageUrl && (!props.activeBrand || asset.brandId === props.activeBrand.id));
+  const themeAccent = getTokenVar("color", "accent");
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -2793,7 +2888,7 @@ function Canvas(props: {
 
   function addCanvasNode(type: WorkflowNode["type"], x: number, y: number, refs?: ReferenceItem[]) {
     if (!props.frame) return undefined;
-    const title = type === "reference" ? "Image" : type === "process" ? "Text" : type === "script" ? "Script" : type === "video" ? "Video" : type === "compose" ? "视频合成" : type === "audio" ? "Audio" : "Output";
+    const title = nodeTypeTitle(type, props.locale);
     const node: WorkflowNode = {
       id: `node_${Date.now().toString(36)}`,
       type,
@@ -2844,7 +2939,7 @@ function Canvas(props: {
   function addNode(anchorId: string, type: WorkflowNode["type"]) {
     if (!props.frame) return;
     const anchor = visibleNodes.find((node) => node.id === anchorId);
-    const title = type === "reference" ? "Image" : type === "process" ? "Text" : type === "script" ? "Script" : type === "video" ? "Video" : type === "compose" ? "视频合成" : type === "audio" ? "Audio" : "Output";
+    const title = nodeTypeTitle(type, props.locale);
     const defaultBody = type === "compose" ? "空空如也，请连接视频节点后操作" : "";
     const node: WorkflowNode = {
       id: `node_${Date.now().toString(36)}`,
@@ -3214,6 +3309,10 @@ function Canvas(props: {
   return (
     <main
       className={`rh-canvas ${activeSelectedNode ? "selecting" : ""} ${gridSnap ? "snap" : ""}`}
+      style={{
+        background: getTokenVar("color", "surface"),
+        color: getTokenVar("color", "text")
+      }}
       onWheel={handleWheel}
       onPointerDown={startPan}
       onPointerMove={(event) => { moveEdge(event); movePan(event); }}
@@ -3242,9 +3341,9 @@ function Canvas(props: {
       )}
       <section className="rh-world" style={{ transform: `translate(${props.viewport.x}px, ${props.viewport.y}px) scale(${props.viewport.scale})` }}>
         {props.frame && (
-          <div className="rh-project-title">
+          <div className="rh-project-title" style={{ borderColor: getTokenVar("color", "border") }}>
             <strong>{props.frame.title}</strong>
-            <small>{projectBrandStatus}</small>
+            <small style={{ color: themeAccent }}>{projectBrandStatus}</small>
           </div>
         )}
         {props.frame && visibleNodes.length === 0 && (
@@ -3750,6 +3849,8 @@ function NodeEditor({
   }, [node]);
   if (!draft) return null;
 
+  const contentLanguageTitle = nodeEditorLanguageTitle(locale, "content");
+  const voiceoverLanguageTitle = nodeEditorLanguageTitle(locale, "voiceover");
   const imageRefs = (draft.refs ?? []).filter((reference) => reference.imageUrl);
   const firstRef = imageRefs[0];
   const imageUrl = firstRef?.imageUrl ?? output?.imageUrl;
@@ -3981,7 +4082,7 @@ function NodeEditor({
           <select value={imageModelId} onChange={(event) => setImageModelId(event.target.value)}>
             {imageModels.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="内容语言">
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={contentLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <select value={imageRatio} onChange={(event) => setImageRatio(event.target.value)}>
@@ -4101,7 +4202,7 @@ function NodeEditor({
             <option>deepseek-ai/DeepSeek-V4-Flash</option>
             <option>Lib Nano Pro</option>
           </select>
-          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="内容语言">
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={contentLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <span />
@@ -4160,7 +4261,7 @@ function NodeEditor({
           <select value={videoRatio} onChange={(event) => setVideoRatio(event.target.value)} title="画面比例">
             <option>16:9 · 720P</option><option>9:16 · 720P</option><option>1:1 · 720P</option>
           </select>
-          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="旁白/字幕语言">
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={voiceoverLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <button type="button" onClick={() => void handleComposeGenerate()} disabled={generating}>{generating ? <Loader2 className="spin" /> : <Scissors />}裁切/合成</button>
@@ -4232,7 +4333,7 @@ function NodeEditor({
           <select value={audioScene} onChange={(event) => setAudioScene(event.target.value)}>
             <option>广告短视频</option><option>产品展示</option><option>品牌片</option><option>直播间</option><option>故事版</option>
           </select>
-          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="内容语言">
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={contentLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <span />
@@ -4281,7 +4382,7 @@ function NodeEditor({
             <option>gpt-5.4</option>
             <option>deepseek-ai/DeepSeek-V4-Flash</option>
           </select>
-          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="内容语言">
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={contentLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <span />
@@ -4388,7 +4489,7 @@ function NodeEditor({
           <select value={videoDuration} onChange={(event) => setVideoDuration(event.target.value)} title="最终时长">
             <option>5s</option><option>10s</option><option>15s</option><option>20s</option><option>30s</option><option>45s</option><option>60s</option>
           </select>
-          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="字幕/旁白语言">
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={voiceoverLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <button type="button" className={videoSound ? "active" : ""} onClick={() => setVideoSound((value) => !value)} title="音效"><Volume2 /></button>
@@ -4431,17 +4532,17 @@ function NodeEditor({
     <aside className="rh-node-editor" onPointerDown={(event) => event.stopPropagation()}>
       <div className="rh-node-editor-head">
         <div>
-          <strong>编辑节点</strong>
-          <small>{draft.type} · {draft.id}</small>
+          <strong>{locale === "en" ? "Edit node" : locale === "th" ? "แก้ไขโหนด" : "编辑节点"}</strong>
+          <small>{nodeTypeTitle(draft.type, locale)} · {draft.id}</small>
         </div>
         <button type="button" onClick={onClose}><X /></button>
       </div>
       <label>
-        节点名称
+        {locale === "en" ? "Node name" : locale === "th" ? "ชื่อโหนด" : "节点名称"}
         <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} onBlur={() => onSave({ title: draft.title })} />
       </label>
       <label>
-        生成 / 处理提示词
+        {locale === "en" ? "Generation / processing prompt" : locale === "th" ? "พรอมป์สร้าง / ประมวลผล" : "生成 / 处理提示词"}
         <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} onBlur={() => onSave({ body: draft.body })} placeholder={promptPlaceholder} />
         {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
       </label>
@@ -4688,6 +4789,9 @@ function BottomComposer(props: {
               ? `${t.skillReady} · ${props.aiStatus.imageGeneration.keySource}`
               : t.keyMissing}
         </span>
+        {props.aiStatus?.publicReference && !props.aiStatus.publicReference.productionReady && (
+          <small title={props.aiStatus.publicReference.message}>{props.aiStatus.publicReference.message}</small>
+        )}
         <i><b style={{ width: `${props.frame?.progress ?? 0}%` }} /></i>
       </div>
     </div>
@@ -4729,8 +4833,12 @@ function ImagePreview({
   );
 }
 
+initializeThemeVariables();
+
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <ThemeProvider>
+      <App />
+    </ThemeProvider>
   </React.StrictMode>
 );
