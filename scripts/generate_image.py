@@ -125,10 +125,27 @@ def build_input(prompt: str, input_images: list[str]) -> Any:
     return [{"role": "user", "content": content}]
 
 
+def input_variants(input_images: list[str]) -> list[list[str]]:
+    if not input_images:
+        return [[]]
+    variants: list[list[str]] = []
+    for count in range(len(input_images), 0, -1):
+        variants.append(input_images[:count])
+    return variants
+
+
 def model_for_gemini(model: str) -> str:
     aliases = {
         "nano_banana_2": "gemini-3.1-flash-image-preview",
         "nano-banana-2": "gemini-3.1-flash-image-preview",
+    }
+    return aliases.get(model, model)
+
+
+def model_for_responses(model: str) -> str:
+    aliases = {
+        "nano_banana_2": "gpt-5.4",
+        "nano-banana-2": "gpt-5.4",
     }
     return aliases.get(model, model)
 
@@ -141,9 +158,7 @@ def is_gemini_image_model(model: str) -> bool:
 def is_openai_image_model(model: str) -> bool:
     normalized = model.lower()
     return (
-        "nano_banana" in normalized
-        or "nano-banana" in normalized
-        or normalized.startswith("grok-imagine-image")
+        normalized.startswith("grok-imagine-image")
         or normalized.startswith("image2")
     )
 
@@ -388,80 +403,100 @@ def main() -> int:
     if not url.endswith("/responses"):
         url = f"{url}/responses"
 
-    payload = {
-        "model": args.model,
-        "input": build_input(args.prompt, args.input_image),
-        "tools": [{"type": "image_generation", "output_format": args.format}],
-        "instructions": args.instructions,
-        "tool_choice": "auto",
-        "stream": args.stream,
-        "store": False,
-    }
-
     last_raw = ""
-    for attempt in range(args.retries + 1):
-        data = json.dumps(payload).encode("utf-8")
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Accept": "text/event-stream" if args.stream else "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": "SparkCanvas/0.1 image-generation-gpt",
-            "version": "2026-05-16",
-            "originator": "sparkcanvas-xmanx",
+    last_error = ""
+    variants = input_variants(args.input_image)
+    for variant_index, input_images in enumerate(variants):
+        payload = {
+            "model": model_for_responses(args.model),
+            "input": build_input(args.prompt, input_images),
+            "tools": [{"type": "image_generation", "output_format": args.format}],
+            "instructions": args.instructions,
+            "tool_choice": "auto",
+            "stream": args.stream,
+            "store": False,
         }
-        if args.session_id:
-            headers["session_id"] = args.session_id
-        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+        for attempt in range(args.retries + 1):
+            data = json.dumps(payload).encode("utf-8")
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Accept": "text/event-stream" if args.stream else "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "SparkCanvas/0.1 image-generation-gpt",
+                "version": "2026-05-16",
+                "originator": "sparkcanvas-xmanx",
+            }
+            if args.session_id:
+                headers["session_id"] = args.session_id
+            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
 
-        try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-                status = resp.status
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            if attempt < args.retries and "rate_limit_exceeded" in body:
-                time.sleep(retry_delay(body))
-                continue
-            fail(f"HTTP {exc.code}\n{body}")
-        except Exception as exc:
-            if attempt < args.retries:
-                time.sleep(1.0 + attempt * 0.5)
-                continue
-            fail(f"Request failed: {exc}")
-
-        if status < 200 or status >= 300:
-            fail(f"Unexpected HTTP status: {status}\n{raw}")
-
-        parsed: Any = None
-        if args.stream:
-            events = parse_sse_events(raw)
-            if events:
-                parsed = events
-        if parsed is None:
             try:
-                parsed = json.loads(raw)
-            except json.JSONDecodeError:
-                fail(f"Response was not valid JSON or SSE:\n{raw[:4000]}")
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    raw = resp.read().decode("utf-8", errors="replace")
+                    status = resp.status
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace")
+                last_raw = body
+                last_error = f"HTTP {exc.code}\n{body}"
+                if attempt < args.retries and "rate_limit_exceeded" in body:
+                    time.sleep(retry_delay(body))
+                    continue
+                if variant_index < len(variants) - 1 and exc.code in {429, 500, 502, 503, 504}:
+                    break
+                fail(last_error)
+            except Exception as exc:
+                last_error = f"Request failed: {exc}"
+                if attempt < args.retries:
+                    time.sleep(1.0 + attempt * 0.5)
+                    continue
+                if variant_index < len(variants) - 1:
+                    break
+                fail(last_error)
 
-        image_b64 = find_image_b64(parsed)
-        if image_b64:
-            out = Path(args.output)
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(base64.b64decode(image_b64))
-            print(str(out))
-            return 0
+            if status < 200 or status >= 300:
+                last_raw = raw
+                last_error = f"Unexpected HTTP status: {status}\n{raw}"
+                if variant_index < len(variants) - 1 and status in {429, 500, 502, 503, 504}:
+                    break
+                fail(last_error)
 
-        last_raw = raw
-        if attempt < args.retries:
-            if is_rate_limit_error(raw, parsed):
-                time.sleep(retry_delay(raw))
-                continue
-            if has_tools_empty_fallback(raw, parsed):
-                time.sleep(1.0 + attempt * 0.5)
-                continue
-        break
+            parsed: Any = None
+            if args.stream:
+                events = parse_sse_events(raw)
+                if events:
+                    parsed = events
+            if parsed is None:
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    last_raw = raw
+                    last_error = f"Response was not valid JSON or SSE:\n{raw[:4000]}"
+                    if variant_index < len(variants) - 1:
+                        break
+                    fail(last_error)
 
-    fail("No base64 image found in response.\n" + last_raw[:4000])
+            image_b64 = find_image_b64(parsed)
+            if image_b64:
+                out = Path(args.output)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_bytes(base64.b64decode(image_b64))
+                print(str(out))
+                return 0
+
+            last_raw = raw
+            last_error = "No base64 image found in response.\n" + raw[:4000]
+            if attempt < args.retries:
+                if is_rate_limit_error(raw, parsed):
+                    time.sleep(retry_delay(raw))
+                    continue
+                if has_tools_empty_fallback(raw, parsed):
+                    time.sleep(1.0 + attempt * 0.5)
+                    continue
+            if variant_index < len(variants) - 1:
+                break
+            break
+
+    fail(last_error or ("No base64 image found in response.\n" + last_raw[:4000]))
     return 1
 
 

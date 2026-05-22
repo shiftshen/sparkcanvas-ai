@@ -46,6 +46,8 @@ npm audit --audit-level=moderate
 docker compose -f config/docker-compose.yml config
 ```
 
+注：凡涉及生产路径的改动（登录/认证、CORS、公开引用 URL、上传/对象存储、视频生成生产链路等），在认定完成前还需额外先跑 `npm run test:production-smoke`。
+
 浏览器验证通过：
 
 - 未登录时先显示登录页。

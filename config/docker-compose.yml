@@ -2,11 +2,12 @@ services:
   frontend:
     image: sparkcanvas-frontend:latest
     build:
-      context: ../frontend
+      context: ..
+      dockerfile: frontend/Dockerfile
     ports:
-      - "80:80"
+      - "23080:80"
     environment:
-      - PUBLIC_URL=https://xmanx.com
+      - PUBLIC_URL=https://marketing.xmanx.com
     depends_on:
       - backend
     restart: unless-stopped
@@ -22,11 +23,15 @@ services:
       - SPARKCANVAS_AUTH_TOKEN=${SPARKCANVAS_AUTH_TOKEN:?set-a-production-auth-token}
       - SPARKCANVAS_ADMIN_ACCOUNT=${SPARKCANVAS_ADMIN_ACCOUNT:-}
       - SPARKCANVAS_ADMIN_PASSWORD=${SPARKCANVAS_ADMIN_PASSWORD:-}
-      - SPARKCANVAS_ALLOWED_ORIGINS=${SPARKCANVAS_ALLOWED_ORIGINS:-https://xmanx.com,https://www.xmanx.com}
+      - SPARKCANVAS_DEMO_AUTH=${SPARKCANVAS_DEMO_AUTH:-true}
+      - SPARKCANVAS_REGISTRATION_ENABLED=${SPARKCANVAS_REGISTRATION_ENABLED:-}
+      - SPARKCANVAS_GOOGLE_CLIENT_ID=${SPARKCANVAS_GOOGLE_CLIENT_ID:-}
+      - SPARKCANVAS_ALLOWED_ORIGINS=${SPARKCANVAS_ALLOWED_ORIGINS:-https://marketing.xmanx.com,https://www.marketing.xmanx.com}
+      - SPARKCANVAS_PUBLIC_BASE_URL=${SPARKCANVAS_PUBLIC_BASE_URL:-https://marketing.xmanx.com}
       - SPARKCANVAS_DATA_FILE=/app/data/sparkcanvas.json
       - SPARKCANVAS_GENERATED_DIR=/app/data/generated
-      - PUBLIC_URL=https://xmanx.com
-      - API_BASE_URL=https://xmanx.com/api
+      - PUBLIC_URL=https://marketing.xmanx.com
+      - API_BASE_URL=https://marketing.xmanx.com/api
       - YIJIARJ_BASE_URL=${YIJIARJ_BASE_URL:-https://api.yijiarj.cn/v1}
       - YIJIARJ_API_KEY=${YIJIARJ_API_KEY:-}
       - IMAGE_GEN_BASE_URL=${IMAGE_GEN_BASE_URL:-https://api.yijiarj.cn/v1}

@@ -6,5 +6,7 @@
   "IMAGE_GEN_MODEL": "nano_banana_2",
   "VIDEO_GEN_MODEL": "grok-imagine-1.0-video-super",
   "TEXT_GEN_MODEL": "gpt-5.4",
-  "SPARKCANVAS_PUBLIC_BASE_URL": "https://xmanx.com"
+  "SPARKCANVAS_PUBLIC_BASE_URL": "https://xmanx.com",
+  "SPARKCANVAS_GOOGLE_CLIENT_ID": "YOUR_GOOGLE_CLIENT_ID",
+  "SPARKCANVAS_REGISTRATION_ENABLED": "true"
 }

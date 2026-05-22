@@ -5,13 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace backend\" \"npm run dev --workspace frontend\"",
-    "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "build": "npm run build --workspace @sparkcanvas/ai-design-language && npm run build --workspace @sparkcanvas/cal-canvas-bridge && npm run build --workspace @sparkcanvas/cal-theme-transformer && npm run build --workspace backend && npm run build --workspace frontend",
     "start": "npm run start --workspace backend",
-    "check": "npm run check --workspace frontend && npm run check --workspace backend",
-    "test:smoke": "node scripts/smoke-test.mjs && node scripts/production-smoke.mjs",
+    "check": "npm run check --workspace @sparkcanvas/ai-design-language && npm run check --workspace @sparkcanvas/cal-canvas-bridge && npm run check --workspace @sparkcanvas/cal-theme-transformer && npm run check --workspace frontend && npm run check --workspace backend",
+    "test:smoke": "node scripts/smoke-test.mjs && node scripts/public-reference-strategy-smoke.mjs && node scripts/reference-upload-service-smoke.mjs && node scripts/reference-object-storage-smoke.mjs && node scripts/video-url-materialization-smoke.mjs && node scripts/compose-verification-failure-smoke.mjs && npm run test:production-smoke",
+    "test:production-smoke": "node scripts/production-smoke.mjs",
+    "deploy:marketing": "bash scripts/deploy-marketing.sh",
     "test": "npm run check && npm run build && npm run test:smoke"
   },
   "workspaces": [
+    "packages/*",
+    "packages/cal-theme-transformer",
     "frontend",
     "backend"
   ],

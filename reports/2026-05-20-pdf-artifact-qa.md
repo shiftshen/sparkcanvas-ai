@@ -28,6 +28,8 @@ npm test
 
 Result: passed.
 
+Note: this fix/report is validated by the local smoke chain above. If later PDF delivery changes touch production-path concerns (for example login/auth, CORS, public/generated file URLs, upload/object storage, or production video wiring used by downloadable artifacts), also run `npm run test:production-smoke` before marking the verification complete.
+
 Smoke coverage includes `pdf-artifact`, `video-output-node`, `workflow-nodes`, `generate`, `task`, `canvas`, and `export`.
 
 ## Expected Behavior

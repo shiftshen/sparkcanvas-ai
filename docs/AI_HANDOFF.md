@@ -256,6 +256,18 @@ npm run build
 npm run test:smoke
 ```
 
+Production-path regression check:
+
+```bash
+npm run test:production-smoke
+```
+
+Run `npm run test:production-smoke` when:
+
+- preparing a production handoff or release check
+- changing login/auth, CORS, public reference URLs, upload/object storage, or video generation production wiring
+- investigating a production-only regression
+
 Full:
 
 ```bash

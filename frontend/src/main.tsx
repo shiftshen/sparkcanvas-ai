@@ -1,5 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { colors, typography } from "../../packages/ai-design-language/src/index";
+import { ThemeProvider, initializeThemeVariables, useTokens } from "./theme";
 import {
   ArrowDownToLine,
   ChevronLeft,
@@ -15,7 +17,6 @@ import {
   Layers3,
   List,
   Loader2,
-  Lock,
   Maximize2,
   MousePointer2,
   Music2,
@@ -40,6 +41,30 @@ import {
   ZoomOut
 } from "lucide-react";
 import "./styles.css";
+import { WorkflowCanvas } from "./canvas/WorkflowCanvas";
+
+const appDesignLanguagePreview = {
+  colors,
+  typography
+} as const;
+
+type GoogleCredentialResponse = { credential?: string };
+
+const DEFAULT_LOGIN_ACCOUNT = "shift";
+const DEFAULT_LOGIN_PASSWORD = "123456";
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (options: { client_id: string; callback: (response: GoogleCredentialResponse) => void }) => void;
+          renderButton: (element: HTMLElement, options: { theme?: "outline" | "filled_blue" | "filled_black"; size?: "large" | "medium" | "small"; width?: number; text?: string }) => void;
+        };
+      };
+    };
+  }
+}
 
 type Brand = {
   id: string;
@@ -239,6 +264,16 @@ type AiStatus = {
   };
   textGeneration?: { configured: boolean; baseUrl: string; model: string; provider: string };
   videoGeneration?: { configured: boolean; baseUrl: string; model: string; provider: string };
+  publicReference?: {
+    configured: boolean;
+    baseUrl: string;
+    baseUrlSource: string;
+    signedGeneratedUrls: boolean;
+    hostKind: string;
+    canUseLocalGeneratedAssets: boolean;
+    productionReady: boolean;
+    message: string;
+  };
 };
 type AiDiagnostics = AiStatus & {
   runtime: {
@@ -249,12 +284,71 @@ type AiDiagnostics = AiStatus & {
   };
 };
 
+type AppErrorBoundaryState = {
+  error: Error | null;
+};
+
+class AppErrorBoundary extends Component<{ children: ReactNode }, AppErrorBoundaryState> {
+  state: AppErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): AppErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("SparkCanvas UI crashed", error);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="rh-fatal">
+        <section>
+          <strong>SparkCanvas 界面异常</strong>
+          <p>前端渲染中断了，不是项目本身没了。先刷新恢复；如果反复黑屏，再清除本地状态重新进入工作台。</p>
+          <code>{this.state.error.message || "Unknown UI error"}</code>
+          <div>
+            <button type="button" onClick={() => window.location.reload()}>刷新恢复</button>
+            <button
+              type="button"
+              onClick={() => {
+                for (const key of Object.keys(window.localStorage)) {
+                  if (key.startsWith("sparkcanvas.")) window.localStorage.removeItem(key);
+                }
+                window.location.reload();
+              }}
+            >
+              清除本地状态
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+}
+
 type User = {
   id: string;
   name: string;
   email: string;
   plan: string;
   credits: number;
+  provider?: "email" | "google";
+  username?: string;
+  avatarUrl?: string;
+};
+
+type AuthConfig = {
+  registrationEnabled: boolean;
+  google: {
+    configured: boolean;
+    clientId: string;
+  };
+  demo: {
+    enabled: boolean;
+    defaultAccount: string;
+    defaultPassword: string;
+  };
 };
 
 type FramePatch = Partial<Pick<Frame, "title" | "prompt" | "modelId" | "settings" | "brandContext" | "workflowNodes" | "outputs">> & { brandId?: string | null; brandInject?: boolean };
@@ -296,6 +390,40 @@ function contentLanguageLabel(language: ContentLanguage | undefined, locale: Loc
   return compact ? item.short[locale] : item.labels[locale];
 }
 
+function nodeTypeTitle(type: WorkflowNode["type"], locale: Locale) {
+  if (locale === "en") {
+    if (type === "reference") return "Image";
+    if (type === "process") return "Text";
+    if (type === "script") return "Script";
+    if (type === "video") return "Video";
+    if (type === "compose") return "Video Compose";
+    if (type === "audio") return "Audio";
+    return "Output";
+  }
+  if (locale === "th") {
+    if (type === "reference") return "ภาพ";
+    if (type === "process") return "ข้อความ";
+    if (type === "script") return "สคริปต์";
+    if (type === "video") return "วิดีโอ";
+    if (type === "compose") return "ตัดต่อวิดีโอ";
+    if (type === "audio") return "เสียง";
+    return "ผลลัพธ์";
+  }
+  if (type === "reference") return "图片";
+  if (type === "process") return "文本";
+  if (type === "script") return "脚本";
+  if (type === "video") return "视频";
+  if (type === "compose") return "视频合成";
+  if (type === "audio") return "音频";
+  return "输出";
+}
+
+function nodeEditorLanguageTitle(locale: Locale, kind: "content" | "voiceover") {
+  if (locale === "en") return kind === "voiceover" ? "Voice-over / subtitle language" : "Content language";
+  if (locale === "th") return kind === "voiceover" ? "ภาษาพากย์ / คำบรรยาย" : "ภาษาคอนเทนต์";
+  return kind === "voiceover" ? "旁白/字幕语言" : "内容语言";
+}
+
 function composerPlaceholderForBrand(brand: Brand | undefined, locale: Locale) {
   if (!brand) {
     if (locale === "en") return "@imgen /generate-poster use $brand.logo $brand.ip -> JPG";
@@ -316,6 +444,12 @@ const i18n = {
     topStatus: "在底部 CAL 输入框编写提示词，$ 图片资源会作为真实参考图传入 skill",
     generate: "生成",
     check: "检查",
+    topbar: {
+      website: "SparkCanvas 官网",
+      diagnostics: "检查本地图片生成 Skill",
+      refillCredits: "恢复本地演示积分",
+      refill: "恢复积分"
+    },
     composer: {
       placeholder: "为 xmanx 生成 5.1 活动投放画面",
       contentLanguage: "内容语言",
@@ -354,9 +488,10 @@ const i18n = {
     login: {
       badge: "CAL 1.0 · Prompt Asset Reference System",
       title: "像写代码一样用 AI 设计品牌内容",
-      subtitle: "SparkCanvas 把品牌 Logo、IP、产品、模特和文案变成可引用变量，在可见即所得画布中生成图片、文本、脚本、视频和音频配置。",
+      subtitle: "SparkCanvas 把品牌 Logo、IP、产品、模特和文案变成可引用变量，在可见即所得画布中生成图片、文本、脚本、视频和音频配置。现在支持邮箱密码登录、注册和 Google 登录。",
       cta: "进入工作台",
       secondary: "查看 CAL 教材",
+      note: "默认账号可直接登录，也可以注册新邮箱账号。Google 登录需先配置客户端 ID。",
       prompt: "@imgen /生成海报 使用 $logo $ip $product，生成 5.1 活动教材和短视频 -> pdf 和 mp4",
       stats: ["@imgen 图片 Skill", "$ 真实素材引用", "可控工作流画布"],
       features: [
@@ -387,6 +522,12 @@ const i18n = {
     topStatus: "Write CAL prompts in the bottom composer. $ image resources are sent to the skill as real references.",
     generate: "Generate",
     check: "Check",
+    topbar: {
+      website: "SparkCanvas website",
+      diagnostics: "Check local image-generation skill",
+      refillCredits: "Restore local demo credits",
+      refill: "Refill"
+    },
     composer: {
       placeholder: "Create a 5.1 campaign visual for xmanx",
       contentLanguage: "Content language",
@@ -425,9 +566,10 @@ const i18n = {
     login: {
       badge: "CAL 1.0 · Prompt Asset Reference System",
       title: "Design with AI like writing code",
-      subtitle: "SparkCanvas turns logos, IP characters, products, models, and copy into reference variables on a WYSIWYG canvas for images, text, scripts, video, and audio plans.",
-      cta: "Enter Studio",
+      subtitle: "SparkCanvas turns logos, IP characters, products, models, and copy into reference variables on a WYSIWYG canvas for images, text, scripts, video, and audio plans. It now supports email/password login, registration, and Google login.",
+      cta: "Enter workspace",
       secondary: "Read CAL guide",
+      note: "Use the default account to sign in or register a new email account. Google login requires a configured client ID.",
       prompt: "@imgen /generate-poster use $logo $ip $product, create a 5.1 campaign guide and short video -> pdf and mp4",
       stats: ["@imgen image skill", "$ real asset refs", "controllable workflow canvas"],
       features: [
@@ -458,6 +600,12 @@ const i18n = {
     topStatus: "เขียนพรอมป์ CAL ด้านล่าง โดยรูปภาพ $ จะถูกส่งให้ skill เป็นภาพอ้างอิงจริง",
     generate: "สร้าง",
     check: "ตรวจสอบ",
+    topbar: {
+      website: "เว็บไซต์ SparkCanvas",
+      diagnostics: "ตรวจสอบสกิลสร้างภาพในเครื่อง",
+      refillCredits: "กู้เครดิตเดโมในเครื่อง",
+      refill: "เติมเครดิต"
+    },
     composer: {
       placeholder: "สร้างภาพแคมเปญ 5.1 สำหรับ xmanx",
       contentLanguage: "ภาษาคอนเทนต์",
@@ -496,9 +644,10 @@ const i18n = {
     login: {
       badge: "CAL 1.0 · ระบบอ้างอิงทรัพยากรในพรอมป์",
       title: "ออกแบบด้วย AI ให้เหมือนเขียนโค้ด",
-      subtitle: "SparkCanvas เปลี่ยนโลโก้ คาแรกเตอร์ สินค้า โมเดล และข้อความแบรนด์ให้เป็นตัวแปรบนแคนวาสแบบเห็นผลลัพธ์ทันที",
-      cta: "เข้า Studio",
+      subtitle: "SparkCanvas เปลี่ยนโลโก้ คาแรกเตอร์ สินค้า โมเดล และข้อความแบรนด์ให้เป็นตัวแปรบนแคนวาสแบบเห็นผลลัพธ์ทันที ตอนนี้รองรับล็อกอินด้วยอีเมล รหัสผ่าน สมัครสมาชิก และ Google",
+      cta: "เข้าเวิร์กสเปซ",
       secondary: "อ่านคู่มือ CAL",
+      note: "ใช้บัญชีเริ่มต้นเพื่อเข้าสู่ระบบ หรือสมัครบัญชีอีเมลใหม่ได้ Google login ต้องตั้งค่า client ID ก่อน",
       prompt: "@imgen /generate-poster use $logo $ip $product, create a 5.1 campaign guide and short video -> pdf and mp4",
       stats: ["@imgen image skill", "$ อ้างอิงแอสเซ็ตจริง", "workflow canvas ที่ควบคุมได้"],
       features: [
@@ -529,6 +678,12 @@ const i18n = {
   topStatus: string;
   generate: string;
   check: string;
+  topbar: {
+    website: string;
+    diagnostics: string;
+    refillCredits: string;
+    refill: string;
+  };
   composer: {
     placeholder: string;
     contentLanguage: string;
@@ -570,6 +725,7 @@ const i18n = {
     subtitle: string;
     cta: string;
     secondary: string;
+    note: string;
     prompt: string;
     stats: string[];
     features: Array<[string, string]>;
@@ -813,9 +969,6 @@ function dimensionsFromPreset(preset: WorkflowPreset) {
 }
 type GraphEdge = { from: WorkflowNode; to: WorkflowNode; id: string };
 
-const demoLoginAccount = import.meta.env.VITE_SPARKCANVAS_DEMO_ACCOUNT ?? "shift";
-const demoLoginPassword = import.meta.env.VITE_SPARKCANVAS_DEMO_PASSWORD ?? "123456";
-
 const api = {
   async get<T>(path: string): Promise<T> {
     const response = await fetch(`/api${path}`, { headers: authHeaders() });
@@ -897,7 +1050,8 @@ function normalizeWorkflowNodes(nodes: WorkflowNode[] = [], withDefaults = true)
 }
 
 function shouldUseDefaultWorkflow(nodes: WorkflowNode[] = []) {
-  return nodes.length > 0 && coreNodeIds.some((id) => nodes.some((node) => node.id === id));
+  if (nodes.length === 0) return true;
+  return coreNodeIds.some((id) => nodes.some((node) => node.id === id));
 }
 
 function displayNodes(nodes: WorkflowNode[], withDefaults = true) {
@@ -1582,6 +1736,10 @@ function readFileAsDataUrl(file: File) {
 }
 
 function App() {
+  void appDesignLanguagePreview;
+
+  const { themeMode, toggleThemeMode, getTokenVar, getTokenValue } = useTokens();
+
   const [user, setUser] = useState<User | null>(null);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -1591,6 +1749,7 @@ function App() {
   const [tasks, setTasks] = useState<GenerationTask[]>([]);
   const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
   const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics | null>(null);
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [panel, setPanel] = useState<PanelKey>(null);
   const [locale, setLocaleState] = useState<Locale>(defaultLocale in i18n ? defaultLocale : "zh");
@@ -1609,6 +1768,7 @@ function App() {
   const projectBrand = activeFrame ? frameBrand : activeBrand;
   const model = models.find((item) => item.id === activeFrame?.modelId) ?? models[0];
   const t = i18n[locale];
+  const themeAccent = getTokenValue("color", "accent") || activeBrand?.accentColor || getTokenValue("color", "primary");
 
   function setLocale(nextLocale: Locale) {
     setLocaleState(nextLocale);
@@ -1620,36 +1780,43 @@ function App() {
     window.history.replaceState(null, "", "/?site=1");
   }
 
-  function enterWorkspace() {
-    setSiteMode(false);
-    window.history.replaceState(null, "", "/");
-    if (!user) void login().catch((caught) => setError(caught instanceof Error ? caught.message : "登录失败"));
-  }
-
   async function loadWorkspace() {
-    const workspace = await api.get<Workspace>("/workspace");
-    setUser(workspace.user);
-    setBrands(workspace.brands);
-    setAssets(workspace.assets);
-    setTemplates(workspace.templates);
-    setModels(workspace.models);
-    setFrames(workspace.frames);
-    setTasks(workspace.tasks);
-    setAiStatus(workspace.ai ?? null);
-    setSelectedFrameId((current) => current && workspace.frames.some((frame) => frame.id === current) ? current : workspace.frames[0]?.id ?? null);
-    setLoading(false);
+    try {
+      const workspace = await api.get<Workspace>("/workspace");
+      setUser(workspace.user);
+      setBrands(workspace.brands);
+      setAssets(workspace.assets);
+      setTemplates(workspace.templates);
+      setModels(workspace.models);
+      setFrames(workspace.frames);
+      setTasks(workspace.tasks);
+      setAiStatus(workspace.ai ?? null);
+      setSelectedFrameId((current) => current && workspace.frames.some((frame) => frame.id === current) ? current : workspace.frames[0]?.id ?? null);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    if (!window.localStorage.getItem("sparkcanvas.token")) {
-      setLoading(false);
+    void fetch("/api/auth/config")
+      .then(async (response) => {
+        if (!response.ok) return;
+        setAuthConfig(await response.json() as AuthConfig);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const token = window.localStorage.getItem("sparkcanvas.token");
+    if (token) {
+      void loadWorkspace().catch(() => {
+        window.localStorage.removeItem("sparkcanvas.token");
+        setUser(null);
+        setLoading(false);
+      });
       return;
     }
-    void loadWorkspace().catch(() => {
-      window.localStorage.removeItem("sparkcanvas.token");
-      setUser(null);
-      setLoading(false);
-    });
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -1661,13 +1828,82 @@ function App() {
     return () => window.clearInterval(timer);
   }, [frames]);
 
-  async function login() {
-    setLoading(true);
-    setError("");
-    const result = await api.post<{ token: string; user: User }>("/auth/login", { account: demoLoginAccount, password: demoLoginPassword });
+  async function completeAuth(result: { token: string; user: User }) {
     window.localStorage.setItem("sparkcanvas.token", result.token);
+    setSiteMode(false);
+    window.history.replaceState(null, "", "/");
     setUser(result.user);
     await loadWorkspace();
+  }
+
+  async function login(account: string, password: string) {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api.post<{ token: string; user: User }>("/auth/login", { account, password });
+      await completeAuth(result);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "登录失败");
+      throw caught;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function register(payload: { name: string; email: string; password: string }) {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api.post<{ token: string; user: User }>("/auth/register", payload);
+      await completeAuth(result);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "注册失败");
+      throw caught;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loginWithGoogle(credential: string) {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api.post<{ token: string; user: User }>("/auth/google", { credential });
+      await completeAuth(result);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Google 登录失败");
+      throw caught;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function logout() {
+    const token = window.localStorage.getItem("sparkcanvas.token");
+    if (token) {
+      try {
+        await api.post("/auth/logout", {});
+      } catch {
+        // ignore logout errors
+      }
+    }
+    window.localStorage.removeItem("sparkcanvas.token");
+    setUser(null);
+    setBrands([]);
+    setAssets([]);
+    setTemplates([]);
+    setModels([]);
+    setFrames([]);
+    setTasks([]);
+    setAiStatus(null);
+    setAiDiagnostics(null);
+    setSelectedFrameId(null);
+    setPanel(null);
+    setPrompt("");
+    setError("");
+    setPreview(null);
+    setEditingNodeId(null);
+    setLoading(false);
   }
 
   async function checkAiDiagnostics() {
@@ -1802,7 +2038,11 @@ function App() {
   }
 
   async function createBrand() {
-    const nextName = `新品牌 ${brands.length + 1}`;
+    const nextName = locale === "en"
+      ? `New Brand ${brands.length + 1}`
+      : locale === "th"
+        ? `แบรนด์ใหม่ ${brands.length + 1}`
+        : `新品牌 ${brands.length + 1}`;
     const created = await api.post<Brand>("/brands", {
       name: nextName,
       logoText: "NB",
@@ -2037,12 +2277,12 @@ function App() {
   }
 
   if (loading) return <div className="rh-loading"><Loader2 className="spin" /> SparkCanvas</div>;
-  if (siteMode || !user) return <LoginScreen locale={locale} setLocale={setLocale} error={error} onLogin={enterWorkspace} />;
+  if (siteMode || !user) return <LoginScreen locale={locale} setLocale={setLocale} error={error} authConfig={authConfig} onLogin={(account, password) => login(account, password)} onRegister={(payload) => register(payload)} onGoogleLogin={(credential) => loginWithGoogle(credential)} />;
 
   return (
-    <div className="rh-app">
-      <header className="rh-topbar">
-        <button type="button" className="rh-logo" onClick={openSiteMode} title="SparkCanvas website">
+    <div className="rh-app" data-theme-mode={themeMode}>
+      <header className="rh-topbar" style={{ borderBottomColor: getTokenVar("color", "border") }}>
+        <button type="button" className="rh-logo" onClick={openSiteMode} title={t.topbar.website}>
           <span>SC</span><div><strong>SparkCanvas</strong><small>{activeBrand?.name ?? "XMANX"}</small></div>
         </button>
         <div className="rh-top-prompt rh-top-status">
@@ -2054,13 +2294,25 @@ function App() {
           <em className={aiStatus?.imageGeneration.configured ? "ready" : "missing"}>
             {aiStatus?.imageGeneration.configured ? `Skill · ${aiStatus.imageGeneration.model}` : "Skill key missing"}
           </em>
-          <button type="button" onClick={() => void checkAiDiagnostics()} title={aiDiagnostics?.runtime.message ?? "检查本地图片生成 Skill"}>
+          <button type="button" onClick={() => void checkAiDiagnostics()} title={aiDiagnostics?.runtime.message ?? t.topbar.diagnostics}>
             <RefreshCw />{t.check}
+          </button>
+          <button
+            type="button"
+            onClick={toggleThemeMode}
+            title={themeMode === "dark" ? "切换到浅色主题" : "切换到深色主题"}
+            aria-label={themeMode === "dark" ? "切换到浅色主题" : "切换到深色主题"}
+          >
+            <Palette />{themeMode === "dark" ? "Dark" : "Light"}
           </button>
           <select className="rh-lang-select" value={locale} onChange={(event) => setLocale(event.target.value as Locale)} aria-label="Language">
             {localeOptions.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}
           </select>
-          {user.credits <= 0 ? <button type="button" className="rh-credit-refill" onClick={() => void refillDemoCredits()} title="恢复本地演示积分">Refill</button> : <strong>{user.credits}</strong>}
+          <button type="button" onClick={() => void logout()} title={locale === "zh" ? "退出登录" : locale === "th" ? "ออกจากระบบ" : "Sign out"}>
+            {user.avatarUrl ? <img className="rh-user-avatar" src={user.avatarUrl} alt={user.name} /> : <span className="rh-user-dot">{user.name.slice(0, 1).toUpperCase()}</span>}
+            {locale === "zh" ? "退出" : locale === "th" ? "ออก" : "Logout"}
+          </button>
+          {user.credits <= 0 ? <button type="button" className="rh-credit-refill" onClick={() => void refillDemoCredits()} title={t.topbar.refillCredits}>{t.topbar.refill}</button> : <strong>{user.credits}</strong>}
         </div>
       </header>
 
@@ -2111,6 +2363,8 @@ function App() {
           />
         </>
       )}
+
+      <WorkflowCanvas />
 
       <Canvas
         frame={activeFrame}
@@ -2174,8 +2428,97 @@ function App() {
   );
 }
 
-function LoginScreen({ locale, setLocale, error, onLogin }: { locale: Locale; setLocale: (locale: Locale) => void; error: string; onLogin: () => void }) {
+function LoginScreen({
+  locale,
+  setLocale,
+  error,
+  authConfig,
+  onLogin,
+  onRegister,
+  onGoogleLogin
+}: {
+  locale: Locale;
+  setLocale: (locale: Locale) => void;
+  error: string;
+  authConfig: AuthConfig | null;
+  onLogin: (account: string, password: string) => Promise<void>;
+  onRegister: (payload: { name: string; email: string; password: string }) => Promise<void>;
+  onGoogleLogin: (credential: string) => Promise<void>;
+}) {
   const copy = i18n[locale].login;
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [account, setAccount] = useState(DEFAULT_LOGIN_ACCOUNT);
+  const [password, setPassword] = useState(DEFAULT_LOGIN_PASSWORD);
+  const [name, setName] = useState("");
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
+  const labels = {
+    login: locale === "zh" ? "登录" : locale === "th" ? "เข้าสู่ระบบ" : "Login",
+    register: locale === "zh" ? "注册" : locale === "th" ? "สมัครสมาชิก" : "Register",
+    account: locale === "zh" ? "邮箱或账号" : locale === "th" ? "อีเมลหรือบัญชี" : "Email or account",
+    password: locale === "zh" ? "密码" : locale === "th" ? "รหัสผ่าน" : "Password",
+    name: locale === "zh" ? "名称" : locale === "th" ? "ชื่อ" : "Name",
+    email: locale === "zh" ? "邮箱" : locale === "th" ? "อีเมล" : "Email",
+    google: locale === "zh" ? "使用 Google 登录" : locale === "th" ? "เข้าสู่ระบบด้วย Google" : "Continue with Google",
+    googleMissing: locale === "zh" ? "配置 GOOGLE_CLIENT_ID 后启用 Google 登录" : locale === "th" ? "ตั้งค่า GOOGLE_CLIENT_ID เพื่อเปิด Google" : "Set GOOGLE_CLIENT_ID to enable Google sign-in",
+    defaultLogin: locale === "zh" ? "默认可用账号" : locale === "th" ? "บัญชีเริ่มต้น" : "Default login",
+    submitLogin: locale === "zh" ? "进入工作台" : locale === "th" ? "เข้าเวิร์กสเปซ" : "Open workspace",
+    submitRegister: locale === "zh" ? "创建账号并进入" : locale === "th" ? "สร้างบัญชีและเข้าใช้งาน" : "Create account",
+    registeringDisabled: locale === "zh" ? "当前环境未开放注册" : locale === "th" ? "ยังไม่เปิดสมัครในสภาพแวดล้อมนี้" : "Registration is disabled here"
+  };
+
+  useEffect(() => {
+    if (!authConfig?.demo.enabled) return;
+    setAccount(authConfig.demo.defaultAccount || DEFAULT_LOGIN_ACCOUNT);
+    setPassword(authConfig.demo.defaultPassword || DEFAULT_LOGIN_PASSWORD);
+  }, [authConfig?.demo.defaultAccount, authConfig?.demo.defaultPassword, authConfig?.demo.enabled]);
+
+  useEffect(() => {
+    const clientId = authConfig?.google.clientId;
+    const target = googleButtonRef.current;
+    if (!clientId || !target) return;
+    let cancelled = false;
+    const render = () => {
+      if (cancelled || !window.google || !target) return;
+      target.innerHTML = "";
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: (response) => {
+          if (!response.credential) return;
+          setGoogleSubmitting(true);
+          void onGoogleLogin(response.credential).finally(() => setGoogleSubmitting(false));
+        }
+      });
+      window.google.accounts.id.renderButton(target, {
+        theme: "outline",
+        size: "large",
+        width: 320,
+        text: "signin_with"
+      });
+    };
+    if (window.google) {
+      render();
+      return () => { cancelled = true; };
+    }
+    const scriptId = "google-identity-services";
+    let script = document.getElementById(scriptId) as HTMLScriptElement | null;
+    if (!script) {
+      script = document.createElement("script");
+      script.id = scriptId;
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+    script.addEventListener("load", render);
+    return () => {
+      cancelled = true;
+      script?.removeEventListener("load", render);
+    };
+  }, [authConfig?.google.clientId]);
   const workflowBadge = locale === "zh" ? "产品逻辑" : locale === "th" ? "ตรรกะผลิตภัณฑ์" : "Product Logic";
   const workflowTitle = locale === "zh"
     ? "一句话不是直接出图，而是生成可控工作流"
@@ -2237,13 +2580,71 @@ function LoginScreen({ locale, setLocale, error, onLogin }: { locale: Locale; se
           <p>{copy.subtitle}</p>
           <div className="rh-site-prompt"><code>{copy.prompt}</code></div>
           <div className="rh-site-actions">
-            <button type="button" onClick={onLogin}><Lock />{copy.cta}</button>
-            <a href="#cal-guide">{copy.secondary}</a>
+            <a className="rh-site-secondary" href="#cal-guide">{copy.secondary}</a>
           </div>
+          <p className="rh-site-access-note">{copy.note}</p>
           {error && <small>{error}</small>}
         </div>
-        <div className="rh-site-visual">
-          <img src="/site-assets/sparkcanvas-hero-skill.png" alt="SparkCanvas AI canvas workflow" />
+        <div className="rh-auth-card">
+          <div className="rh-auth-tabs">
+            <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>{labels.login}</button>
+            <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")} disabled={!authConfig?.registrationEnabled}>{labels.register}</button>
+          </div>
+          {authConfig?.demo.enabled && (
+            <button
+              type="button"
+              className="rh-auth-default"
+              onClick={() => {
+                setMode("login");
+                setAccount(authConfig.demo.defaultAccount || DEFAULT_LOGIN_ACCOUNT);
+                setPassword(authConfig.demo.defaultPassword || DEFAULT_LOGIN_PASSWORD);
+              }}
+            >
+              <strong>{labels.defaultLogin}</strong>
+              <span>{authConfig.demo.defaultAccount || DEFAULT_LOGIN_ACCOUNT} / {authConfig.demo.defaultPassword || DEFAULT_LOGIN_PASSWORD}</span>
+            </button>
+          )}
+          <form
+            className="rh-auth-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setSubmitting(true);
+              const action = mode === "login"
+                ? onLogin(account, password)
+                : onRegister({ name, email: registerEmail, password: registerPassword });
+              void action.catch(() => {}).finally(() => setSubmitting(false));
+            }}
+          >
+            {mode === "login" ? (
+              <>
+                <label>{labels.account}<input autoComplete="username" value={account} onChange={(event) => setAccount(event.target.value)} /></label>
+                <label>{labels.password}<input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+              </>
+            ) : (
+              <>
+                <label>{labels.name}<input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} /></label>
+                <label>{labels.email}<input autoComplete="email" type="email" value={registerEmail} onChange={(event) => setRegisterEmail(event.target.value)} /></label>
+                <label>{labels.password}<input autoComplete="new-password" type="password" value={registerPassword} onChange={(event) => setRegisterPassword(event.target.value)} /></label>
+              </>
+            )}
+            <button type="submit" disabled={submitting || (mode === "register" && !authConfig?.registrationEnabled)}>
+              <Sparkles />{submitting ? (locale === "zh" ? "处理中" : locale === "th" ? "กำลังทำงาน" : "Working") : mode === "login" ? labels.submitLogin : labels.submitRegister}
+            </button>
+          </form>
+          <div className="rh-auth-divider"><span>Google</span></div>
+          {authConfig?.google.configured ? (
+            <div className={googleSubmitting ? "rh-google-wrap loading" : "rh-google-wrap"} ref={googleButtonRef} aria-label={labels.google} />
+          ) : (
+            <button type="button" className="rh-google-disabled" disabled>{labels.googleMissing}</button>
+          )}
+          {mode === "register" && !authConfig?.registrationEnabled && <small className="rh-auth-note">{labels.registeringDisabled}</small>}
+          <div className="rh-auth-preview">
+            <img src="/site-assets/sparkcanvas-hero-v2.png" alt="SparkCanvas AI canvas workflow" />
+            <div>
+              <strong>@imgen skill</strong>
+              <span>$logo + $product + $copy.slogan {"->"} JPG / PDF / MP4</span>
+            </div>
+          </div>
         </div>
       </section>
       <section className="rh-site-stats">
@@ -2749,6 +3150,7 @@ function Canvas(props: {
   onUpload: (file: File, type: Asset["type"], options?: AssetUploadOptions) => Promise<Asset | undefined>;
   onRunWorkflow: () => void;
 }) {
+  const { getTokenVar } = useTokens();
   const panRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   const [nodes, setNodes] = useState<WorkflowNode[]>(() => props.frame ? normalizeWorkflowNodes(props.frame.workflowNodes, shouldUseDefaultWorkflow(props.frame.workflowNodes)) : []);
   const [openEdge, setOpenEdge] = useState<string | null>(null);
@@ -2766,6 +3168,8 @@ function Canvas(props: {
   const lastAutoFitKeyRef = useRef<string | undefined>(undefined);
   const activeSelectedNode = visibleNodes.find((node) => node.id === selectedNode || node.id === props.editingNodeId);
   const imageAssets = props.assets.filter((asset) => asset.imageUrl && (!props.activeBrand || asset.brandId === props.activeBrand.id));
+  const themeAccent = getTokenVar("color", "accent");
+  const syncedDefaultFrameIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -2791,9 +3195,20 @@ function Canvas(props: {
     return props.onUpdateFrame({ workflowNodes: nextNodes });
   }
 
+  useEffect(() => {
+    const frame = props.frame;
+    const frameId = frame?.id;
+    if (!frameId || frame.workflowNodes.length > 0 || syncedDefaultFrameIdsRef.current.has(frameId)) return;
+    syncedDefaultFrameIdsRef.current.add(frameId);
+    const nextNodes = normalizeWorkflowNodes([], true);
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
+    void commit(nextNodes);
+  }, [props.frame?.id, props.frame?.workflowNodes.length]);
+
   function addCanvasNode(type: WorkflowNode["type"], x: number, y: number, refs?: ReferenceItem[]) {
     if (!props.frame) return undefined;
-    const title = type === "reference" ? "Image" : type === "process" ? "Text" : type === "script" ? "Script" : type === "video" ? "Video" : type === "compose" ? "视频合成" : type === "audio" ? "Audio" : "Output";
+    const title = nodeTypeTitle(type, props.locale);
     const node: WorkflowNode = {
       id: `node_${Date.now().toString(36)}`,
       type,
@@ -2838,13 +3253,29 @@ function Canvas(props: {
     const next = nodesRef.current.map((node) => node.id === nodeId ? { ...node, ...patch } : node);
     nodesRef.current = next;
     setNodes(next);
-    commit(next);
+    return commit(next);
+  }
+
+  function syncNodeBeforeGeneration(nodeId: string, patch: Partial<WorkflowNode> = {}) {
+    const normalized = normalizeWorkflowNodes(nodesRef.current, shouldUseDefaultWorkflow(nodesRef.current));
+    const next = normalized.map((node) => node.id === nodeId ? { ...node, ...patch } : node);
+    nodesRef.current = next;
+    setNodes(next);
+    return commit(next);
+  }
+
+  function applyGeneratedFrame<T extends { frame?: Frame } | void>(result: T): T {
+    if (!result?.frame?.workflowNodes) return result;
+    const nextNodes = normalizeWorkflowNodes(result.frame.workflowNodes, shouldUseDefaultWorkflow(result.frame.workflowNodes));
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
+    return result;
   }
 
   function addNode(anchorId: string, type: WorkflowNode["type"]) {
     if (!props.frame) return;
     const anchor = visibleNodes.find((node) => node.id === anchorId);
-    const title = type === "reference" ? "Image" : type === "process" ? "Text" : type === "script" ? "Script" : type === "video" ? "Video" : type === "compose" ? "视频合成" : type === "audio" ? "Audio" : "Output";
+    const title = nodeTypeTitle(type, props.locale);
     const defaultBody = type === "compose" ? "空空如也，请连接视频节点后操作" : "";
     const node: WorkflowNode = {
       id: `node_${Date.now().toString(36)}`,
@@ -2993,8 +3424,13 @@ function Canvas(props: {
   }
 
   function movePan(event: React.PointerEvent<HTMLElement>) {
-    if (!panRef.current) return;
-    props.setViewport((current) => ({ ...current, x: panRef.current!.vx + event.clientX - panRef.current!.x, y: panRef.current!.vy + event.clientY - panRef.current!.y }));
+    const pan = panRef.current;
+    if (!pan) return;
+    props.setViewport((current) => ({ ...current, x: pan.vx + event.clientX - pan.x, y: pan.vy + event.clientY - pan.y }));
+  }
+
+  function endPan() {
+    panRef.current = null;
   }
 
   function startEdgeDrag(event: React.PointerEvent<HTMLElement>, id: string) {
@@ -3183,8 +3619,9 @@ function Canvas(props: {
       w: node.w ?? 230,
       h: node.h ?? 238
     }));
+    const isCompactViewport = window.innerWidth < 900;
     if (!fitNodes.length) {
-      props.setViewport({ x: 76, y: 64, scale: window.innerWidth < 800 ? 0.42 : 0.72 });
+      props.setViewport(isCompactViewport ? { x: 18, y: 82, scale: 0.3 } : { x: 76, y: 64, scale: 0.72 });
       return;
     }
     const rect = document.querySelector(".rh-canvas")?.getBoundingClientRect();
@@ -3194,12 +3631,14 @@ function Canvas(props: {
     const minY = Math.min(...fitNodes.map((node) => node.y));
     const maxX = Math.max(...fitNodes.map((node) => node.x + node.w));
     const maxY = Math.max(...fitNodes.map((node) => node.y + node.h));
-    const usableWidth = Math.max(360, viewportWidth - 170);
-    const usableHeight = Math.max(260, viewportHeight - 280);
-    const scale = Math.min(0.86, Math.max(0.24, Math.min(usableWidth / Math.max(1, maxX - minX), usableHeight / Math.max(1, maxY - minY))));
+    const horizontalPadding = isCompactViewport ? 32 : 170;
+    const verticalPadding = isCompactViewport ? 168 : 280;
+    const usableWidth = Math.max(isCompactViewport ? 220 : 360, viewportWidth - horizontalPadding);
+    const usableHeight = Math.max(isCompactViewport ? 240 : 260, viewportHeight - verticalPadding);
+    const scale = Math.min(isCompactViewport ? 0.52 : 0.86, Math.max(isCompactViewport ? 0.18 : 0.24, Math.min(usableWidth / Math.max(1, maxX - minX), usableHeight / Math.max(1, maxY - minY))));
     props.setViewport({
-      x: Math.round(84 - minX * scale),
-      y: Math.round(96 - minY * scale),
+      x: Math.round((isCompactViewport ? 20 : 84) - minX * scale),
+      y: Math.round((isCompactViewport ? 96 : 96) - minY * scale),
       scale
     });
   }
@@ -3214,10 +3653,16 @@ function Canvas(props: {
   return (
     <main
       className={`rh-canvas ${activeSelectedNode ? "selecting" : ""} ${gridSnap ? "snap" : ""}`}
+      style={{
+        background: getTokenVar("color", "surface"),
+        color: getTokenVar("color", "text")
+      }}
       onWheel={handleWheel}
       onPointerDown={startPan}
       onPointerMove={(event) => { moveEdge(event); movePan(event); }}
-      onPointerUp={() => { panRef.current = null; endEdgeDrag(); }}
+      onPointerUp={() => { endPan(); endEdgeDrag(); }}
+      onPointerCancel={() => { endPan(); endEdgeDrag(); }}
+      onPointerLeave={() => { endPan(); endEdgeDrag(); }}
       onDoubleClick={(event) => {
         if ((event.target as HTMLElement).closest(".rh-node, .rh-edge-control, button, input, textarea, select")) return;
         event.preventDefault();
@@ -3242,9 +3687,9 @@ function Canvas(props: {
       )}
       <section className="rh-world" style={{ transform: `translate(${props.viewport.x}px, ${props.viewport.y}px) scale(${props.viewport.scale})` }}>
         {props.frame && (
-          <div className="rh-project-title">
+          <div className="rh-project-title" style={{ borderColor: getTokenVar("color", "border") }}>
             <strong>{props.frame.title}</strong>
-            <small>{projectBrandStatus}</small>
+            <small style={{ color: themeAccent }}>{projectBrandStatus}</small>
           </div>
         )}
         {props.frame && visibleNodes.length === 0 && (
@@ -3409,39 +3854,43 @@ function Canvas(props: {
               return undefined;
             })()}
             onClose={closeNodeEditor}
-            onSave={(patch) => props.editingNodeId && saveNode(props.editingNodeId, patch)}
-            onGenerate={(nodePrompt, modelId, settings) => {
+            onSave={(patch) => props.editingNodeId ? saveNode(props.editingNodeId, patch) : undefined}
+            onGenerate={async (nodePrompt, modelId, settings) => {
               if (!props.editingNodeId) return;
               const nodeId = props.editingNodeId;
-              const nextNodes = nodes.map((item) => item.id === nodeId ? { ...item, body: nodePrompt || item.body } : item);
-              setNodes(nextNodes);
-              return Promise.resolve(commit(nextNodes))
-                .then(() => props.onGenerateNode(nodeId, nodePrompt, modelId, settings))
-                .then((result) => {
-                  if (result?.frame.workflowNodes) setNodes(normalizeWorkflowNodes(result.frame.workflowNodes, shouldUseDefaultWorkflow(result.frame.workflowNodes)));
-                  return result;
-                });
+              await syncNodeBeforeGeneration(nodeId, { body: nodePrompt || nodesRef.current.find((item) => item.id === nodeId)?.body });
+              return applyGeneratedFrame(await props.onGenerateNode(nodeId, nodePrompt, modelId, settings));
             }}
             onGenerationProgress={(progress) => props.editingNodeId && setNodeGeneration(progress === null ? null : { nodeId: props.editingNodeId, progress })}
-            onGenerateText={(nodePrompt, modelId, translate, mode, contentLanguage) => {
+            onGenerateText={async (nodePrompt, modelId, translate, mode, contentLanguage) => {
               if (!props.editingNodeId) return;
-              return props.onGenerateTextNode(props.editingNodeId, nodePrompt, modelId, translate, mode, contentLanguage);
+              const nodeId = props.editingNodeId;
+              await syncNodeBeforeGeneration(nodeId, { body: nodePrompt });
+              return applyGeneratedFrame(await props.onGenerateTextNode(nodeId, nodePrompt, modelId, translate, mode, contentLanguage));
             }}
-            onGenerateScript={(nodePrompt, modelId, translate, contentLanguage) => {
+            onGenerateScript={async (nodePrompt, modelId, translate, contentLanguage) => {
               if (!props.editingNodeId) return;
-              return props.onGenerateScriptNode(props.editingNodeId, nodePrompt, modelId, translate, contentLanguage);
+              const nodeId = props.editingNodeId;
+              await syncNodeBeforeGeneration(nodeId, { body: nodePrompt });
+              return applyGeneratedFrame(await props.onGenerateScriptNode(nodeId, nodePrompt, modelId, translate, contentLanguage));
             }}
-            onGenerateVideo={(nodePrompt, modelId, settings) => {
+            onGenerateVideo={async (nodePrompt, modelId, settings) => {
               if (!props.editingNodeId) return;
-              return props.onGenerateVideoNode(props.editingNodeId, nodePrompt, modelId, settings);
+              const nodeId = props.editingNodeId;
+              await syncNodeBeforeGeneration(nodeId, { body: nodePrompt });
+              return applyGeneratedFrame(await props.onGenerateVideoNode(nodeId, nodePrompt, modelId, settings));
             }}
-            onGenerateAudio={(nodePrompt, modelId, settings) => {
+            onGenerateAudio={async (nodePrompt, modelId, settings) => {
               if (!props.editingNodeId) return;
-              return props.onGenerateAudioNode(props.editingNodeId, nodePrompt, modelId, settings);
+              const nodeId = props.editingNodeId;
+              await syncNodeBeforeGeneration(nodeId, { body: nodePrompt });
+              return applyGeneratedFrame(await props.onGenerateAudioNode(nodeId, nodePrompt, modelId, settings));
             }}
-            onGenerateCompose={(nodePrompt, settings) => {
+            onGenerateCompose={async (nodePrompt, settings) => {
               if (!props.editingNodeId) return;
-              return props.onGenerateComposeNode(props.editingNodeId, nodePrompt, settings);
+              const nodeId = props.editingNodeId;
+              await syncNodeBeforeGeneration(nodeId, { body: nodePrompt });
+              return applyGeneratedFrame(await props.onGenerateComposeNode(nodeId, nodePrompt, settings));
             }}
             onUpload={(file, type, options) => props.onUpload(file, type, options)}
             onPreview={(target) => props.setPreview({ ...target, nodeId: props.editingNodeId ?? undefined })}
@@ -3698,7 +4147,7 @@ function NodeEditor({
   locale: Locale;
   output?: Frame["outputs"][number];
   onClose: () => void;
-  onSave: (patch: Partial<WorkflowNode>) => void;
+  onSave: (patch: Partial<WorkflowNode>) => void | Promise<Frame | void>;
   onGenerate: (prompt: string, modelId?: string, settings?: Partial<GenerationSettings>) => NodeGenerateResponse | void | Promise<NodeGenerateResponse | void>;
   onGenerateText: (prompt: string, modelId: string, translate: boolean, mode?: string, contentLanguage?: ContentLanguage) => TextGenerateResponse | void | Promise<TextGenerateResponse | void>;
   onGenerateScript: (prompt: string, modelId: string, translate: boolean, contentLanguage?: ContentLanguage) => ScriptGenerateResponse | void | Promise<ScriptGenerateResponse | void>;
@@ -3750,6 +4199,8 @@ function NodeEditor({
   }, [node]);
   if (!draft) return null;
 
+  const contentLanguageTitle = nodeEditorLanguageTitle(locale, "content");
+  const voiceoverLanguageTitle = nodeEditorLanguageTitle(locale, "voiceover");
   const imageRefs = (draft.refs ?? []).filter((reference) => reference.imageUrl);
   const firstRef = imageRefs[0];
   const imageUrl = firstRef?.imageUrl ?? output?.imageUrl;
@@ -3981,7 +4432,7 @@ function NodeEditor({
           <select value={imageModelId} onChange={(event) => setImageModelId(event.target.value)}>
             {imageModels.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="内容语言">
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={contentLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <select value={imageRatio} onChange={(event) => setImageRatio(event.target.value)}>
@@ -4101,7 +4552,7 @@ function NodeEditor({
             <option>deepseek-ai/DeepSeek-V4-Flash</option>
             <option>Lib Nano Pro</option>
           </select>
-          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="内容语言">
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={contentLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <span />
@@ -4160,7 +4611,7 @@ function NodeEditor({
           <select value={videoRatio} onChange={(event) => setVideoRatio(event.target.value)} title="画面比例">
             <option>16:9 · 720P</option><option>9:16 · 720P</option><option>1:1 · 720P</option>
           </select>
-          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="旁白/字幕语言">
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={voiceoverLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <button type="button" onClick={() => void handleComposeGenerate()} disabled={generating}>{generating ? <Loader2 className="spin" /> : <Scissors />}裁切/合成</button>
@@ -4232,7 +4683,7 @@ function NodeEditor({
           <select value={audioScene} onChange={(event) => setAudioScene(event.target.value)}>
             <option>广告短视频</option><option>产品展示</option><option>品牌片</option><option>直播间</option><option>故事版</option>
           </select>
-          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="内容语言">
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={contentLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <span />
@@ -4281,7 +4732,7 @@ function NodeEditor({
             <option>gpt-5.4</option>
             <option>deepseek-ai/DeepSeek-V4-Flash</option>
           </select>
-          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="内容语言">
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={contentLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <span />
@@ -4388,7 +4839,7 @@ function NodeEditor({
           <select value={videoDuration} onChange={(event) => setVideoDuration(event.target.value)} title="最终时长">
             <option>5s</option><option>10s</option><option>15s</option><option>20s</option><option>30s</option><option>45s</option><option>60s</option>
           </select>
-          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title="字幕/旁白语言">
+          <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={voiceoverLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
           </select>
           <button type="button" className={videoSound ? "active" : ""} onClick={() => setVideoSound((value) => !value)} title="音效"><Volume2 /></button>
@@ -4431,17 +4882,17 @@ function NodeEditor({
     <aside className="rh-node-editor" onPointerDown={(event) => event.stopPropagation()}>
       <div className="rh-node-editor-head">
         <div>
-          <strong>编辑节点</strong>
-          <small>{draft.type} · {draft.id}</small>
+          <strong>{locale === "en" ? "Edit node" : locale === "th" ? "แก้ไขโหนด" : "编辑节点"}</strong>
+          <small>{nodeTypeTitle(draft.type, locale)} · {draft.id}</small>
         </div>
         <button type="button" onClick={onClose}><X /></button>
       </div>
       <label>
-        节点名称
+        {locale === "en" ? "Node name" : locale === "th" ? "ชื่อโหนด" : "节点名称"}
         <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} onBlur={() => onSave({ title: draft.title })} />
       </label>
       <label>
-        生成 / 处理提示词
+        {locale === "en" ? "Generation / processing prompt" : locale === "th" ? "พรอมป์สร้าง / ประมวลผล" : "生成 / 处理提示词"}
         <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} onBlur={() => onSave({ body: draft.body })} placeholder={promptPlaceholder} />
         {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
       </label>
@@ -4688,6 +5139,9 @@ function BottomComposer(props: {
               ? `${t.skillReady} · ${props.aiStatus.imageGeneration.keySource}`
               : t.keyMissing}
         </span>
+        {props.aiStatus?.publicReference && !props.aiStatus.publicReference.productionReady && (
+          <small title={props.aiStatus.publicReference.message}>{props.aiStatus.publicReference.message}</small>
+        )}
         <i><b style={{ width: `${props.frame?.progress ?? 0}%` }} /></i>
       </div>
     </div>
@@ -4729,8 +5183,14 @@ function ImagePreview({
   );
 }
 
+initializeThemeVariables();
+
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <ThemeProvider>
+      <AppErrorBoundary>
+        <App />
+      </AppErrorBoundary>
+    </ThemeProvider>
   </React.StrictMode>
 );

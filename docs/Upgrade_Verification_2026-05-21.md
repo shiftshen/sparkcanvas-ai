@@ -46,6 +46,8 @@ npm run test:smoke
 
 Result: all passed.
 
+Note: for production-path changes (login/auth, CORS, public-reference URLs, upload/object storage, or video-generation production flow), also run `npm run test:production-smoke` before release.
+
 ## Existing Coverage Reconfirmed
 
 - PDF output is a real `.pdf` and embeds image pages.

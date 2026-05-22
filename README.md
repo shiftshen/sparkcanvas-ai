@@ -17,13 +17,12 @@ npm install
 npm run dev
 ```
 
-打开 `http://localhost:3100`。演示账号已内置：账号 `shift`，密码 `123456`。
+打开 `http://localhost:3100`。本地默认账号已内置并显示在登录页：账号 `shift`，密码 `123456`；也可以用邮箱密码注册新账号。
 
-前端演示登录可用 Vite 环境变量覆盖，避免把真实演示账号写进前端调用逻辑：
+Google 登录使用 Google Identity Services。配置后端公开 client id 即可在登录页启用：
 
 ```bash
-export VITE_SPARKCANVAS_DEMO_ACCOUNT='shift'
-export VITE_SPARKCANVAS_DEMO_PASSWORD='123456'
+export SPARKCANVAS_GOOGLE_CLIENT_ID='YOUR_GOOGLE_CLIENT_ID'
 ```
 
 本地数据会持久化到 `backend/data/sparkcanvas.json`，包括品牌、资产、任务、画布和积分。
@@ -76,6 +75,7 @@ export SPARKCANVAS_PUBLIC_BASE_URL='https://xmanx.com'
 npm run check
 npm run build
 npm run test:smoke
+npm run test:production-smoke
 ```
 
 一键完整验证：
@@ -84,7 +84,7 @@ npm run test:smoke
 npm test
 ```
 
-`npm run test:smoke` 会使用临时数据文件启动后端，不污染本地演示数据。
+`npm run test:smoke` 会使用临时数据文件启动后端，不污染本地演示数据。`npm run test:production-smoke` 只在涉及生产路径时运行：发布前、改动登录/CORS/公开引用/上传/对象存储/视频生成链路后，或排查生产回归时先跑它。
 
 ### 生产部署预演
 
@@ -94,6 +94,14 @@ docker compose -f config/docker-compose.yml up -d
 ```
 
 服务器上将 `xmanx.com` 和 `www.xmanx.com` 的 DNS 指向部署机器后，使用 `config/nginx-xmanx.com.conf` 作为 HTTPS 反代参考。
+
+### 一键同步到 1Panel
+
+```bash
+npm run deploy:marketing
+```
+
+这个命令会先把当前分支推到 GitHub，然后同步到 `1panel-happy:/home/happy/apps/sparkcanvas-marketing` 并重启容器。它会保留 `.env.production` 和 `backend/data/`。
 
 ## 目录结构说明
 
