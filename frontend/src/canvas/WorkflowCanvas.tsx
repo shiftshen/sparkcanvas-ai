@@ -1,27 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Check, Command, Download, Plus, Save, Trash2, UserRound } from "lucide-react";
-import { parseCalPrompt, summarizeCal } from "@sparkcanvas/ai-design-language";
+import { Check, Command, Download, Save, Trash2, UserRound, Database, FileOutput } from "lucide-react";
+import { parseCalPrompt, summarizeCal } from "../../../packages/ai-design-language/src/index";
+import {
+  layoutCalAst,
+  type WorkflowCanvasEdge,
+  type WorkflowCanvasNode,
+  type WorkflowCanvasNodeType
+} from "../../../packages/cal-canvas-bridge/src/index";
 import "./workflow-canvas.css";
-
-type WorkflowCanvasNodeType = "agent" | "command";
-
-type WorkflowCanvasNode = {
-  id: string;
-  type: WorkflowCanvasNodeType;
-  label: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  title: string;
-  body: string;
-};
-
-type WorkflowCanvasEdge = {
-  id: string;
-  from: string;
-  to: string;
-};
 
 type SavedCanvasState = {
   prompt: string;
@@ -55,52 +41,18 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function parseNodeSequence(prompt: string) {
-  const normalized = prompt.replace(/\r\n?/g, "\n").trim();
-  const tokens = Array.from(normalized.matchAll(/(^|\s)(@([\p{L}\p{N}_-]+)|\/([\p{L}\p{N}_-]+))/gu));
-  return tokens.map((match, index) => {
-    const agent = match[3];
-    const command = match[4];
-    return agent
-      ? { id: `agent_${index}`, type: "agent" as const, label: `@${agent}`, title: `Agent ${agent}`, body: agent }
-      : { id: `command_${index}`, type: "command" as const, label: `/${command}`, title: `Command ${command}`, body: command ?? "" };
-  });
-}
-
 function buildNodesFromPrompt(prompt: string, baseX = 80, baseY = 72) {
   const parsed = parseCalPrompt(prompt);
-  const sequence = parseNodeSequence(prompt);
-  const nodes: WorkflowCanvasNode[] = sequence.length
-    ? sequence.map((item, index) => ({
-        id: uid(item.type),
-        type: item.type,
-        label: item.label,
-        title: item.title,
-        body: item.body,
-        x: baseX + index * NODE_GAP_X,
-        y: baseY + (index % 2) * 22,
-        width: NODE_WIDTH,
-        height: NODE_HEIGHT
-      }))
-    : [
-        {
-          id: uid("command"),
-          type: "command",
-          label: "/prompt",
-          title: "Command prompt",
-          body: parsed.normalizedPrompt,
-          x: baseX,
-          y: baseY,
-          width: NODE_WIDTH,
-          height: NODE_HEIGHT
-        }
-      ];
+  const { nodes, edges } = layoutCalAst(parsed, {
+    startX: baseX,
+    startY: baseY,
+    nodeWidth: NODE_WIDTH,
+    nodeHeight: NODE_HEIGHT,
+    gapX: NODE_GAP_X,
+    gapY: NODE_GAP_Y
+  });
 
-  return {
-    nodes,
-    edges: nodes.slice(1).map((node, index) => ({ id: uid("edge"), from: nodes[index]?.id ?? nodes[0].id, to: node.id })),
-    parsed
-  };
+  return { nodes, edges, parsed };
 }
 
 function loadState(): SavedCanvasState {
@@ -120,14 +72,19 @@ function loadState(): SavedCanvasState {
   }
 }
 
+type CanvasMode = "select" | "connect";
+
 export function WorkflowCanvas() {
   const [state, setState] = useState<SavedCanvasState>(() => loadState());
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(state.selectedNodeId ?? null);
   const [dragging, setDragging] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
+  const [mode, setMode] = useState<CanvasMode>("select");
+  const [connectFromId, setConnectFromId] = useState<string | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
   const selectedNode = useMemo(() => state.nodes.find((node) => node.id === selectedNodeId) ?? null, [state.nodes, selectedNodeId]);
-  const summary = useMemo(() => summarizeCal(parseCalPrompt(state.prompt)), [state.prompt]);
+  const parsedPrompt = useMemo(() => parseCalPrompt(state.prompt), [state.prompt]);
+  const summary = useMemo(() => summarizeCal(parsedPrompt), [parsedPrompt]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -158,27 +115,66 @@ export function WorkflowCanvas() {
     };
   }, [dragging]);
 
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMode("select");
+        setConnectFromId(null);
+        return;
+      }
+      if ((event.key === "Backspace" || event.key === "Delete") && selectedNodeId) {
+        event.preventDefault();
+        setState((current) => {
+          const nextNodes = current.nodes.filter((node) => node.id !== selectedNodeId);
+          const nextEdges = current.edges.filter((edge) => edge.from !== selectedNodeId && edge.to !== selectedNodeId);
+          const nextSelectedNodeId = nextNodes[0]?.id ?? null;
+          setSelectedNodeId(nextSelectedNodeId);
+          if (!nextSelectedNodeId) {
+            setMode("select");
+            setConnectFromId(null);
+          }
+          return {
+            ...current,
+            nodes: nextNodes,
+            edges: nextEdges,
+            selectedNodeId: nextSelectedNodeId,
+            nextX: nextNodes.length ? Math.max(80, ...nextNodes.map((node: WorkflowCanvasNode) => node.x + node.width)) + NODE_GAP_X : 80,
+            nextY: nextNodes.length ? Math.max(72, ...nextNodes.map((node: WorkflowCanvasNode) => node.y + node.height)) : 72
+          };
+        });
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedNodeId, state.nodes]);
+
   function applyPrompt(prompt: string) {
     const { nodes, edges } = buildNodesFromPrompt(prompt, 80, 72);
+    const nextX = Math.max(80, ...nodes.map((node: WorkflowCanvasNode) => node.x + node.width)) + NODE_GAP_X;
+    const nextY = Math.max(72, ...nodes.map((node: WorkflowCanvasNode) => node.y + node.height));
     setState((current) => ({
       ...current,
       prompt,
       nodes,
       edges,
       selectedNodeId: nodes[0]?.id ?? null,
-      nextX: 80,
-      nextY: 72
+      nextX,
+      nextY
     }));
     setSelectedNodeId(nodes[0]?.id ?? null);
   }
 
   function addNode(type: WorkflowCanvasNodeType) {
+    const presets: Record<WorkflowCanvasNodeType, Pick<WorkflowCanvasNode, "label" | "title" | "body">> = {
+      agent: { label: "@agent", title: "Agent node", body: "agentName" },
+      command: { label: "/command", title: "Command node", body: "commandName" },
+      resource: { label: "$brand.logo", title: "Resource node", body: "brand · logo" },
+      output: { label: "-> jpg", title: "Output target", body: "jpg" }
+    };
     const node: WorkflowCanvasNode = {
       id: uid(type),
       type,
-      label: type === "agent" ? "@agent" : "/command",
-      title: type === "agent" ? "Agent node" : "Command node",
-      body: type === "agent" ? "agentName" : "commandName",
+      ...presets[type],
       x: state.nextX,
       y: state.nextY,
       width: NODE_WIDTH,
@@ -194,6 +190,8 @@ export function WorkflowCanvas() {
       nextX: current.nextX + NODE_GAP_X,
       nextY: current.nextY
     }));
+    setMode("select");
+    setConnectFromId(null);
     setSelectedNodeId(node.id);
   }
 
@@ -205,6 +203,35 @@ export function WorkflowCanvas() {
     }));
   }
 
+  function connectNodes(fromId: string, toId: string) {
+    if (fromId === toId) return;
+    setState((current) => {
+      if (current.edges.some((edge) => edge.from === fromId && edge.to === toId)) return current;
+      return {
+        ...current,
+        edges: [...current.edges, { id: uid("edge"), from: fromId, to: toId }]
+      };
+    });
+  }
+
+  function beginConnect(nodeId: string) {
+    setMode("connect");
+    setConnectFromId(nodeId);
+    setSelectedNodeId(nodeId);
+  }
+
+  function finishConnect(nodeId: string) {
+    if (!connectFromId || connectFromId === nodeId) return;
+    connectNodes(connectFromId, nodeId);
+    setMode("select");
+    setConnectFromId(null);
+  }
+
+  function cancelConnect() {
+    setMode("select");
+    setConnectFromId(null);
+  }
+
   function saveToLocalStorage() {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, selectedNodeId }));
   }
@@ -213,6 +240,8 @@ export function WorkflowCanvas() {
     const next = defaultState();
     setState(next);
     setSelectedNodeId(null);
+    setMode("select");
+    setConnectFromId(null);
     window.localStorage.removeItem(STORAGE_KEY);
   }
 
@@ -226,7 +255,7 @@ export function WorkflowCanvas() {
   }
 
   return (
-    <section className="sc-workflow-canvas">
+    <section className={`sc-workflow-canvas ${mode === "connect" ? "connect-mode" : ""}`}>
       <header className="sc-workflow-header">
         <div>
           <strong>Workflow Canvas</strong>
@@ -235,6 +264,8 @@ export function WorkflowCanvas() {
         <div className="sc-workflow-actions">
           <button type="button" onClick={() => addNode("agent")}><UserRound /> Agent</button>
           <button type="button" onClick={() => addNode("command")}><Command /> Command</button>
+          <button type="button" onClick={() => addNode("resource")}><Database /> Resource</button>
+          <button type="button" onClick={() => addNode("output")}><FileOutput /> Output</button>
           <button type="button" onClick={saveToLocalStorage}><Save /> Save</button>
           <button type="button" onClick={exportJson}><Download /> Export</button>
           <button type="button" onClick={resetCanvas}><Trash2 /> Reset</button>
@@ -247,15 +278,22 @@ export function WorkflowCanvas() {
             <textarea
               value={state.prompt}
               onChange={(event) => setState((current) => ({ ...current, prompt: event.target.value }))}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault();
+                  applyPrompt(state.prompt);
+                }
+              }}
               placeholder="Write a CAL prompt like @agent /command -> output"
             />
             <div className="sc-workflow-composer-actions">
-              <button type="button" onClick={() => applyPrompt(state.prompt)}><Check /> Parse CAL</button>
+              <button type="button" onClick={() => applyPrompt(state.prompt)}><Check /> Auto-Layout</button>
+              <button type="button" onClick={() => (mode === "connect" ? cancelConnect() : setMode("connect"))}>{mode === "connect" ? "Cancel Connect" : "Connect Mode"}</button>
               <span>{summary || "No CAL tokens yet"}</span>
             </div>
           </div>
 
-          <div ref={stageRef} className="sc-workflow-stage">
+          <div ref={stageRef} className="sc-workflow-stage" onPointerDown={() => { if (mode === "connect") cancelConnect(); }}>
             <svg className="sc-workflow-lines" viewBox={`0 0 ${Math.max(1200, state.nextX + 400)} ${Math.max(800, state.nextY + 400)}`} aria-hidden="true">
               <defs>
                 <marker id="sc-workflow-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
@@ -273,6 +311,13 @@ export function WorkflowCanvas() {
                 const mid = x1 + Math.max(70, (x2 - x1) / 2);
                 return <path key={edge.id} d={`M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`} markerEnd="url(#sc-workflow-arrow)" />;
               })}
+              {mode === "connect" && connectFromId && (() => {
+                const from = state.nodes.find((node) => node.id === connectFromId);
+                if (!from) return null;
+                const x1 = from.x + from.width;
+                const y1 = from.y + from.height / 2;
+                return <path d={`M ${x1} ${y1} C ${x1 + 90} ${y1}, ${x1 + 120} ${y1}, ${x1 + 160} ${y1}`} markerEnd="url(#sc-workflow-arrow)" className="connect-preview" />;
+              })()}
             </svg>
 
             {state.nodes.map((node) => (
@@ -281,15 +326,27 @@ export function WorkflowCanvas() {
                 type="button"
                 className={`sc-workflow-node ${node.type} ${node.id === selectedNodeId ? "selected" : ""}`}
                 style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
-                onClick={() => setSelectedNodeId(node.id)}
+                onClick={() => {
+                  if (mode === "connect" && connectFromId) {
+                    finishConnect(node.id);
+                  } else {
+                    setSelectedNodeId(node.id);
+                  }
+                }}
+                onDoubleClick={() => beginConnect(node.id)}
                 onPointerDown={(event) => {
                   setSelectedNodeId(node.id);
+                  if (mode === "connect") {
+                    setConnectFromId((current) => current ?? node.id);
+                    event.preventDefault();
+                    return;
+                  }
                   const rect = (event.currentTarget as HTMLButtonElement).getBoundingClientRect();
                   setDragging({ id: node.id, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top });
                   event.preventDefault();
                 }}
               >
-                <span className="sc-workflow-node-type">{node.type === "agent" ? "@" : "/"}</span>
+                <span className="sc-workflow-node-type">{node.type === "agent" ? "@" : node.type === "command" ? "/" : node.type === "resource" ? "$" : "->"}</span>
                 <strong>{node.label}</strong>
                 <small>{node.title}</small>
                 <p>{node.body}</p>
@@ -300,8 +357,21 @@ export function WorkflowCanvas() {
 
         <aside className="sc-workflow-sidebar">
           <strong>Properties</strong>
+          <small>{mode === "connect" ? `Connect from ${connectFromId ?? "..."} then click a target` : "Select a node to edit its properties."}</small>
+          <div className="sc-workflow-sidebar-meta">
+            <span>{parsedPrompt.resources.length} resources</span>
+            <span>{parsedPrompt.outputs.length} outputs</span>
+            <span>{parsedPrompt.warnings.length} warnings</span>
+          </div>
           {selectedNode ? (
             <>
+              <div className="sc-workflow-sidebar-section">
+                <button type="button" onClick={() => beginConnect(selectedNode.id)}>Start Connect</button>
+                <button type="button" onClick={() => setState((current) => ({
+                  ...current,
+                  edges: current.edges.filter((edge) => edge.from !== selectedNode.id && edge.to !== selectedNode.id)
+                }))}>Clear Links</button>
+              </div>
               <label>
                 Label
                 <input value={selectedNode.label} onChange={(event) => updateSelectedNode({ label: event.target.value })} />
@@ -326,6 +396,18 @@ export function WorkflowCanvas() {
           ) : (
             <p>Select a node to edit its properties.</p>
           )}
+
+          <div className="sc-workflow-sidebar-section">
+            <strong>CAL diagnostics</strong>
+            <button type="button" onClick={() => cancelConnect()} disabled={mode !== "connect"}>Exit connect mode</button>
+            {parsedPrompt.warnings.length ? (
+              <ul>
+                {parsedPrompt.warnings.map((warning: string) => <li key={warning}>{warning}</li>)}
+              </ul>
+            ) : (
+              <p>No parser warnings.</p>
+            )}
+          </div>
         </aside>
       </div>
     </section>

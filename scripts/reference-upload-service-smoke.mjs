@@ -328,6 +328,50 @@ try {
       body: JSON.stringify({ account: "admin@example.com", password: "prod-upload-password" })
     });
     const prodToken = prodLogin.token;
+
+    const directExternalFrame = await request(prodBaseUrl, "/canvas/frames", {
+      method: "POST",
+      headers: { Origin: "https://xmanx.com" },
+      body: JSON.stringify({ brandId: null, title: "Upload service production external URL smoke" })
+    }, prodToken);
+    await request(prodBaseUrl, `/canvas/frames/${directExternalFrame.id}`, {
+      method: "PATCH",
+      headers: { Origin: "https://xmanx.com" },
+      body: JSON.stringify({
+        workflowNodes: [{
+          id: "node_video_upload_service_external_url",
+          type: "video",
+          title: "Upload service external URL node",
+          body: "Reject unsafe external reference URL in production",
+          preview: "#111827",
+          x: 120,
+          y: 120,
+          w: 260,
+          h: 180,
+          refs: [{
+            id: "ref_upload_service_external_http",
+            role: "first-frame",
+            title: "Unsafe External First Frame",
+            description: "Non-HTTPS external URL should be rejected in production",
+            color: "#111827",
+            imageUrl: "http://127.0.0.1/unsafe-first-frame.png"
+          }]
+        }]
+      })
+    }, prodToken);
+    const directExternalGenerate = await requestRaw(prodBaseUrl, `/canvas/frames/${directExternalFrame.id}/nodes/node_video_upload_service_external_url/generate-video`, {
+      method: "POST",
+      headers: { Origin: "https://xmanx.com" },
+      body: JSON.stringify({
+        prompt: "Generate a short product motion test using the uploaded first frame reference.",
+        model: "grok-imagine-1.0-video-super",
+        settings: { mode: "图生视频", ratio: "9:16 · 720P", duration: "10s", sound: false, translate: false }
+      })
+    }, prodToken);
+    const directExternalErrorText = await directExternalGenerate.text();
+    assert(directExternalGenerate.status === 500, `expected production external URL rejection, got ${directExternalGenerate.status} ${directExternalErrorText}`);
+    assert(/input_reference|upload-service-non-production-url|公网图片链接|发布策略/i.test(directExternalErrorText), `expected unsafe external URL rejection details, got ${directExternalErrorText}`);
+
     uploadMode = "unsafe";
     const providerCountBefore = providerSeenReferences.length;
     const prodFrame = await createVideoNode(prodBaseUrl, prodToken, "Upload service production unsafe URL smoke");
@@ -350,7 +394,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    checked: ["upload-service-provider-configured", "upload-service-first-frame-persisted", "production-upload-service-rejects-non-https-public-url"],
+    checked: ["upload-service-provider-configured", "upload-service-first-frame-persisted", "production-upload-service-rejects-unsafe-external-url", "production-upload-service-rejects-non-https-public-url"],
     providerReference,
     uploadRequest
   }, null, 2));

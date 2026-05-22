@@ -121,11 +121,11 @@ curl http://localhost:4100/health
 npm test
 ```
 
-该命令必须覆盖：
+`npm test` 当前实际覆盖：
 
 - TypeScript 类型检查。
 - 前后端生产构建。
-- 后端冒烟测试。
+- 后端本地冒烟测试。
 - 登录、工作区加载、品牌创建、品牌资产上传/替换/刷新后持久化。
 - CAL 引用解析，图片引用进入 `imageReferences`。
 - 一句话生成 JPG/PDF/MP4 工作流。
@@ -133,6 +133,21 @@ npm test
 - MP4 节点状态更新。
 - 当前工作流重跑不新建项目。
 - 资产和节点保存后可从 `/workspace` 重新加载。
+
+生产路径改动、发布前或排查生产回归时，还必须额外运行：
+
+```bash
+npm run test:production-smoke
+```
+
+`npm run test:production-smoke` 当前实际聚焦生产路径回归，覆盖：
+
+- 生产环境禁用公开演示账号 `shift/123456`。
+- 生产 token 登录与 `/workspace` 鉴权。
+- `/generated/*` 生成文件必须鉴权访问。
+- 生产环境公开引用状态与 CORS 来源过滤。
+- 视频首帧引用在生产路径中使用带签名公开 URL。
+- public reference、upload service、object storage 三条生产引用回归脚本。
 
 ## 10. 上线阻塞项
 

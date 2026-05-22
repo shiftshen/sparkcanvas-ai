@@ -3,14 +3,21 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const root = process.cwd();
+const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const port = 4201;
 const baseUrl = `http://localhost:${port}`;
 const tempDir = await mkdtemp(path.join(tmpdir(), "sparkcanvas-prod-smoke-"));
 const dataFile = path.join(tempDir, "sparkcanvas.json");
 const generatedDir = path.join(tempDir, "generated");
 const providerSeenReferences = [];
+const referenceRegressionScripts = [
+  "public-reference-strategy-smoke.mjs",
+  "reference-upload-service-smoke.mjs",
+  "reference-object-storage-smoke.mjs"
+];
 
 const providerServer = createServer((req, res) => {
   if (req.method === "POST" && req.url === "/v1/videos") {
@@ -43,6 +50,27 @@ const providerBaseUrl = `http://127.0.0.1:${providerPort}`;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+async function runReferenceRegressionScript(scriptName) {
+  const scriptEnv = { ...process.env };
+  delete scriptEnv.SPARKCANVAS_PUBLIC_BASE_URL;
+  delete scriptEnv.PUBLIC_BASE_URL;
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(scriptsDir, scriptName)], {
+      cwd: root,
+      env: scriptEnv,
+      stdio: "inherit"
+    });
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${scriptName} failed with ${signal ? `signal ${signal}` : `exit code ${code ?? "unknown"}`}`));
+    });
+  });
 }
 
 const server = spawn("node", ["dist/server.js"], {
@@ -204,10 +232,24 @@ try {
   });
   assert(evilOrigin.status >= 500 || !evilOrigin.headers.get("access-control-allow-origin"), "production CORS must not allow arbitrary origins");
 
+  for (const scriptName of referenceRegressionScripts) {
+    await runReferenceRegressionScript(scriptName);
+  }
+
   console.log(JSON.stringify({
     ok: true,
-    checked: ["production-demo-login-disabled", "production-admin-login", "production-token-auth", "production-generated-file-auth", "production-video-input-reference-signed-url", "production-cors-origin-filter", "production-upload-service-url-sanity"],
-    providerReference
+    checked: [
+      "production-demo-login-disabled",
+      "production-admin-login",
+      "production-token-auth",
+      "production-generated-file-auth",
+      "production-video-input-reference-signed-url",
+      "production-cors-origin-filter",
+      "production-upload-service-url-sanity",
+      "production-public-reference-regressions"
+    ],
+    providerReference,
+    referenceRegressionScripts
   }, null, 2));
 } finally {
   server.kill("SIGTERM");

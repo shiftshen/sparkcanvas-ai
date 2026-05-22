@@ -1,4 +1,5 @@
-import { borders, colors, motion, spacing, typography, type ThemeMode } from "@sparkcanvas/ai-design-language";
+import { borders, colors, motion, spacing, typography } from "../../../packages/ai-design-language/src/index";
+import type { ThemeMode } from "../../../packages/ai-design-language/src/types";
 
 const STYLE_ELEMENT_ID = "sparkcanvas-ai-design-language-vars";
 const STORAGE_KEY = "sparkcanvas.theme-mode";
@@ -20,44 +21,46 @@ function serializeBlock(selector: string, declarations: string[]) {
 }
 
 function themeColorDeclarations(mode: ThemeMode) {
-  return Object.entries(colors[mode]).map(([name, value]) => serializeDeclaration(cssVarName("color", name), value));
+  return Object.entries(colors[mode] as Record<string, string>).map(([name, value]) =>
+    serializeDeclaration(cssVarName("color", name), value)
+  );
 }
 
 function sharedDeclarations() {
   const declarations: string[] = [];
 
-  Object.entries(spacing).forEach(([name, value]) => {
+  Object.entries(spacing as Record<string, string>).forEach(([name, value]) => {
     declarations.push(serializeDeclaration(cssVarName("spacing", name), value));
   });
 
-  Object.entries(borders.radius).forEach(([name, value]) => {
+  Object.entries(borders.radius as Record<string, string>).forEach(([name, value]) => {
     declarations.push(serializeDeclaration(cssVarName("border-radius", name), value));
   });
 
-  Object.entries(borders.width).forEach(([name, value]) => {
+  Object.entries(borders.width as Record<string, string>).forEach(([name, value]) => {
     declarations.push(serializeDeclaration(cssVarName("border-width", name), value));
   });
 
-  Object.entries(typography.fontFamily).forEach(([name, value]) => {
+  Object.entries(typography.fontFamily as Record<string, string>).forEach(([name, value]) => {
     declarations.push(serializeDeclaration(cssVarName("font-family", name), value));
   });
 
-  Object.entries(typography.weight).forEach(([name, value]) => {
+  Object.entries(typography.weight as Record<string, number>).forEach(([name, value]) => {
     declarations.push(serializeDeclaration(cssVarName("font-weight", name), value));
   });
 
-  Object.entries(typography.scale).forEach(([name, value]) => {
+  Object.entries(typography.scale as Record<string, { fontSize: string; lineHeight: string; letterSpacing: string; fontWeight: number }>).forEach(([name, value]) => {
     declarations.push(serializeDeclaration(cssVarName("font-size", name), value.fontSize));
     declarations.push(serializeDeclaration(cssVarName("line-height", name), value.lineHeight));
     declarations.push(serializeDeclaration(cssVarName("letter-spacing", name), value.letterSpacing));
     declarations.push(serializeDeclaration(cssVarName("font-weight-scale", name), value.fontWeight));
   });
 
-  Object.entries(motion.duration).forEach(([name, value]) => {
+  Object.entries(motion.duration as Record<string, string>).forEach(([name, value]) => {
     declarations.push(serializeDeclaration(cssVarName("motion-duration", name), value));
   });
 
-  Object.entries(motion.easing).forEach(([name, value]) => {
+  Object.entries(motion.easing as Record<string, string>).forEach(([name, value]) => {
     declarations.push(serializeDeclaration(cssVarName("motion-easing", name), value));
   });
 

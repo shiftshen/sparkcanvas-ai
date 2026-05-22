@@ -43,7 +43,8 @@
 }
 
 .sc-workflow-actions button,
-.sc-workflow-composer-actions button {
+.sc-workflow-composer-actions button,
+.sc-workflow-sidebar-section button {
   display: inline-flex;
   align-items: center;
   gap: var(--sc-spacing-2);
@@ -115,6 +116,12 @@
   opacity: 0.8;
 }
 
+.sc-workflow-lines path.connect-preview {
+  stroke: var(--sc-color-warning);
+  stroke-dasharray: 8 6;
+  opacity: 1;
+}
+
 .sc-workflow-node {
   position: absolute;
   display: grid;
@@ -126,6 +133,15 @@
   background: color-mix(in srgb, var(--sc-color-surface-elevated) 75%, transparent);
   color: var(--sc-color-text);
   box-shadow: 0 10px 24px color-mix(in srgb, var(--sc-color-shadow) 18%, transparent);
+  cursor: grab;
+}
+
+.sc-workflow-canvas.connect-mode .sc-workflow-node {
+  cursor: crosshair;
+}
+
+.sc-workflow-node:active {
+  cursor: grabbing;
 }
 
 .sc-workflow-node.selected {
@@ -139,6 +155,14 @@
 
 .sc-workflow-node.command .sc-workflow-node-type {
   color: var(--sc-color-success);
+}
+
+.sc-workflow-node.resource .sc-workflow-node-type {
+  color: var(--sc-color-warning);
+}
+
+.sc-workflow-node.output .sc-workflow-node-type {
+  color: var(--sc-color-info);
 }
 
 .sc-workflow-node strong {
@@ -163,6 +187,30 @@
   align-content: start;
   gap: var(--sc-spacing-3);
   padding: var(--sc-spacing-4);
+}
+
+.sc-workflow-sidebar small {
+  color: var(--sc-color-text-muted);
+}
+
+.sc-workflow-sidebar-meta,
+.sc-workflow-sidebar-section ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.sc-workflow-sidebar-section {
+  display: grid;
+  gap: 8px;
+}
+
+.sc-workflow-sidebar-meta span,
+.sc-workflow-sidebar-section li {
+  list-style: none;
+  font-size: var(--sc-font-size-sm);
+  color: var(--sc-color-text-muted);
 }
 
 .sc-workflow-sidebar label {

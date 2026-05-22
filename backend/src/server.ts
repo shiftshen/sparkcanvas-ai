@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import type { ErrorRequestHandler, NextFunction, Request, Response } from "express";
 import PDFDocument from "pdfkit";
+import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createWriteStream, existsSync, readFileSync, renameSync } from "node:fs";
@@ -11,6 +12,9 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 
 const DEMO_TOKEN = "demo-token";
+const DEFAULT_DEMO_ACCOUNT = "shift";
+const DEFAULT_DEMO_EMAIL = "shift@sparkcanvas.local";
+const DEFAULT_DEMO_PASSWORD = "123456";
 
 type Brand = {
   id: string;
@@ -413,19 +417,60 @@ type GenerationTask = {
   completedAt?: string;
 };
 
+type AuthProvider = "email" | "google";
+
+type AuthUser = {
+  id: string;
+  name: string;
+  email: string;
+  username?: string;
+  plan: string;
+  credits: number;
+  provider: AuthProvider;
+  passwordHash?: string;
+  googleSub?: string;
+  avatarUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AuthSession = {
+  token: string;
+  userId: string;
+  kind: "login" | "register" | "google";
+  createdAt: string;
+  lastSeenAt: string;
+};
+
+type PublicUser = Pick<AuthUser, "id" | "name" | "email" | "plan" | "credits" | "provider" | "avatarUrl"> & {
+  username?: string;
+};
+
 type Db = {
-  user: {
+  user?: {
     id: string;
     name: string;
     email: string;
     plan: string;
     credits: number;
   };
+  users: AuthUser[];
+  sessions: AuthSession[];
   brands: Brand[];
   assets: Asset[];
   frames: CanvasFrame[];
   tasks: GenerationTask[];
 };
+
+declare global {
+  namespace Express {
+    interface Request {
+      authUser?: AuthUser;
+      authSession?: AuthSession;
+      authToken?: string;
+    }
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(__dirname, "../data");
@@ -441,6 +486,7 @@ const demoAuthEnabled = !isProduction || process.env.SPARKCANVAS_DEMO_AUTH === "
 const authToken = process.env.SPARKCANVAS_AUTH_TOKEN || (demoAuthEnabled ? DEMO_TOKEN : "");
 const adminAccount = process.env.SPARKCANVAS_ADMIN_ACCOUNT;
 const adminPassword = process.env.SPARKCANVAS_ADMIN_PASSWORD;
+const registrationEnabled = !isProduction || process.env.SPARKCANVAS_REGISTRATION_ENABLED === "true" || localAuthValue("SPARKCANVAS_REGISTRATION_ENABLED") === "true";
 const allowedOrigins = (process.env.SPARKCANVAS_ALLOWED_ORIGINS || (isProduction ? "https://xmanx.com,https://www.xmanx.com" : ""))
   .split(",")
   .map((item) => item.trim())
@@ -455,7 +501,7 @@ const templates = [
 ];
 
 const models = [
-  { id: "imgen-skill", provider: "otcbot", model: "nano_banana_2", name: "@imgen · image skill", type: "image", costMultiplier: 1, unitCostCny: 0.24, reasoningEffort: "high", description: "默认图片角色，统一走本地 scripts/generate_image.py；默认模型 nano_banana_2，网关和密钥由 IMAGE_GEN_* / auth.json 控制" },
+  { id: "imgen-skill", provider: "otcbot", model: process.env.IMAGE_GEN_MODEL || localAuthValue("IMAGE_GEN_MODEL") || "gpt-5.4", name: "@imgen · image skill", type: "image", costMultiplier: 1, unitCostCny: 0.24, reasoningEffort: "high", description: "默认图片角色，统一走本地 scripts/generate_image.py；模型、网关和密钥由 IMAGE_GEN_* / auth.json 控制，默认经 Responses API 调用 image_generation" },
   { id: "yijiarj-nano-banana-2", provider: "yijiarj", model: "nano_banana_2", name: "yijiarj · nano_banana_2", type: "image", costMultiplier: 1, unitCostCny: 0.24, reasoningEffort: "high", description: "默认图片模型，经本地 skill 调用 yijiarj Gemini native image API，支持多图参考；约 ¥0.24/次" },
   { id: "cliproxyapi-gpt-5-4", provider: "cliproxyapi", model: "gpt-5.4", name: "cliproxyapi · gpt-5.4", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
   { id: "cliproxyapi-gpt-5", provider: "cliproxyapi", model: "gpt-5", name: "cliproxyapi · gpt-5", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
@@ -653,13 +699,8 @@ function createSeedDb(): Db {
   ].map((brand) => defaultBrandDetails(brand));
 
   const seed: Db = {
-    user: {
-      id: "user_shift",
-      name: "Shift",
-      email: "shift@sparkcanvas.local",
-      plan: "Pro",
-      credits: 1260
-    },
+    users: [defaultAuthUser(1260)],
+    sessions: [],
     brands,
     assets: [
       createAsset("XMANX Logo 透明底", "logo", "brand_xmanx", "#111827", "XM · transparent", "/brand-assets/optimized/xmanx-logo.jpg"),
@@ -678,6 +719,109 @@ function createSeedDb(): Db {
 
 function createAsset(title: string, type: Asset["type"], brandId: string, color: string, meta: string, imageUrl?: string): Asset {
   return { id: nanoid(8), title, type, brandId, color, meta, imageUrl, createdAt: now() };
+}
+
+function passwordHash(password: string, salt = randomBytes(16).toString("hex")) {
+  const iterations = 120000;
+  const derived = pbkdf2Sync(password, salt, iterations, 64, "sha512").toString("hex");
+  return `pbkdf2$${iterations}$${salt}$${derived}`;
+}
+
+function verifyPassword(password: string, encoded?: string) {
+  if (!encoded) return false;
+  const parts = encoded.split("$");
+  if (parts.length !== 4 || parts[0] !== "pbkdf2") return false;
+  const iterations = Number(parts[1]);
+  if (!Number.isFinite(iterations) || iterations < 1) return false;
+  const expected = Buffer.from(parts[3], "hex");
+  const actual = Buffer.from(pbkdf2Sync(password, parts[2], iterations, expected.length, "sha512").toString("hex"), "hex");
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+function publicUser(user: AuthUser): PublicUser {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    plan: user.plan,
+    credits: user.credits,
+    provider: user.provider,
+    avatarUrl: user.avatarUrl,
+    ...(user.username ? { username: user.username } : {})
+  };
+}
+
+function defaultAuthUser(credits = 1260): AuthUser {
+  const timestamp = now();
+  return {
+    id: "user_shift",
+    name: "Shift",
+    username: DEFAULT_DEMO_ACCOUNT,
+    email: DEFAULT_DEMO_EMAIL,
+    plan: "Pro",
+    credits,
+    provider: "email",
+    passwordHash: passwordHash(DEFAULT_DEMO_PASSWORD),
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+}
+
+function normalizeAuthUser(user: Partial<AuthUser> & Pick<AuthUser, "id" | "name" | "email" | "plan" | "credits">): AuthUser {
+  const timestamp = now();
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    username: user.username ?? user.email.split("@")[0] ?? user.name.toLowerCase().replace(/\s+/g, ""),
+    plan: user.plan,
+    credits: user.credits,
+    provider: user.provider ?? "email",
+    passwordHash: user.passwordHash,
+    googleSub: user.googleSub,
+    avatarUrl: user.avatarUrl,
+    createdAt: user.createdAt ?? timestamp,
+    updatedAt: user.updatedAt ?? timestamp
+  };
+}
+
+function authSessionToken(user: AuthUser, kind: AuthSession["kind"]) {
+  if (kind === "login" && user.email === DEFAULT_DEMO_EMAIL && user.username === DEFAULT_DEMO_ACCOUNT) {
+    return DEMO_TOKEN;
+  }
+  if (kind === "login" && adminAccount && adminPassword && user.email === adminAccount && process.env.SPARKCANVAS_AUTH_TOKEN) {
+    return process.env.SPARKCANVAS_AUTH_TOKEN;
+  }
+  return `sc_${nanoid(30)}`;
+}
+
+function upsertSession(user: AuthUser, kind: AuthSession["kind"]) {
+  const token = authSessionToken(user, kind);
+  const session: AuthSession = {
+    token,
+    userId: user.id,
+    kind,
+    createdAt: now(),
+    lastSeenAt: now()
+  };
+  db.sessions = db.sessions.filter((item) => item.token !== token);
+  db.sessions.unshift(session);
+  return session;
+}
+
+function findAuthUser(accountOrEmail: string) {
+  const normalized = accountOrEmail.trim().toLowerCase();
+  return db.users.find((user) => user.email.toLowerCase() === normalized || user.username?.toLowerCase() === normalized);
+}
+
+function authUserFromToken(token?: string) {
+  if (!token) return undefined;
+  if (token === process.env.SPARKCANVAS_AUTH_TOKEN && process.env.SPARKCANVAS_AUTH_TOKEN) {
+    const adminUser = adminAccount ? findAuthUser(adminAccount) : undefined;
+    return adminUser ?? db.users[0];
+  }
+  const session = db.sessions.find((item) => item.token === token);
+  return session ? db.users.find((user) => user.id === session.userId) : undefined;
 }
 
 function attrNode(key: string, value?: AttributeValue, children?: AttributeTree[]): AttributeTree {
@@ -1400,17 +1544,81 @@ async function loadDb() {
   await mkdir(path.dirname(dataFile), { recursive: true });
   try {
     db = JSON.parse(await readFile(dataFile, "utf8")) as Db;
+    await migrateAuthDb();
     await migrateDb();
   } catch {
     const backupFile = `${dataFile}.bak`;
     if (existsSync(backupFile)) {
       db = JSON.parse(await readFile(backupFile, "utf8")) as Db;
+      await migrateAuthDb();
+      await migrateDb();
       await persistDb();
       return;
     }
     db = createSeedDb();
+    await migrateAuthDb();
+    await migrateDb();
     await persistDb();
   }
+}
+
+async function migrateAuthDb() {
+  let changed = false;
+  const timestamp = now();
+  const legacyUser = db.user;
+  if (!Array.isArray(db.users)) {
+    db.users = [];
+    changed = true;
+  }
+  if (!Array.isArray(db.sessions)) {
+    db.sessions = [];
+    changed = true;
+  }
+  if (isProduction && !demoAuthEnabled) {
+    const before = db.users.length;
+    db.users = db.users.filter((user) => user.email !== DEFAULT_DEMO_EMAIL && user.username !== DEFAULT_DEMO_ACCOUNT);
+    if (db.users.length !== before) changed = true;
+  }
+  if (legacyUser && !db.users.some((user) => user.id === legacyUser.id || user.email === legacyUser.email)) {
+    db.users.unshift(normalizeAuthUser({
+      ...legacyUser,
+      username: DEFAULT_DEMO_ACCOUNT,
+      provider: "email",
+      passwordHash: passwordHash(DEFAULT_DEMO_PASSWORD),
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }));
+    changed = true;
+  }
+  if (!db.users.length && (!isProduction || process.env.SPARKCANVAS_DEMO_AUTH === "true")) {
+    db.users.unshift(defaultAuthUser(1260));
+    changed = true;
+  }
+  if (adminAccount && adminPassword) {
+    const adminExisting = findAuthUser(adminAccount);
+    const adminUser: AuthUser = normalizeAuthUser({
+      id: adminExisting?.id ?? `user_${nanoid(8)}`,
+      name: adminExisting?.name ?? adminAccount,
+      email: adminAccount,
+      username: adminAccount.split("@")[0] ?? adminAccount,
+      plan: adminExisting?.plan ?? "Pro",
+      credits: adminExisting?.credits ?? 1260,
+      provider: "email",
+      passwordHash: passwordHash(adminPassword),
+      avatarUrl: adminExisting?.avatarUrl,
+      createdAt: adminExisting?.createdAt ?? timestamp,
+      updatedAt: timestamp
+    });
+    if (adminExisting) {
+      db.users = db.users.map((user) => user.id === adminExisting.id ? adminUser : user);
+    } else {
+      db.users.unshift(adminUser);
+    }
+    changed = true;
+  }
+  db.sessions = db.sessions.filter((session) => db.users.some((user) => user.id === session.userId));
+  if (legacyUser) delete db.user;
+  if (changed) await persistDb();
 }
 
 async function migrateDb() {
@@ -2652,6 +2860,40 @@ function publicUrlFromLocalAsset(assetUrl?: string, options: { signed?: boolean 
   return relativeUrl ? `${publicBase}${relativeUrl}` : "";
 }
 
+function resolveDirectExternalReference(assetUrl: string, label: string): PublishedReferenceResolution {
+  if (isProduction) {
+    try {
+      const { productionReady } = classifyReferenceHost(assetUrl);
+      if (!productionReady) {
+        return {
+          source: "external-url",
+          strategy: "unpublished",
+          url: "",
+          requiresPublicBaseUrl: false,
+          publishReady: false,
+          reason: `${label}-non-production-url`
+        };
+      }
+    } catch {
+      return {
+        source: "external-url",
+        strategy: "unpublished",
+        url: "",
+        requiresPublicBaseUrl: false,
+        publishReady: false,
+        reason: `${label}-invalid-url`
+      };
+    }
+  }
+  return {
+    source: "external-url",
+    strategy: "direct-external",
+    url: assetUrl,
+    requiresPublicBaseUrl: false,
+    publishReady: true
+  };
+}
+
 function publicBaseUrlPublicationProvider(): ReferencePublicationProvider {
   return {
     id: "public-base-url",
@@ -2667,13 +2909,7 @@ function publicBaseUrlPublicationProvider(): ReferencePublicationProvider {
         };
       }
       if (/^https?:\/\//i.test(assetUrl)) {
-        return {
-          source: "external-url",
-          strategy: "direct-external",
-          url: assetUrl,
-          requiresPublicBaseUrl: false,
-          publishReady: true
-        };
+        return resolveDirectExternalReference(assetUrl, "public-base-url");
       }
       if (!assetUrl.startsWith("/")) {
         return {
@@ -2862,13 +3098,7 @@ function objectStorageReferencePublicationProvider(): ReferencePublicationProvid
         };
       }
       if (/^https?:\/\//i.test(assetUrl)) {
-        return {
-          source: "external-url",
-          strategy: "direct-external",
-          url: assetUrl,
-          requiresPublicBaseUrl: false,
-          publishReady: true
-        };
+        return resolveDirectExternalReference(assetUrl, "object-storage");
       }
       if (!assetUrl.startsWith("/")) {
         return {
@@ -2982,13 +3212,7 @@ function uploadServiceReferencePublicationProvider(): ReferencePublicationProvid
         };
       }
       if (/^https?:\/\//i.test(assetUrl)) {
-        return {
-          source: "external-url",
-          strategy: "direct-external",
-          url: assetUrl,
-          requiresPublicBaseUrl: false,
-          publishReady: true
-        };
+        return resolveDirectExternalReference(assetUrl, "upload-service");
       }
       if (!assetUrl.startsWith("/")) {
         return {
@@ -3433,11 +3657,17 @@ async function compactReferenceImage(sourcePath: string, outputName: string, ind
   return sourcePath;
 }
 
+function isRecognizedAuthToken(token?: string) {
+  if (!token) return false;
+  if (process.env.SPARKCANVAS_AUTH_TOKEN && token === process.env.SPARKCANVAS_AUTH_TOKEN) return true;
+  return db.sessions.some((session) => session.token === token);
+}
+
 function generatedFileRequestAuthorized(req: Request) {
   if (!isProduction) return true;
   const bearer = req.header("authorization")?.replace(/^Bearer\s+/i, "");
   const queryToken = typeof req.query.token === "string" ? req.query.token : "";
-  return Boolean(authToken && (bearer === authToken || queryToken === authToken));
+  return isRecognizedAuthToken(bearer) || isRecognizedAuthToken(queryToken);
 }
 
 function generatedFileMiddleware(req: Request, res: Response, next: NextFunction) {
@@ -3445,45 +3675,46 @@ function generatedFileMiddleware(req: Request, res: Response, next: NextFunction
   next();
 }
 
-function generatedFileUrl(url?: string) {
+function generatedFileUrl(url?: string, token?: string) {
   if (!url?.startsWith("/generated/")) return url;
-  if (!isProduction || !authToken) return url;
+  const auth = token || process.env.SPARKCANVAS_AUTH_TOKEN || "";
+  if (!isProduction || !auth) return url;
   const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}token=${encodeURIComponent(authToken)}`;
+  return `${url}${separator}token=${encodeURIComponent(auth)}`;
 }
 
-function applyGeneratedFileAuthToFrame(frame: CanvasFrame) {
-  if (!isProduction || !authToken) return frame;
+function applyGeneratedFileAuthToFrame(frame: CanvasFrame, token?: string) {
+  if (!isProduction || !(token || process.env.SPARKCANVAS_AUTH_TOKEN)) return frame;
   const patchReference = (reference: ReferenceItem): ReferenceItem => ({
     ...reference,
-    imageUrl: generatedFileUrl(reference.imageUrl)
+    imageUrl: generatedFileUrl(reference.imageUrl, token)
   });
   return {
     ...frame,
     workflowNodes: frame.workflowNodes.map((node) => ({
       ...node,
-      imageUrl: generatedFileUrl(node.imageUrl),
-      fileUrl: generatedFileUrl(node.fileUrl),
-      videoUrl: generatedFileUrl(node.videoUrl),
+      imageUrl: generatedFileUrl(node.imageUrl, token),
+      fileUrl: generatedFileUrl(node.fileUrl, token),
+      videoUrl: generatedFileUrl(node.videoUrl, token),
       refs: node.refs?.map(patchReference)
     })),
     outputs: frame.outputs.map((output) => ({
       ...output,
-      imageUrl: generatedFileUrl(output.imageUrl),
-      fileUrl: generatedFileUrl(output.fileUrl),
-      videoUrl: generatedFileUrl(output.videoUrl)
+      imageUrl: generatedFileUrl(output.imageUrl, token),
+      fileUrl: generatedFileUrl(output.fileUrl, token),
+      videoUrl: generatedFileUrl(output.videoUrl, token)
     }))
   };
 }
 
-function applyGeneratedFileAuthToWorkspace() {
-  if (!isProduction || !authToken) {
+function applyGeneratedFileAuthToWorkspace(token?: string) {
+  if (!isProduction || !(token || process.env.SPARKCANVAS_AUTH_TOKEN)) {
     return { brands: db.brands, assets: db.assets, frames: db.frames };
   }
   return {
     brands: db.brands,
-    assets: db.assets.map((asset) => ({ ...asset, imageUrl: generatedFileUrl(asset.imageUrl) })),
-    frames: db.frames.map(applyGeneratedFileAuthToFrame)
+    assets: db.assets.map((asset) => ({ ...asset, imageUrl: generatedFileUrl(asset.imageUrl, token) })),
+    frames: db.frames.map((frame) => applyGeneratedFileAuthToFrame(frame, token))
   };
 }
 
@@ -4336,6 +4567,15 @@ function appendCopyNote(copy: string, note: string) {
   return copy.includes(note) ? copy : `${copy} · ${note}`;
 }
 
+function cleanImageGenerationNotes(text = "") {
+  return text
+    .replace(/\n?模型: [^\n]+/g, "")
+    .replace(/\n?参数: [^\n]+/g, "")
+    .replace(/\n?生成状态: [^\n]+/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function cleanVideoStatusNotes(copy = "", state: "ready" | "pending") {
   const staleReadyPatterns = state === "ready"
     ? [
@@ -5148,6 +5388,30 @@ async function completeTask(taskId: string) {
   }
 }
 
+function googleClientId() {
+  return process.env.SPARKCANVAS_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || localAuthValue("SPARKCANVAS_GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_ID");
+}
+
+async function verifyGoogleCredential(credential: string) {
+  const clientId = googleClientId();
+  if (!clientId) throw new Error("Google login is not configured");
+  const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+  const payload = await response.json() as Record<string, unknown>;
+  if (!response.ok) throw new Error(typeof payload.error_description === "string" ? payload.error_description : "Google token verification failed");
+  if (payload.aud !== clientId) throw new Error("Google token audience does not match this app");
+  if (payload.iss !== "https://accounts.google.com" && payload.iss !== "accounts.google.com") throw new Error("Google token issuer is invalid");
+  if (payload.email_verified !== "true" && payload.email_verified !== true) throw new Error("Google account email is not verified");
+  const email = typeof payload.email === "string" ? payload.email : "";
+  const sub = typeof payload.sub === "string" ? payload.sub : "";
+  if (!email || !sub) throw new Error("Google token did not include a verified user");
+  return {
+    email,
+    sub,
+    name: typeof payload.name === "string" ? payload.name : email.split("@")[0],
+    picture: typeof payload.picture === "string" ? payload.picture : undefined
+  };
+}
+
 const app = express();
 function installAsyncRouteCatcher(target: express.Express) {
   const methods = ["get", "post", "patch", "delete", "use"] as const;
@@ -5169,8 +5433,8 @@ function installAsyncRouteCatcher(target: express.Express) {
 }
 
 installAsyncRouteCatcher(app);
-if (isProduction && !authToken) {
-  throw new Error("Production auth is not configured. Set SPARKCANVAS_AUTH_TOKEN or explicitly enable SPARKCANVAS_DEMO_AUTH=true.");
+if (isProduction && !authToken && !adminAccount && !adminPassword && !googleClientId() && !registrationEnabled) {
+  throw new Error("Production auth is not configured. Set SPARKCANVAS_AUTH_TOKEN, admin login envs, Google login, or enable registration explicitly.");
 }
 app.use(cors({
   origin(origin, callback) {
@@ -5186,49 +5450,152 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "sparkcanvas-api", domain: "xmanx.com" });
 });
 
-app.post("/auth/login", (req, res) => {
+app.get("/auth/config", (_req, res) => {
+  const clientId = googleClientId();
+  res.json({
+    registrationEnabled,
+    google: {
+      configured: Boolean(clientId),
+      clientId: clientId || ""
+    },
+    demo: {
+      enabled: demoAuthEnabled,
+      defaultAccount: demoAuthEnabled ? DEFAULT_DEMO_ACCOUNT : "",
+      defaultPassword: demoAuthEnabled ? DEFAULT_DEMO_PASSWORD : ""
+    }
+  });
+});
+
+app.post("/auth/login", async (req, res) => {
   const parsed = z.object({ account: z.string(), password: z.string() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid login payload" });
-  const demoMatch = demoAuthEnabled && parsed.data.account === "shift" && parsed.data.password === "123456";
-  const adminMatch = Boolean(adminAccount && adminPassword && parsed.data.account === adminAccount && parsed.data.password === adminPassword);
-  if (!demoMatch && !adminMatch) {
-    return res.status(401).json({ message: "Invalid demo account or password" });
+  const user = findAuthUser(parsed.data.account.trim());
+  if (!user || !verifyPassword(parsed.data.password, user.passwordHash)) {
+    return res.status(401).json({ message: "Invalid email/account or password" });
   }
-  res.json({ token: authToken, user: db.user });
+  const session = upsertSession(user, "login");
+  await persistDb();
+  res.json({ token: session.token, user: publicUser(user) });
+});
+
+app.post("/auth/register", async (req, res) => {
+  if (!registrationEnabled) return res.status(403).json({ message: "Registration is disabled" });
+  const parsed = z.object({
+    name: z.string().min(1).optional(),
+    email: z.string().email(),
+    password: z.string().min(6)
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid registration payload" });
+  const email = parsed.data.email.trim().toLowerCase();
+  if (findAuthUser(email)) return res.status(409).json({ message: "Account already exists" });
+  const timestamp = now();
+  const user: AuthUser = {
+    id: `user_${nanoid(8)}`,
+    name: parsed.data.name?.trim() || email.split("@")[0] || "New User",
+    username: email.split("@")[0] || undefined,
+    email,
+    plan: "Starter",
+    credits: 1260,
+    provider: "email",
+    passwordHash: passwordHash(parsed.data.password),
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+  db.users.unshift(user);
+  const session = upsertSession(user, "register");
+  await persistDb();
+  res.status(201).json({ token: session.token, user: publicUser(user) });
+});
+
+app.post("/auth/google", async (req, res) => {
+  const parsed = z.object({ credential: z.string().min(10) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid Google login payload" });
+  try {
+    const verified = await verifyGoogleCredential(parsed.data.credential);
+    const existing = db.users.find((user) => user.googleSub === verified.sub || user.email.toLowerCase() === verified.email.toLowerCase());
+    const timestamp = now();
+    const user: AuthUser = existing
+      ? {
+          ...existing,
+          name: existing.name || verified.name,
+          email: verified.email,
+          provider: "google",
+          googleSub: verified.sub,
+          avatarUrl: verified.picture ?? existing.avatarUrl,
+          updatedAt: timestamp
+        }
+      : {
+          id: `user_${nanoid(8)}`,
+          name: verified.name,
+          username: verified.email.split("@")[0] || undefined,
+          email: verified.email,
+          plan: "Starter",
+          credits: 1260,
+          provider: "google",
+          googleSub: verified.sub,
+          avatarUrl: verified.picture,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        };
+    if (existing) {
+      db.users = db.users.map((item) => item.id === existing.id ? user : item);
+    } else {
+      db.users.unshift(user);
+    }
+    const session = upsertSession(user, "google");
+    await persistDb();
+    res.json({ token: session.token, user: publicUser(user) });
+  } catch (error) {
+    return res.status(401).json({ message: error instanceof Error ? error.message : "Google login failed" });
+  }
+});
+
+app.post("/auth/logout", async (req, res) => {
+  const token = req.header("authorization")?.replace(/^Bearer\s+/i, "") || "";
+  if (token) {
+    db.sessions = db.sessions.filter((session) => session.token !== token);
+    await persistDb();
+  }
+  res.json({ ok: true });
 });
 
 app.use((req, res, next) => {
   const token = req.header("authorization")?.replace(/^Bearer\s+/i, "");
-  if (!authToken || token !== authToken) return res.status(401).json({ message: "Unauthorized" });
+  const authUser = authUserFromToken(token);
+  if (!authUser) return res.status(401).json({ message: "Unauthorized" });
+  req.authUser = authUser;
+  req.authSession = db.sessions.find((session) => session.token === token);
+  req.authToken = token;
   next();
 });
 
-app.get("/me", (_req, res) => {
-  res.json(db.user);
+app.get("/me", (req, res) => {
+  res.json(publicUser(req.authUser!));
 });
 
-app.post("/me/credits/refill", async (_req, res) => {
+app.post("/me/credits/refill", async (req, res) => {
   if (process.env.NODE_ENV === "production" && process.env.DEMO_CREDIT_REFILL !== "true") {
     return res.status(403).json({ message: "Demo credit refill is disabled in production" });
   }
-  db.user.credits = Math.max(db.user.credits, 1260);
+  req.authUser!.credits = Math.max(req.authUser!.credits, 1260);
+  req.authUser!.updatedAt = now();
   await persistDb();
-  res.json(db.user);
+  res.json(publicUser(req.authUser!));
 });
 
-app.get("/workspace", async (_req, res) => {
+app.get("/workspace", async (req, res) => {
   await repairInterruptedGenerations();
   await refreshPendingVideoOutputs();
-  const workspace = applyGeneratedFileAuthToWorkspace();
-  res.json({ user: db.user, brands: workspace.brands, assets: workspace.assets, templates, models, frames: workspace.frames, tasks: db.tasks, ai: aiStatus() });
+  const workspace = applyGeneratedFileAuthToWorkspace(req.authToken);
+  res.json({ user: publicUser(req.authUser!), brands: workspace.brands, assets: workspace.assets, templates, models, frames: workspace.frames, tasks: db.tasks, ai: aiStatus() });
 });
 
-app.get("/workspace/export", (_req, res) => {
+app.get("/workspace/export", (req, res) => {
   res.setHeader("Content-Disposition", `attachment; filename="sparkcanvas-workspace-${Date.now()}.json"`);
   res.json({
     exportedAt: now(),
     domain: "xmanx.com",
-    workspace: { user: db.user, brands: db.brands, assets: db.assets, templates, models, frames: db.frames, tasks: db.tasks }
+    workspace: { user: publicUser(req.authUser!), brands: db.brands, assets: db.assets, templates, models, frames: db.frames, tasks: db.tasks }
   });
 });
 
@@ -5772,17 +6139,31 @@ app.post("/canvas/frames/:id/run", async (req, res) => {
     createdAt: now(),
     updatedAt: now()
   };
-  db.user.credits = Math.max(0, db.user.credits - frame.cost);
+  req.authUser!.credits = Math.max(0, req.authUser!.credits - frame.cost);
+  req.authUser!.updatedAt = now();
   db.tasks.unshift(task);
   await persistDb();
   void completeTask(taskId);
-  res.status(202).json({ taskId, task, frame, credits: db.user.credits });
+  res.status(202).json({ taskId, task, frame, credits: req.authUser!.credits });
 });
+
+function ensureFrameWorkflowNode(frame: CanvasFrame, nodeId: string) {
+  const existing = frame.workflowNodes.find((item) => item.id === nodeId);
+  if (existing) return existing;
+  if (!autoCoreNodeIds.has(nodeId)) return undefined;
+  const brand = frameBrand(frame);
+  const model = models.find((item) => item.id === frame.modelId) ?? models[0];
+  frame.workflowNodes = mergeWorkflowNodes(
+    buildWorkflowNodes(frame.prompt, brand, model, frame.settings, frame.brandContext || (brand ? buildBrandContext(brand) : ""), frame.brandInjected),
+    frame.workflowNodes
+  );
+  return frame.workflowNodes.find((item) => item.id === nodeId);
+}
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
   const frame = db.frames.find((item) => item.id === req.params.id);
   if (!frame) return res.status(404).json({ message: "Frame not found" });
-  const node = frame.workflowNodes.find((item) => item.id === req.params.nodeId);
+  const node = ensureFrameWorkflowNode(frame, req.params.nodeId);
   if (!node) return res.status(409).json({ message: "Node not synced yet. Save canvas workflow before generation." });
 
   const input = z.object({
@@ -5823,7 +6204,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
     generationNote = `生成状态: 使用内置品牌图降级，${error instanceof Error ? error.message.slice(0, 120) : "unavailable"}`;
   }
 
-  node.body = input.prompt?.trim() || node.body || frame.prompt;
+  const baseNodeBody = cleanImageGenerationNotes(input.prompt?.trim() || node.body || frame.prompt);
+  node.body = baseNodeBody;
   node.body = [
     node.body,
     `模型: ${selectedModel.name}`,
@@ -5863,7 +6245,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
   const frame = db.frames.find((item) => item.id === req.params.id);
   if (!frame) return res.status(404).json({ message: "Frame not found" });
-  const node = frame.workflowNodes.find((item) => item.id === req.params.nodeId);
+  const node = ensureFrameWorkflowNode(frame, req.params.nodeId);
   if (!node) return res.status(404).json({ message: "Node not found" });
 
   const input = z.object({
@@ -5921,7 +6303,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) => {
   const frame = db.frames.find((item) => item.id === req.params.id);
   if (!frame) return res.status(404).json({ message: "Frame not found" });
-  const node = frame.workflowNodes.find((item) => item.id === req.params.nodeId);
+  const node = ensureFrameWorkflowNode(frame, req.params.nodeId);
   if (!node) return res.status(404).json({ message: "Node not found" });
 
   const input = z.object({
@@ -6006,7 +6388,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => {
   const frame = db.frames.find((item) => item.id === req.params.id);
   if (!frame) return res.status(404).json({ message: "Frame not found" });
-  const node = frame.workflowNodes.find((item) => item.id === req.params.nodeId);
+  const node = ensureFrameWorkflowNode(frame, req.params.nodeId);
   if (!node) return res.status(404).json({ message: "Node not found" });
 
   const input = z.object({
@@ -6280,7 +6662,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => {
   const frame = db.frames.find((item) => item.id === req.params.id);
   if (!frame) return res.status(404).json({ message: "Frame not found" });
-  const node = frame.workflowNodes.find((item) => item.id === req.params.nodeId);
+  const node = ensureFrameWorkflowNode(frame, req.params.nodeId);
   if (!node) return res.status(404).json({ message: "Node not found" });
 
   const input = z.object({
@@ -6328,7 +6710,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-compose", async (req, res) => {
   const frame = db.frames.find((item) => item.id === req.params.id);
   if (!frame) return res.status(404).json({ message: "Frame not found" });
-  const node = frame.workflowNodes.find((item) => item.id === req.params.nodeId);
+  const node = ensureFrameWorkflowNode(frame, req.params.nodeId);
   if (!node) return res.status(404).json({ message: "Node not found" });
 
   const input = z.object({
@@ -6418,7 +6800,7 @@ app.get("/tasks/:id", (req, res) => {
   const task = db.tasks.find((item) => item.id === req.params.id);
   if (!task) return res.status(404).json({ message: "Task not found" });
   const frame = db.frames.find((item) => item.id === task.frameId);
-  res.json({ task, frame, credits: db.user.credits });
+  res.json({ task, frame, credits: req.authUser!.credits });
 });
 
 app.post("/generate", async (req, res) => {
@@ -6480,12 +6862,13 @@ app.post("/generate", async (req, res) => {
     updatedAt: now()
   };
 
-  db.user.credits = Math.max(0, db.user.credits - frame.cost);
+  req.authUser!.credits = Math.max(0, req.authUser!.credits - frame.cost);
+  req.authUser!.updatedAt = now();
   db.frames.unshift(frame);
   db.tasks.unshift(task);
   await persistDb();
   void completeTask(taskId);
-  res.status(201).json({ taskId, task, frame, credits: db.user.credits });
+  res.status(201).json({ taskId, task, frame, credits: req.authUser!.credits });
 });
 
 const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {

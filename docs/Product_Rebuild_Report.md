@@ -54,6 +54,7 @@ SparkCanvas 是面向 xmanx.com 的品牌驱动 AI 生产画布。正确流程�
 - `npm test` passed.
 - `npm audit --audit-level=moderate` passed with 0 vulnerabilities.
 - Browser verification confirmed the rebuilt UI exposes editable node titles, node insertion controls, visual brand material cards, asset multi-select, model selectors, minimap, zoom controls and bottom generation composer.
+- 注：凡涉及生产路径的变更（如登录/认证、CORS、公开引用 URL、上传/对象存储、视频生成生产链路），在认定本重构/验证完成前还必须额外运行 `npm run test:production-smoke`。
 
 ## 仍需后续真实接入
 

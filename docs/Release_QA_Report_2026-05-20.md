@@ -50,6 +50,7 @@ Commands passed:
 npm run check
 npm run build
 npm run test:smoke
+npm run test:production-smoke
 ```
 
 Smoke coverage includes:

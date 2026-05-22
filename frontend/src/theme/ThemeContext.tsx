@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import type { ThemeMode } from "@sparkcanvas/ai-design-language";
+import type { ThemeMode } from "../../../packages/ai-design-language/src/types";
 import { applyThemeMode, getInitialThemeMode, persistThemeMode, resolveCssVariable } from "./cssVariables";
 
 type TokenCategory = "color" | "spacing" | "border-radius" | "border-width" | "font-family" | "font-weight" | "font-size" | "line-height" | "letter-spacing" | "font-weight-scale" | "motion-duration" | "motion-easing";
@@ -25,7 +25,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<ThemeContextValue>(() => ({
     themeMode,
     setThemeMode: setThemeModeState,
-    toggleThemeMode: () => setThemeModeState((current) => current === "dark" ? "light" : "dark"),
+    toggleThemeMode: () => setThemeModeState((current: ThemeMode) => (current === "dark" ? "light" : "dark")),
     getTokenVar: (category, name) => resolveCssVariable(category, name),
     getTokenValue: (category, name) => {
       if (typeof window === "undefined") return "";

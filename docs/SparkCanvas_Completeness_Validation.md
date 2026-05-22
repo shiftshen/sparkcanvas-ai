@@ -1,5 +1,9 @@
 # SparkCanvas AI：产品与技术完整性验证报告
 
+> [!WARNING]
+> 这是一份历史完整性验证报告，仅保留作参考，不能作为当前完成/上线状态的依据。
+> 当前状态请以 `docs/Completion_Report.md`、`docs/Acceptance_Checklist.md` 和最新的 QA/发布验证报告为准。
+
 ## 1. 用户视角验证（User Perspective）
 
 从目标用户（电商卖家、内容创作者、企业营销人员）的角度，我们验证新产品是否满足了他们的核心需求，并解决了痛点。
