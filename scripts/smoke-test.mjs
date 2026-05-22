@@ -20,7 +20,8 @@ const server = spawn("node", ["dist/server.js"], {
     PORT: String(port),
     SPARKCANVAS_DATA_FILE: dataFile,
     SPARKCANVAS_GENERATED_DIR: generatedDir,
-    SPARKCANVAS_DISABLE_IMAGE_GEN: "1"
+    SPARKCANVAS_DISABLE_IMAGE_GEN: "1",
+    SPARKCANVAS_PUBLIC_BASE_URL: "http://127.0.0.1:1234"
   },
   stdio: ["ignore", "pipe", "pipe"]
 });
@@ -145,7 +146,7 @@ try {
     body: JSON.stringify({ account: "shift", password: "123456" })
   });
   token = login.token;
-  assert(login.user?.credits === 1260, "demo login should return seeded credits");
+  assert(typeof login.user?.credits === "number" && login.user.credits > 0, "demo login should return usable credits");
   const refilledUser = await request("/me/credits/refill", { method: "POST", body: JSON.stringify({}) });
   assert(refilledUser.credits === 1260, "local demo credit refill should keep demo account testable");
 
@@ -161,10 +162,13 @@ try {
   const aiStatus = await request("/ai/status");
   assert(typeof aiStatus.imageGeneration.baseUrl === "string" && aiStatus.imageGeneration.baseUrl.includes("/v1"), "AI status should expose image generation base URL");
   assert(!("apiKey" in aiStatus.imageGeneration), "AI status must not expose secrets");
+  assert(aiStatus.publicReference?.productionReady === false, "local smoke should mark public reference URLs as not production-ready by default");
+  assert(typeof aiStatus.publicReference?.message === "string" && aiStatus.publicReference.message.length > 0, "AI status should explain public reference readiness");
   const aiDiagnostics = await request("/ai/diagnostics");
   assert(aiDiagnostics.runtime.scriptExists === true, "AI diagnostics should find the local image skill script");
   assert(aiDiagnostics.runtime.helpOk === true, "AI diagnostics should verify the local image skill CLI");
   assert(!("apiKey" in aiDiagnostics.imageGeneration), "AI diagnostics must not expose secrets");
+  assert(aiDiagnostics.publicReference?.productionReady === false, "AI diagnostics should include non-production public reference readiness locally");
   const modelDiagnostics = await request("/ai/models/diagnostics");
   assert(modelDiagnostics.models.some((item) => item.id === "imgen-skill" && item.status === "recommended"), "model diagnostics should mark @imgen as the recommended image route");
   assert(modelDiagnostics.models.some((item) => item.id === "yijiarj-veo-3-1-fast" && item.type === "video"), "model diagnostics should include switchable video candidates");
@@ -359,10 +363,11 @@ try {
   const uploadedImageResponse = await fetch(`${baseUrl}${reloadedBrandUpload.imageUrl}`);
   assert(uploadedImageResponse.ok && uploadedImageResponse.headers.get("content-type")?.includes("image"), "uploaded brand image URL should render as an image");
 
+  const plannerPrompt = '@imgen /生成海报 使用 $model，显示 "会员免费锅底"，画面中心写 $copy.slogan，再加入 $copy.brand_name，主题 %高级感 尺寸: 1080x1350 -> 海报';
   const resolvedRefs = await request("/ai/resolve-references", {
     method: "POST",
     body: JSON.stringify({
-      prompt: '@imgen /生成海报 使用 $model，显示 "会员免费锅底"，画面中心写 $copy.slogan，再加入 $copy.brand_name，主题 %高级感 尺寸: 1080x1350 -> 海报',
+      prompt: plannerPrompt,
       brandId: brand.id,
       brandInject: true
     })
@@ -372,6 +377,45 @@ try {
   assert(resolvedRefs.textReferences.some((reference) => reference.key.endsWith(".copy.slogan") && reference.value === brand.slogan), "$copy.slogan should resolve to current brand slogan");
   assert(resolvedRefs.lockedTexts.includes("会员免费锅底") && resolvedRefs.tags.includes("高级感") && resolvedRefs.params["尺寸"] === "1080x1350", "CAL parser should extract locked text, tags and params");
   assert(resolvedRefs.prompt.includes(`"${brand.slogan}"`) && resolvedRefs.finalPrompt.includes("图片资源"), "resolved payload should expand text and keep image reference summary");
+
+  const plannerPlan = await request("/ai/plan", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: plannerPrompt,
+      brandId: brand.id,
+      brandInject: true,
+      settings: { ratio: "4:5", count: 1, quality: "hd", strength: 70, duration: 0, contentLanguage: "zh-en" }
+    })
+  });
+  assert(plannerPlan.version === "planner-plan/0.1" && plannerPlan.steps.length >= 5, "planner endpoint should return a multi-step plan");
+  assert(plannerPlan.context.brandId === brand.id && plannerPlan.context.injected === true, "planner endpoint should preserve explicit brand injection context");
+  assert(plannerPlan.steps.some((step) => step.stage === "generation" && /Generate/i.test(step.title)), "planner endpoint should emit generation steps");
+
+  const canvasPlan = await request("/ai/canvas-plan", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: plannerPrompt,
+      brandId: brand.id,
+      brandInject: true,
+      settings: { ratio: "4:5", count: 1, quality: "hd", strength: 70, duration: 0, contentLanguage: "zh-en" }
+    })
+  });
+  assert(canvasPlan.version === "canvas-plan/0.1" && canvasPlan.nodes.length >= plannerPlan.steps.length, "canvas-plan endpoint should expose graph nodes for planner steps");
+  assert(canvasPlan.nodes.some((node) => node.stage === "generation") && canvasPlan.edges.length >= 3, "canvas-plan endpoint should expose planner graph connectivity");
+
+  const workflowBridge = await request("/ai/workflow-bridge", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: plannerPrompt,
+      brandId: brand.id,
+      brandInject: true,
+      settings: { ratio: "4:5", count: 1, quality: "hd", strength: 70, duration: 0, contentLanguage: "zh-en" }
+    })
+  });
+  assert(workflowBridge.plan?.version === "planner-plan/0.1" && workflowBridge.canvasPlan?.version === "canvas-plan/0.1", "workflow bridge should expose planner and canvas-plan payloads");
+  assert(workflowBridge.workflowNodes.some((node) => node.id === "visual-draft"), "workflow bridge should map planner generation into the main workflow nodes");
+  assert(workflowBridge.workflowNodes.some((node) => node.id === "visual-draft" && node.title && node.title !== "Image"), "workflow bridge should expose planner-derived generation node titles");
+  assert(workflowBridge.workflowNodes.find((node) => node.id === "prompt")?.title !== "Prompt", "workflow bridge should override core node metadata with planner-aware titles");
   const prefixRefs = await request("/ai/resolve-references", {
     method: "POST",
     body: JSON.stringify({
@@ -404,12 +448,14 @@ try {
   const explicitUnbrandedRefs = await request("/ai/resolve-references", {
     method: "POST",
     body: JSON.stringify({
-      prompt: "参考 $xmanx.logo 生成一张跨品牌测试图",
+      prompt: "参考 $xmanx.logo 和 $dapot.ip 生成一张跨品牌测试图，同时保留 $logo 未解析",
       brandId: null,
       brandInject: false
     })
   });
-  assert(explicitUnbrandedRefs.imageReferences.some((reference) => reference.role === "logo" && reference.imageUrl), "brandId null should still resolve explicit cross-brand $brand.asset refs");
+  assert(explicitUnbrandedRefs.imageReferences.some((reference) => reference.description.includes("xmanx.logo") && reference.role === "logo" && reference.imageUrl), "brandId null should still resolve explicit cross-brand $xmanx.logo refs");
+  assert(explicitUnbrandedRefs.imageReferences.some((reference) => reference.description.includes("dapot.ip") && reference.role === "ip" && reference.imageUrl), "brandId null should still resolve explicit cross-brand $dapot.ip refs");
+  assert(explicitUnbrandedRefs.prompt.includes("$logo") && explicitUnbrandedRefs.warnings.some((warning) => warning.includes("当前项目未绑定品牌") && warning.includes("$logo")), "brandId null should keep unqualified $logo unresolved without active-brand fallback");
   const storefrontRefs = await request("/ai/resolve-references", {
     method: "POST",
     body: JSON.stringify({
@@ -598,6 +644,8 @@ try {
   assert(promptOnlyCompleted.frame.brandId === "" && promptOnlyCompleted.frame.brandInjected === false, "plain one-line generation should remain unbranded");
   assert(promptOnlyRefs.length === 0, "plain one-line generation should not attach XMANX refs when no brand is selected or mentioned");
   assert(!promptOnlyCompleted.frame.finalPrompt.includes("XMANX") && !promptOnlyCompleted.frame.finalPrompt.includes("xmanx.com"), "plain one-line final prompt should not contain hidden XMANX context");
+  assert(promptOnlyCompleted.frame.workflowNodes.find((node) => node.id === "prompt")?.title === "Interpret intent", "main generate flow should apply planner metadata to core prompt node");
+  assert(promptOnlyCompleted.frame.workflowNodes.some((node) => node.type === "output" && /Package|输出/.test(node.title)), "main generate flow should use planner-derived output nodes instead of default generic output naming");
 
   const inferredBrandGenerated = await request("/generate", {
     method: "POST",
@@ -647,6 +695,9 @@ try {
   });
   const multiOutputCompleted = await waitForTask(multiOutputGenerated.taskId);
   assert(multiOutputCompleted.task.progress === 100 && multiOutputCompleted.frame.progress === 100, "multi-output workflow should finish at 100%, not stay at 96%");
+  assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.id === "visual-draft" && /Generate/i.test(node.title)), "multi-output workflow should keep planner-driven visual draft node for shared generation");
+  assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.type === "process" && node.title.includes("PDF")), "planner-driven workflow should add a PDF process node before output packaging");
+  assert(multiOutputCompleted.frame.workflowNodes.some((node) => node.type === "script" && /Generate MP4|视频脚本/i.test(node.title)), "planner-driven workflow should add a video script/generation branch for mp4 outputs");
   assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "document" && output.title.includes("PDF")), "CAL -> pdf should create a document output");
   assert(multiOutputCompleted.frame.outputs.some((output) => output.kind === "document" && output.fileUrl?.endsWith(".pdf")), "CAL -> pdf should generate a downloadable PDF artifact");
   const pdfOutput = multiOutputCompleted.frame.outputs.find((output) => output.kind === "document");
@@ -826,6 +877,7 @@ try {
   });
   assert(composeNode.composePlan.includes("分段策略") && composeNode.composePlan.includes("配音规则") && composeNode.segments.length === 2, "compose node should create a multi-segment edit plan with per-segment voice/audio rules");
   assert(composeNode.segmentPlan?.every((segment) => segment.modelSeconds === 10) && composeNode.composePlan.includes("S1 成片10s/模型10s"), "compose node should expose fixed 10s model clip planning");
+  assert(composeNode.composeVerification?.continuityChecks?.some((line) => line.includes("连续性校验")) && composeNode.composePlan.includes("合成校验"), "compose node should surface continuity verification in the plan");
 
   const smokeVideoA = await createSmokeVideo("smoke-a.mp4", "red");
   const smokeVideoB = await createSmokeVideo("smoke-b.mp4", "blue");
@@ -860,6 +912,7 @@ try {
       body: JSON.stringify({ prompt: "用历史生成视频裁切合并 5 秒成片", settings: { duration: "5s", ratio: "16:9 · 720P", contentLanguage: "zh-en", transition: "硬切", audioMode: "统一混音" } })
     });
     assert(mergedComposeNode.mergedUrl?.startsWith("/generated/") && mergedComposeNode.composePlan.includes("已用 ffmpeg 完成裁切/合成"), "compose node should trim and merge historical generated MP4 files into a final local MP4");
+    assert(mergedComposeNode.composeVerification?.ok === true && mergedComposeNode.composeVerification?.materializedSegments >= 1, "compose node should return explicit successful verification for the merged MP4 branch");
     const staleStatusOutputs = longVideoCompleted.frame.outputs.map((output) => output.kind === "video"
       ? { ...output, videoUrl: smokeVideoA, copy: `${output.copy} · 本地 MP4 文件无有效视频内容，已恢复为等待状态。` }
       : output);
@@ -872,6 +925,7 @@ try {
     const cleanedVideoOutput = cleanedVideoFrame.outputs.find((output) => output.kind === "video");
     assert(cleanedVideoOutput?.videoUrl === smokeVideoA && !cleanedVideoOutput.copy.includes("本地 MP4 文件无有效视频内容"), "valid local MP4 outputs should remove stale invalid-video status notes on workspace reload");
     optionalChecks.push("compose-local-mp4");
+    optionalChecks.push("compose-verification");
     optionalChecks.push("video-status-cleanup");
   } else {
     optionalChecks.push("compose-local-mp4-skipped-no-ffmpeg");

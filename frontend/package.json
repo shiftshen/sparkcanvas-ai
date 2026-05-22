@@ -10,6 +10,7 @@
     "check": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@sparkcanvas/ai-design-language": "file:../packages/ai-design-language",
     "@vitejs/plugin-react": "^6.0.2",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",

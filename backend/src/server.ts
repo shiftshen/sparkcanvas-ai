@@ -44,6 +44,38 @@ type BrandAssetRole = {
   color?: string;
 };
 
+type EntityKind = "brand" | "product" | "asset" | "campaign" | "persona" | "document" | "workspace";
+
+type AttributeValue =
+  | string
+  | number
+  | boolean
+  | null
+  | string[]
+  | number[]
+  | boolean[]
+  | AttributeTree[]
+  | AttributeTree;
+
+type AttributeTree = {
+  key: string;
+  value?: AttributeValue;
+  children?: AttributeTree[];
+};
+
+type Entity = {
+  id: string;
+  entityId: string;
+  kind: EntityKind;
+  entityKind: EntityKind;
+  sourceType: "brand";
+  sourceId: string;
+  title: string;
+  status: "active" | "archived";
+  updatedAt: string;
+  attributes: AttributeTree[];
+};
+
 type Asset = {
   id: string;
   title: string;
@@ -152,6 +184,202 @@ type ResolvedPromptAssets = {
   agents: string[];
   commands: string[];
   ast: CalAst;
+  warnings: string[];
+};
+
+type ResolverResolvedKind = "entity" | "attribute" | "asset" | "text";
+
+type ResolverBinding = {
+  sourceRef: string;
+  resolved: boolean;
+  resolvedKind: ResolverResolvedKind;
+  entityId?: string;
+  entityKind?: EntityKind;
+  brandId?: string;
+  brandKey?: string;
+  path: string;
+  pathSegments: string[];
+  title?: string;
+  role?: string;
+  description?: string;
+  value?: string;
+  imageUrl?: string;
+  warnings: string[];
+};
+
+type ResolverGraph = {
+  version: "resolver-graph/0.1";
+  source: {
+    originalPrompt: string;
+    normalizedPrompt: string;
+    expandedPrompt: string;
+    cal: CalAst;
+  };
+  context: {
+    brandId: string;
+    brandKey: string;
+    brandName: string;
+    selection: "explicit" | "inferred" | "none";
+    injected: boolean;
+  };
+  bindings: ResolverBinding[];
+  warnings: string[];
+};
+
+type CreativeIRIntent = {
+  summary: string;
+  sourceText: string;
+  agents: string[];
+  commands: string[];
+  tags: string[];
+  lockedTexts: string[];
+  params: Record<string, string>;
+  executionText: string;
+};
+
+type CreativeIRContext = {
+  brandId: string;
+  brandKey: string;
+  brandName: string;
+  selection: "explicit" | "inferred" | "none";
+  injected: boolean;
+  brandContext: string;
+  visualStyle: string;
+  tone: string;
+  market: string;
+  slogan: string;
+  audience: string;
+  forbiddenWords: string[];
+  sceneKeywords: string[];
+};
+
+type CreativeIRBinding = {
+  kind: "image" | "text";
+  key: string;
+  raw: string;
+  role?: string;
+  title?: string;
+  description?: string;
+  value?: string;
+  imageUrl?: string;
+  resolved: boolean;
+};
+
+type CreativeIRStyle = {
+  visualStyle: string;
+  tone: string;
+  primaryColor?: string;
+  accentColor?: string;
+  tags: string[];
+  contentLanguage: ContentLanguage | "auto";
+  orientation: WorkflowOrientation;
+  ratioHint: string;
+};
+
+type CreativeIRConstraints = {
+  lockedTexts: string[];
+  forbiddenWords: string[];
+  warnings: string[];
+  contentLanguage: string;
+  brandConsistency: string[];
+};
+
+type CreativeIRFlowStep = {
+  id: string;
+  title: string;
+  detail: string;
+};
+
+type CreativeIROutput = {
+  targets: string[];
+  primary: WorkflowOutputTarget;
+  kinds: OutputKind[];
+  hints: Array<{
+    target: string;
+    kind: OutputKind;
+    label: string;
+  }>;
+};
+
+type CreativeIR = {
+  version: "creative-ir/0.1";
+  source: {
+    originalPrompt: string;
+    normalizedPrompt: string;
+    expandedPrompt: string;
+    cal: CalAst;
+  };
+  intent: CreativeIRIntent;
+  context: CreativeIRContext;
+  bindings: {
+    assets: CreativeIRBinding[];
+    references: CreativeIRBinding[];
+  };
+  style: CreativeIRStyle;
+  constraints: CreativeIRConstraints;
+  flow: CreativeIRFlowStep[];
+  output: CreativeIROutput;
+  warnings: string[];
+};
+
+type PlannerStage = "intent" | "context" | "references" | "generation" | "output";
+
+type PlannerStep = {
+  id: string;
+  stage: PlannerStage;
+  title: string;
+  detail: string;
+  dependsOn: string[];
+  inputs: string[];
+  outputs: string[];
+  bindings: string[];
+};
+
+type PlannerPlan = {
+  version: "planner-plan/0.1";
+  source: {
+    prompt: string;
+    irVersion: CreativeIR["version"];
+  };
+  summary: string;
+  context: {
+    brandId: string;
+    brandName: string;
+    selection: CreativeIRContext["selection"];
+    injected: boolean;
+    primaryOutput: WorkflowOutputTarget;
+    outputKinds: OutputKind[];
+  };
+  steps: PlannerStep[];
+  warnings: string[];
+};
+
+type CanvasPlanNode = {
+  id: string;
+  type: "intent" | "context" | "reference" | "generation" | "output";
+  title: string;
+  body: string;
+  stepId: string;
+  stage: PlannerStage;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  inputIds?: string[];
+};
+
+type CanvasPlanEdge = {
+  id: string;
+  from: string;
+  to: string;
+};
+
+type CanvasPlanGraph = {
+  version: "canvas-plan/0.1";
+  planVersion: PlannerPlan["version"];
+  summary: string;
+  nodes: CanvasPlanNode[];
+  edges: CanvasPlanEdge[];
   warnings: string[];
 };
 
@@ -450,6 +678,76 @@ function createSeedDb(): Db {
 
 function createAsset(title: string, type: Asset["type"], brandId: string, color: string, meta: string, imageUrl?: string): Asset {
   return { id: nanoid(8), title, type, brandId, color, meta, imageUrl, createdAt: now() };
+}
+
+function attrNode(key: string, value?: AttributeValue, children?: AttributeTree[]): AttributeTree {
+  const node: AttributeTree = { key };
+  if (typeof value !== "undefined") node.value = value;
+  if (children?.length) node.children = children;
+  return node;
+}
+
+function brandToEntity(brand: Brand): Entity {
+  const relatedAssets = db.assets.filter((asset) => asset.brandId === brand.id);
+  return {
+    id: brand.id,
+    entityId: brand.id,
+    kind: "brand",
+    entityKind: "brand",
+    sourceType: "brand",
+    sourceId: brand.id,
+    title: brand.name,
+    status: brand.archived ? "archived" : "active",
+    updatedAt: brand.updatedAt,
+    attributes: [
+      attrNode("identity", undefined, [
+        attrNode("name", brand.name),
+        attrNode("logoText", brand.logoText),
+        attrNode("slogan", brand.slogan),
+        attrNode("industry", brand.industry),
+        attrNode("market", brand.market),
+        attrNode("targetAudience", brand.targetAudience),
+        attrNode("brandStory", brand.brandStory),
+        attrNode("active", brand.active),
+        attrNode("autoInject", brand.autoInject)
+      ]),
+      attrNode("visual", undefined, [
+        attrNode("primaryColor", brand.primaryColor),
+        attrNode("accentColor", brand.accentColor),
+        attrNode("visualStyle", brand.visualStyle),
+        attrNode("logoUsage", brand.logoUsage),
+        attrNode("sceneKeywords", brand.sceneKeywords)
+      ]),
+      attrNode("voice", undefined, [
+        attrNode("tone", brand.tone)
+      ]),
+      attrNode("business", undefined, [
+        attrNode("ipName", brand.ipName),
+        attrNode("ipDescription", brand.ipDescription)
+      ]),
+      attrNode("rules", undefined, [
+        attrNode("forbiddenWords", brand.forbiddenWords),
+        attrNode("archived", Boolean(brand.archived))
+      ]),
+      attrNode("assets", undefined, [
+        attrNode("roles", undefined, brand.assetRoles.map((role) => attrNode(role.role, undefined, [
+          attrNode("title", role.title),
+          attrNode("description", role.description),
+          attrNode("color", role.color ?? null)
+        ]))),
+        attrNode("linked", undefined, relatedAssets.map((asset) => attrNode(asset.id, undefined, [
+          attrNode("id", asset.id),
+          attrNode("title", asset.title),
+          attrNode("type", asset.type),
+          attrNode("role", assetTypeToReferenceRole(asset.type, asset.title, asset.meta)),
+          attrNode("color", asset.color),
+          attrNode("meta", asset.meta),
+          attrNode("imageUrl", asset.imageUrl ?? null),
+          attrNode("createdAt", asset.createdAt)
+        ])))
+      ])
+    ]
+  };
 }
 
 function assetTypeToReferenceRole(type: Asset["type"], title = "", meta = ""): BrandAssetRole["role"] {
@@ -795,7 +1093,11 @@ function isTextResourcePath(path: string) {
 function parsePromptAssetRefs(prompt: string, currentBrand?: Brand): ParsedAssetRef[] {
   prompt = normalizeLegacyPromptRefs(prompt);
   const currentKey = currentBrand ? brandKey(currentBrand) : "";
-  const knownBrandKeys = new Set(db.brands.flatMap((brand) => [brandKey(brand), normalizeKey(brand.name), brand.id]));
+  const reservedRefHeads = new Set([
+    "logo", "ip", "product", "model", "store", "storefront", "environment", "background", "scene", "menu", "equipment", "asset",
+    "copy", "brand", "brand_name", "name", "slogan", "title", "subtitle", "promotion", "cta", "price", "address", "phone", "notice",
+    "domain", "market", "tone", "style", "forbidden", "story", "audience", "guide", "logo_text", "color"
+  ]);
   const refs: ParsedAssetRef[] = [];
   const regex = /(\$)([\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*)/gu;
   let match: RegExpExecArray | null;
@@ -803,8 +1105,9 @@ function parsePromptAssetRefs(prompt: string, currentBrand?: Brand): ParsedAsset
     const symbol = "$" as const;
     const parts = match[2].split(".");
     const first = normalizeKey(parts[0]);
-    const hasBrandPrefix = knownBrandKeys.has(first) && (parts.length === 1 || parts.length > 1);
-    const brand = hasBrandPrefix ? first : currentKey;
+    const explicitBrandMatch = (!reservedRefHeads.has(first) || parts.length === 1) ? findBrandByKey(first) : undefined;
+    const hasBrandPrefix = Boolean(explicitBrandMatch) && (!reservedRefHeads.has(first) || parts.length === 1);
+    const brand = hasBrandPrefix && explicitBrandMatch ? brandKey(explicitBrandMatch) : currentKey;
     const path = normalizeRefPath((hasBrandPrefix ? parts.slice(1) : parts).join("."));
     refs.push({
       raw: match[0],
@@ -867,6 +1170,147 @@ function replaceCalToken(prompt: string, raw: string, replacement: string) {
   return prompt.replace(pattern, replacement);
 }
 
+function buildBrandPackageValue(brand: Brand) {
+  return [
+    `${brand.name}: ${brand.slogan}`,
+    brand.visualStyle,
+    brand.tone,
+    brand.sceneKeywords?.length ? `场景: ${brand.sceneKeywords.join(", ")}` : "",
+    brand.forbiddenWords?.length ? `禁用: ${brand.forbiddenWords.join(", ")}` : ""
+  ].filter(Boolean).join("；");
+}
+
+function buildResolverBindings(refs: ParsedAssetRef[], currentBrand?: Brand): ResolverBinding[] {
+  return refs.map((ref) => {
+    const brand = ref.explicitBrand ? findBrandByKey(ref.brandKey) : currentBrand;
+    const pathSegments = ref.path ? ref.path.split(".").filter(Boolean) : [];
+    const warnings: string[] = [];
+    if (!brand) {
+      warnings.push(ref.explicitBrand ? `未找到品牌 ${ref.brandKey}` : `当前项目未绑定品牌，无法解析 ${ref.raw}`);
+      return {
+        sourceRef: ref.raw,
+        resolved: false,
+        resolvedKind: ref.type === "text" ? "text" : "asset",
+        brandKey: ref.brandKey,
+        path: ref.path,
+        pathSegments,
+        warnings
+      };
+    }
+    if (!ref.path) {
+      return {
+        sourceRef: ref.raw,
+        resolved: true,
+        resolvedKind: "entity",
+        entityId: brand.id,
+        entityKind: "brand",
+        brandId: brand.id,
+        brandKey: brandKey(brand),
+        path: ref.path,
+        pathSegments,
+        title: brand.name,
+        description: `完整品牌包 · ${brand.visualStyle}`,
+        value: buildBrandPackageValue(brand),
+        imageUrl: buildReferenceItems(brand, 1)[0]?.imageUrl,
+        warnings
+      };
+    }
+    if (ref.type === "text") {
+      const value = textValueForPath(brand, ref.path);
+      if (!value) {
+        warnings.push(`未找到文本资源 $${ref.fullKey}`);
+        return {
+          sourceRef: ref.raw,
+          resolved: false,
+          resolvedKind: isTextResourcePath(ref.path) ? "attribute" : "text",
+          entityId: brand.id,
+          entityKind: "brand",
+          brandId: brand.id,
+          brandKey: brandKey(brand),
+          path: ref.path,
+          pathSegments,
+          warnings
+        };
+      }
+      return {
+        sourceRef: ref.raw,
+        resolved: true,
+        resolvedKind: "attribute",
+        entityId: brand.id,
+        entityKind: "brand",
+        brandId: brand.id,
+        brandKey: brandKey(brand),
+        path: ref.path,
+        pathSegments,
+        title: pathSegments[pathSegments.length - 1] ?? ref.path,
+        value,
+        warnings
+      };
+    }
+
+    const asset = db.assets.find((item) => item.brandId === brand.id && item.imageUrl && assetMatchesPath(item, ref.path));
+    if (!asset?.imageUrl) {
+      warnings.push(`未找到图片资源 $${ref.fullKey}`);
+      return {
+        sourceRef: ref.raw,
+        resolved: false,
+        resolvedKind: "asset",
+        entityId: brand.id,
+        entityKind: "brand",
+        brandId: brand.id,
+        brandKey: brandKey(brand),
+        path: ref.path,
+        pathSegments,
+        warnings
+      };
+    }
+    return {
+      sourceRef: ref.raw,
+      resolved: true,
+      resolvedKind: "asset",
+      entityId: asset.id,
+      entityKind: "asset",
+      brandId: brand.id,
+      brandKey: brandKey(brand),
+      path: ref.path,
+      pathSegments,
+      title: asset.title,
+      role: assetTypeToReferenceRole(asset.type, asset.title, asset.meta),
+      description: asset.meta,
+      imageUrl: asset.imageUrl,
+      warnings
+    };
+  });
+}
+
+function buildResolverGraph(prompt: string, options?: { brandId?: string | null; brandInject?: boolean }): ResolverGraph {
+  const normalizedPrompt = normalizeLegacyPromptRefs(prompt).trim();
+  const explicitBrand = options?.brandId === null ? undefined : options?.brandId ? findBrand(options.brandId) : undefined;
+  const inferredBrand = explicitBrand ? undefined : inferBrandFromPrompt(normalizedPrompt);
+  const brand = explicitBrand ?? inferredBrand;
+  const resolved = resolvePromptAssets(normalizedPrompt, brand);
+  const shouldInjectBrand = Boolean(brand && (options?.brandInject ?? promptRequestsWholeBrand(normalizedPrompt, brand)));
+  const bindings = buildResolverBindings(resolved.ast.resources, brand);
+  return {
+    version: "resolver-graph/0.1",
+    source: {
+      originalPrompt: prompt,
+      normalizedPrompt,
+      expandedPrompt: resolved.prompt,
+      cal: resolved.ast
+    },
+    context: {
+      brandId: brand?.id ?? "",
+      brandKey: brand ? brandKey(brand) : "",
+      brandName: brand?.name ?? "无品牌",
+      selection: explicitBrand ? "explicit" : brand ? "inferred" : "none",
+      injected: shouldInjectBrand
+    },
+    bindings,
+    warnings: Array.from(new Set([...resolved.warnings, ...bindings.flatMap((binding) => binding.warnings)]))
+  };
+}
+
 function resolvePromptAssets(prompt: string, currentBrand?: Brand): ResolvedPromptAssets {
   prompt = normalizeLegacyPromptRefs(prompt);
   const refs = parsePromptAssetRefs(prompt, currentBrand);
@@ -893,14 +1337,7 @@ function resolvePromptAssets(prompt: string, currentBrand?: Brand): ResolvedProm
         ...reference,
         description: `${ref.fullKey}.${reference.role} · ${reference.description}`
       })));
-      const brandValue = [
-        `${brand.name}: ${brand.slogan}`,
-        brand.visualStyle,
-        brand.tone,
-        brand.sceneKeywords?.length ? `场景: ${brand.sceneKeywords.join(", ")}` : "",
-        brand.forbiddenWords?.length ? `禁用: ${brand.forbiddenWords.join(", ")}` : ""
-      ].filter(Boolean).join("；");
-      textReferences.push({ key: `${brandKey(brand)}.brand_package`, value: brandValue, raw: ref.raw });
+      textReferences.push({ key: `${brandKey(brand)}.brand_package`, value: buildBrandPackageValue(brand), raw: ref.raw });
       expandedPrompt = replaceCalToken(expandedPrompt, ref.raw, `参考品牌 ${brand.name} 的完整品牌素材、视觉风格和文案约束`);
       continue;
     }
@@ -1002,7 +1439,7 @@ async function migrateDb() {
   }
 
   const xmanxBrand = db.brands.find((brand) => brand.id === "brand_xmanx");
-  if (xmanxBrand && !db.brands.some((brand) => brand.active)) {
+  if (xmanxBrand && !xmanxBrand.active) {
     xmanxBrand.active = true;
     changed = true;
   }
@@ -1404,6 +1841,453 @@ function buildBrandContext(brand: Brand) {
   ].filter(Boolean).join("\n");
 }
 
+function orientationFromRatio(ratio?: string): WorkflowOrientation {
+  if (!ratio) return "square";
+  const normalized = ratio.trim();
+  if (normalized === "9:16" || normalized === "4:5" || normalized === "3:4") return "portrait";
+  if (normalized === "16:9" || normalized === "4:3" || normalized === "3:2") return "landscape";
+  const [left, right] = normalized.split(":").map((value) => Number.parseFloat(value));
+  if (Number.isFinite(left) && Number.isFinite(right)) {
+    if (left > right) return "landscape";
+    if (left < right) return "portrait";
+  }
+  return "square";
+}
+
+function primaryOutputTargetFromResolved(resolved: ResolvedPromptAssets): WorkflowOutputTarget {
+  const final = finalOutputFromPrompt(resolved.prompt);
+  if (["jpg", "png", "poster", "pdf", "mp4", "kit"].includes(final)) return final as WorkflowOutputTarget;
+  if (resolved.outputs.some((item) => outputKindForTarget(item) === "video")) return "mp4";
+  if (resolved.outputs.some((item) => outputKindForTarget(item) === "document")) return "pdf";
+  return "jpg";
+}
+
+function buildCreativeIR(prompt: string, options?: { brandId?: string | null; brandInject?: boolean; settings?: Partial<GenerationSettings> }): CreativeIR {
+  const normalizedPrompt = normalizeLegacyPromptRefs(prompt).trim();
+  const explicitBrand = options?.brandId === null ? undefined : options?.brandId ? findBrand(options.brandId) : undefined;
+  const inferredBrand = explicitBrand ? undefined : inferBrandFromPrompt(normalizedPrompt);
+  const brand = explicitBrand ?? inferredBrand;
+  const resolved = resolvePromptAssets(normalizedPrompt, brand);
+  const primaryOutput = primaryOutputTargetFromResolved(resolved);
+  const settings = defaultSettings(normalizedPrompt, options?.settings);
+  const orientation = orientationFromRatio(settings.ratio);
+  const shouldInjectBrand = Boolean(brand && (options?.brandInject ?? promptRequestsWholeBrand(normalizedPrompt, brand)));
+  const brandContext = brand && shouldInjectBrand ? buildBrandContext(brand) : "";
+  const finalPrompt = buildFinalPrompt(normalizedPrompt, brand ? buildBrandContext(brand) : "", shouldInjectBrand, brand);
+  const assetBindings: CreativeIRBinding[] = resolved.imageReferences.map((reference) => ({
+    kind: "image",
+    key: reference.description.split(" · ")[0] ?? reference.id,
+    raw: resolved.ast.resources.find((resource) => resource.type === "image" && reference.description.startsWith(resource.fullKey))?.raw ?? `$${reference.description.split(" · ")[0] ?? reference.id}`,
+    role: reference.role,
+    title: reference.title,
+    description: reference.description,
+    imageUrl: reference.imageUrl,
+    resolved: Boolean(reference.imageUrl)
+  }));
+  const textBindings: CreativeIRBinding[] = resolved.textReferences.map((reference) => ({
+    kind: "text",
+    key: reference.key,
+    raw: reference.raw,
+    value: reference.value,
+    resolved: true
+  }));
+  const unresolvedBindings: CreativeIRBinding[] = resolved.ast.resources
+    .filter((resource) => !assetBindings.some((binding) => binding.raw === resource.raw) && !textBindings.some((binding) => binding.raw === resource.raw))
+    .map((resource) => ({
+      kind: resource.type,
+      key: resource.fullKey,
+      raw: resource.raw,
+      resolved: false
+    }));
+  const outputTargets = resolved.outputs.length ? resolved.outputs : outputTargetsForFinal(primaryOutput);
+  const outputHints = outputTargets.map((target) => ({
+    target,
+    kind: outputKindForTarget(target),
+    label: labelForOutputTarget(target)
+  }));
+
+  return {
+    version: "creative-ir/0.1",
+    source: {
+      originalPrompt: prompt,
+      normalizedPrompt,
+      expandedPrompt: resolved.prompt,
+      cal: resolved.ast
+    },
+    intent: {
+      summary: stripCalForExecution(normalizedPrompt, resolved) || normalizedPrompt,
+      sourceText: finalPrompt,
+      agents: resolved.agents,
+      commands: resolved.commands,
+      tags: resolved.tags,
+      lockedTexts: resolved.lockedTexts,
+      params: resolved.params,
+      executionText: stripCalForExecution(normalizedPrompt, resolved)
+    },
+    context: {
+      brandId: brand?.id ?? "",
+      brandKey: brand ? brandKey(brand) : "",
+      brandName: brand?.name ?? "无品牌",
+      selection: explicitBrand ? "explicit" : brand ? "inferred" : "none",
+      injected: shouldInjectBrand,
+      brandContext,
+      visualStyle: brandVisualStyle(brand),
+      tone: brandTone(brand),
+      market: brand?.market ?? "",
+      slogan: brand?.slogan ?? "",
+      audience: brand?.targetAudience ?? "",
+      forbiddenWords: brand?.forbiddenWords ?? [],
+      sceneKeywords: brand?.sceneKeywords ?? []
+    },
+    bindings: {
+      assets: [...assetBindings, ...unresolvedBindings.filter((binding) => binding.kind === "image")],
+      references: [...textBindings, ...unresolvedBindings.filter((binding) => binding.kind === "text")]
+    },
+    style: {
+      visualStyle: brandVisualStyle(brand),
+      tone: brandTone(brand),
+      primaryColor: brand?.primaryColor,
+      accentColor: brand?.accentColor,
+      tags: resolved.tags,
+      contentLanguage: settings.contentLanguage ?? "auto",
+      orientation,
+      ratioHint: settings.ratio
+    },
+    constraints: {
+      lockedTexts: resolved.lockedTexts,
+      forbiddenWords: brand?.forbiddenWords ?? [],
+      warnings: resolved.warnings,
+      contentLanguage: contentLanguageLabel(settings.contentLanguage),
+      brandConsistency: brand ? [
+        `保持 ${brand.name} 的 Logo、IP、商品与主色一致`,
+        `遵守品牌语气：${brand.tone}`,
+        brand.forbiddenWords.length ? `避免：${brand.forbiddenWords.join(", ")}` : ""
+      ].filter(Boolean) : []
+    },
+    flow: buildWorkflow(normalizedPrompt, brand, shouldInjectBrand).map((detail, index) => ({
+      id: `flow-${index + 1}`,
+      title: detail.split(" ")[0] ?? `Step ${index + 1}`,
+      detail
+    })),
+    output: {
+      targets: outputTargets,
+      primary: primaryOutput,
+      kinds: Array.from(new Set(outputHints.map((item) => item.kind))),
+      hints: outputHints
+    },
+    warnings: resolved.warnings
+  };
+}
+
+function buildPlannerPlanFromCreativeIR(ir: CreativeIR): PlannerPlan {
+  const steps: PlannerStep[] = [];
+  const intentStepId = "intent-1";
+  const contextStepId = "context-1";
+  const referencesStepId = "references-1";
+
+  steps.push({
+    id: intentStepId,
+    stage: "intent",
+    title: "Interpret intent",
+    detail: ir.intent.summary || ir.source.normalizedPrompt,
+    dependsOn: [],
+    inputs: [ir.source.originalPrompt],
+    outputs: ["intent.summary", "intent.executionText"],
+    bindings: [...ir.intent.agents.map((item) => `@${item}`), ...ir.intent.commands.map((item) => `/${item}`)]
+  });
+
+  steps.push({
+    id: contextStepId,
+    stage: "context",
+    title: ir.context.injected ? "Prepare brand context" : "Prepare task context",
+    detail: ir.context.injected
+      ? `注入 ${ir.context.brandName} 品牌上下文，保持 ${ir.style.visualStyle || "既定视觉风格"} 与 ${ir.style.tone || "品牌语气"} 一致。`
+      : "不注入完整品牌包，仅保留提示词、显式引用与风格参数。",
+    dependsOn: [intentStepId],
+    inputs: [ir.context.brandName, ir.style.visualStyle, ir.style.tone].filter(Boolean),
+    outputs: ["context.brand", "context.style", "context.constraints"],
+    bindings: ir.constraints.brandConsistency
+  });
+
+  steps.push({
+    id: referencesStepId,
+    stage: "references",
+    title: "Resolve references and constraints",
+    detail: [
+      ir.bindings.assets.length ? `图片引用 ${ir.bindings.assets.length} 个` : "无图片引用",
+      ir.bindings.references.length ? `文本引用 ${ir.bindings.references.length} 个` : "无文本引用",
+      ir.constraints.lockedTexts.length ? `锁定文案 ${ir.constraints.lockedTexts.length} 条` : "无锁定文案"
+    ].join("；"),
+    dependsOn: [contextStepId],
+    inputs: [
+      ...ir.bindings.assets.map((binding) => binding.raw),
+      ...ir.bindings.references.map((binding) => binding.raw),
+      ...ir.constraints.lockedTexts.map((item) => `"${item}"`)
+    ],
+    outputs: ["resolved.references", "constraint.pack"],
+    bindings: [
+      ...ir.bindings.assets.map((binding) => binding.key),
+      ...ir.bindings.references.map((binding) => binding.key)
+    ]
+  });
+
+  const generationStepIds: string[] = [];
+  ir.output.hints.forEach((hint, index) => {
+    const stepId = `generation-${index + 1}`;
+    generationStepIds.push(stepId);
+    steps.push({
+      id: stepId,
+      stage: "generation",
+      title: `Generate ${hint.label}`,
+      detail: ir.flow[index]?.detail ?? `基于 ${ir.intent.summary} 生成 ${hint.label}，输出类型 ${hint.kind}。`,
+      dependsOn: [referencesStepId],
+      inputs: [
+        ir.intent.executionText || ir.intent.summary,
+        ir.style.ratioHint,
+        contentLanguageLabel(ir.style.contentLanguage === "auto" ? ir.constraints.contentLanguage === "自动识别语言" ? "auto" : ir.style.contentLanguage : ir.style.contentLanguage)
+      ].filter(Boolean),
+      outputs: [`draft.${hint.target}`, `artifact.${hint.kind}`],
+      bindings: ir.flow.map((flowStep) => flowStep.id)
+    });
+  });
+
+  ir.output.hints.forEach((hint, index) => {
+    steps.push({
+      id: `output-${index + 1}`,
+      stage: "output",
+      title: `Package ${hint.label}`,
+      detail: `整理并交付 ${hint.label}，保留品牌一致性、文案限制与输出规格。`,
+      dependsOn: [generationStepIds[index] ?? referencesStepId],
+      inputs: [`draft.${hint.target}`, ...ir.output.targets],
+      outputs: [`deliverable.${hint.target}`],
+      bindings: [hint.kind, hint.target]
+    });
+  });
+
+  return {
+    version: "planner-plan/0.1",
+    source: {
+      prompt: ir.source.originalPrompt,
+      irVersion: ir.version
+    },
+    summary: ir.intent.summary || ir.source.normalizedPrompt,
+    context: {
+      brandId: ir.context.brandId,
+      brandName: ir.context.brandName,
+      selection: ir.context.selection,
+      injected: ir.context.injected,
+      primaryOutput: ir.output.primary,
+      outputKinds: ir.output.kinds
+    },
+    steps,
+    warnings: [...ir.warnings, ...ir.constraints.warnings]
+  };
+}
+
+function buildCanvasPlanGraphFromPlan(plan: PlannerPlan): CanvasPlanGraph {
+  const stageOrder: PlannerStage[] = ["intent", "context", "references", "generation", "output"];
+  const stageColumn = new Map(stageOrder.map((stage, index) => [stage, index]));
+  const stageY = new Map<PlannerStage, number>();
+  const nodes: CanvasPlanNode[] = plan.steps.map((step) => {
+    const stageIndex = stageColumn.get(step.stage) ?? 0;
+    const currentY = stageY.get(step.stage) ?? 80;
+    stageY.set(step.stage, currentY + 190);
+    const type = step.stage === "references" ? "reference" : step.stage;
+    return {
+      id: step.id,
+      type,
+      title: step.title,
+      body: [step.detail, step.bindings.length ? `Bindings: ${step.bindings.join(", ")}` : ""].filter(Boolean).join("\n"),
+      stepId: step.id,
+      stage: step.stage,
+      x: 80 + stageIndex * 280,
+      y: currentY,
+      w: step.stage === "generation" ? 300 : 240,
+      h: step.stage === "generation" ? 170 : 150,
+      inputIds: step.dependsOn.length ? step.dependsOn : undefined
+    };
+  });
+  const edges: CanvasPlanEdge[] = plan.steps.flatMap((step) => step.dependsOn.map((from, index) => ({
+    id: `${from}->${step.id}-${index + 1}`,
+    from,
+    to: step.id
+  })));
+
+  return {
+    version: "canvas-plan/0.1",
+    planVersion: plan.version,
+    summary: plan.summary,
+    nodes,
+    edges,
+    warnings: plan.warnings
+  };
+}
+
+type WorkflowBridgeNodeHint = {
+  id: string;
+  title?: string;
+  body?: string;
+  parentId?: string;
+  inputIds?: string[];
+  preview?: string;
+  order: number;
+  stage: PlannerStage | "workflow";
+  source: "planner" | "canvas" | "heuristic";
+};
+
+type WorkflowBridge = {
+  ir: CreativeIR;
+  plan: PlannerPlan;
+  canvasPlan: CanvasPlanGraph;
+  nodeHints: WorkflowBridgeNodeHint[];
+};
+
+function buildWorkflowBridge(prompt: string, brand: Brand | undefined, settings: GenerationSettings, brandInject = settings.brandInject) {
+  const ir = buildCreativeIR(prompt, {
+    brandId: brand?.id ?? null,
+    brandInject,
+    settings
+  });
+  const plan = buildPlannerPlanFromCreativeIR(ir);
+  const canvasPlan = buildCanvasPlanGraphFromPlan(plan);
+  const intentStep = plan.steps.find((step) => step.stage === "intent");
+  const contextStep = plan.steps.find((step) => step.stage === "context");
+  const referenceStep = plan.steps.find((step) => step.stage === "references");
+  const generationSteps = plan.steps.filter((step) => step.stage === "generation");
+  const outputSteps = plan.steps.filter((step) => step.stage === "output");
+
+  const nodeHints: WorkflowBridgeNodeHint[] = [
+    {
+      id: "prompt",
+      stage: "intent",
+      source: "planner",
+      order: 0,
+      title: intentStep?.title,
+      body: intentStep ? `${intentStep.detail}\nPlan: ${intentStep.outputs.join(", ")}` : undefined,
+      inputIds: intentStep?.dependsOn
+    },
+    {
+      id: "brand",
+      stage: "context",
+      source: "planner",
+      order: 1,
+      title: contextStep?.title,
+      body: contextStep ? `${contextStep.detail}\nPlan: ${contextStep.outputs.join(", ")}` : undefined,
+      inputIds: contextStep?.dependsOn
+    },
+    {
+      id: "input-image",
+      stage: "references",
+      source: "canvas",
+      order: 2,
+      title: referenceStep?.title,
+      body: referenceStep?.detail,
+      inputIds: referenceStep?.dependsOn
+    }
+  ];
+
+  if (generationSteps.length) {
+    const primaryGeneration = generationSteps[0];
+    const needsVisualDraft = generationSteps.length > 1 || ir.output.kinds.includes("document") || ir.output.kinds.includes("video") || ir.output.primary === "jpg" || ir.output.primary === "png" || ir.output.primary === "poster";
+    if (needsVisualDraft) {
+      nodeHints.push({
+        id: "visual-draft",
+        stage: "generation",
+        source: "planner",
+        order: 3,
+        title: primaryGeneration.title,
+        body: primaryGeneration.detail,
+        inputIds: primaryGeneration.dependsOn
+      });
+    }
+  }
+
+  outputSteps.forEach((step, index) => {
+    const outputTarget = ir.output.targets[index] ?? ir.output.primary;
+    const outputId = index === 0 && ir.output.targets.length === 1 ? "output" : `output-${outputTarget}-${index}`;
+    nodeHints.push({
+      id: outputId,
+      stage: "output",
+      source: "planner",
+      order: 100 + index,
+      title: step.title,
+      body: step.detail,
+      inputIds: step.dependsOn
+    });
+  });
+
+  return {
+    ir,
+    plan,
+    canvasPlan,
+    nodeHints
+  };
+}
+
+function workflowNodeTypeForHint(hint: WorkflowBridgeNodeHint): WorkflowNode["type"] {
+  if (hint.id === "prompt") return "prompt";
+  if (hint.id === "brand") return "brand";
+  if (hint.id === "input-image") return "image";
+  if (hint.id === "visual-draft") return "image";
+  if (hint.stage === "references") return "reference";
+  if (hint.stage === "output") return "output";
+  if (hint.stage === "generation") return /script/i.test(hint.id) || /脚本/.test(hint.title ?? "") ? "script" : /compose/i.test(hint.id) || /合成/.test(hint.title ?? "") ? "compose" : /video|mp4/i.test(hint.id + " " + (hint.title ?? "")) ? "video" : /pdf|kit|内容编辑器/i.test(hint.id + " " + (hint.title ?? "")) ? "process" : "image";
+  return "reference";
+}
+
+function applyWorkflowBridgeToNodes(nodes: WorkflowNode[], bridge: WorkflowBridge) {
+  const hintById = new Map(bridge.nodeHints.map((hint) => [hint.id, hint]));
+  const bridged: WorkflowNode[] = nodes.map((node) => {
+    const hint = hintById.get(node.id);
+    if (!hint) return node;
+    return {
+      ...node,
+      title: hint.title ?? node.title,
+      body: hint.body ? `${node.body}\n\n${hint.body}` : node.body,
+      parentId: hint.parentId ?? node.parentId,
+      inputIds: hint.inputIds?.length ? hint.inputIds : node.inputIds,
+      edgeOffsetY: node.edgeOffsetY
+    };
+  });
+  const existingIds = new Set(bridged.map((node) => node.id));
+  const missing: WorkflowNode[] = bridge.nodeHints
+    .filter((hint) => !existingIds.has(hint.id))
+    .sort((a, b) => a.order - b.order)
+    .map((hint) => {
+      const type = workflowNodeTypeForHint(hint);
+      const parentId = hint.parentId ?? (hint.id === "brand" ? "input-image" : hint.id === "prompt" ? "brand" : hint.stage === "generation" ? "prompt" : hint.stage === "output" ? (existingIds.has("visual-draft") || bridge.nodeHints.some((item) => item.id === "visual-draft") ? "visual-draft" : "prompt") : undefined);
+      return {
+        id: hint.id,
+        type,
+        title: hint.title ?? hint.id,
+        body: hint.body ?? "",
+        parentId,
+        inputIds: hint.inputIds?.length ? hint.inputIds : undefined,
+        preview: type === "output" ? "#0f172a" : type === "video" ? "#111827" : type === "script" ? "#7c3aed" : type === "compose" ? "#0f766e" : type === "brand" ? "#111827" : "#f97316",
+        x: hint.stage === "intent" ? 80 : hint.stage === "context" ? 360 : hint.stage === "references" ? 640 : hint.stage === "generation" ? 920 : 1200,
+        y: hint.stage === "generation" ? 100 : 190,
+        w: type === "process" || type === "script" || type === "compose" ? 320 : type === "output" || type === "video" ? 260 : 240,
+        h: type === "process" || type === "script" || type === "compose" ? 220 : 150,
+        edgeOffsetY: 0
+      };
+    });
+  return [...bridged, ...missing].sort((a, b) => {
+    const aOrder = hintById.get(a.id)?.order ?? Number.MAX_SAFE_INTEGER;
+    const bOrder = hintById.get(b.id)?.order ?? Number.MAX_SAFE_INTEGER;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return 0;
+  });
+}
+
+function buildWorkflowBridgePreviewNodes(prompt: string, brand: Brand | undefined, model: (typeof models)[number], settings: GenerationSettings, brandContext = brand ? buildBrandContext(brand) : "", brandInjected = settings.brandInject) {
+  const bridge = buildWorkflowBridge(prompt, brand, settings, brandInjected);
+  const baseNodes = buildWorkflowNodes(prompt, brand, model, settings, brandContext, brandInjected);
+  return {
+    ...bridge,
+    workflowNodes: applyWorkflowBridgeToNodes(baseNodes, bridge)
+  };
+}
+
 function buildFinalPrompt(prompt: string, brandContext: string, inject: boolean, brand?: Brand) {
   prompt = normalizeLegacyPromptRefs(prompt);
   const resolved = resolvePromptAssets(prompt, brand);
@@ -1719,16 +2603,505 @@ async function videoInputImageDataUrl(imageUrl?: string) {
   return `data:${mime};base64,${bytes.toString("base64")}`;
 }
 
-function publicUrlFromLocalAsset(assetUrl?: string) {
-  if (!assetUrl?.startsWith("/")) return "";
-  const publicBase = (process.env.SPARKCANVAS_PUBLIC_BASE_URL || process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
-  return publicBase ? `${publicBase}${assetUrl}` : "";
+type PublishedReferenceResolution = {
+  source: "missing" | "external-url" | "local-generated" | "local-public" | "unsupported";
+  strategy: "none" | "direct-external" | "public-base-signed" | "unpublished";
+  url: string;
+  requiresPublicBaseUrl: boolean;
+  publishReady: boolean;
+  reason?: string;
+};
+
+type ReferencePublicationProviderId = "public-base-url" | "object-storage" | "upload-service-stub";
+
+type ReferencePublicationStatus = {
+  configured: boolean;
+  baseUrl: string;
+  baseUrlSource: string;
+  publicationStrategy: PublishedReferenceResolution["strategy"];
+  publicationProvider: ReferencePublicationProviderId;
+  signedGeneratedUrls: boolean;
+  hostKind: string;
+  canUseLocalGeneratedAssets: boolean;
+  productionReady: boolean;
+  message: string;
+};
+
+type ReferencePublicationProvider = {
+  id: ReferencePublicationProviderId;
+  resolve(assetUrl?: string): Promise<PublishedReferenceResolution>;
+  status(): ReferencePublicationStatus;
+};
+
+function classifyReferenceHost(rawUrl: string) {
+  const parsed = new URL(rawUrl);
+  const hostname = parsed.hostname.toLowerCase();
+  const isLoopback = hostname === "localhost" || hostname === "::1" || hostname === "[::1]" || /^127\./.test(hostname);
+  const isPrivateIpv4 = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(hostname);
+  const isPrivateHost = hostname.endsWith(".local") || hostname.endsWith(".internal") || hostname.endsWith(".lan");
+  const hostKind = isLoopback ? "loopback" : isPrivateIpv4 || isPrivateHost ? "private" : "public";
+  const productionReady = parsed.protocol === "https:" && hostKind === "public";
+  return { parsed, hostKind, productionReady };
 }
 
-function videoInputReferenceUrl(imageUrl?: string) {
-  if (!imageUrl) return "";
-  if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
-  return publicUrlFromLocalAsset(imageUrl);
+function publicUrlFromLocalAsset(assetUrl?: string, options: { signed?: boolean } = {}) {
+  if (!assetUrl?.startsWith("/")) return "";
+  const publicBase = (process.env.SPARKCANVAS_PUBLIC_BASE_URL || process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  if (!publicBase) return "";
+  const relativeUrl = options.signed ? generatedFileUrl(assetUrl) : assetUrl;
+  return relativeUrl ? `${publicBase}${relativeUrl}` : "";
+}
+
+function publicBaseUrlPublicationProvider(): ReferencePublicationProvider {
+  return {
+    id: "public-base-url",
+    async resolve(assetUrl?: string) {
+      if (!assetUrl) {
+        return {
+          source: "missing",
+          strategy: "none",
+          url: "",
+          requiresPublicBaseUrl: false,
+          publishReady: false,
+          reason: "missing-reference"
+        };
+      }
+      if (/^https?:\/\//i.test(assetUrl)) {
+        return {
+          source: "external-url",
+          strategy: "direct-external",
+          url: assetUrl,
+          requiresPublicBaseUrl: false,
+          publishReady: true
+        };
+      }
+      if (!assetUrl.startsWith("/")) {
+        return {
+          source: "unsupported",
+          strategy: "unpublished",
+          url: "",
+          requiresPublicBaseUrl: false,
+          publishReady: false,
+          reason: "unsupported-reference-path"
+        };
+      }
+      const source = assetUrl.startsWith("/generated/") ? "local-generated" : "local-public";
+      const signedUrl = publicUrlFromLocalAsset(assetUrl, { signed: true });
+      if (!signedUrl) {
+        return {
+          source,
+          strategy: "unpublished",
+          url: "",
+          requiresPublicBaseUrl: true,
+          publishReady: false,
+          reason: "missing-public-base-url"
+        };
+      }
+      return {
+        source,
+        strategy: "public-base-signed",
+        url: signedUrl,
+        requiresPublicBaseUrl: true,
+        publishReady: true
+      };
+    },
+    status() {
+      const rawBaseUrl = (process.env.SPARKCANVAS_PUBLIC_BASE_URL || process.env.PUBLIC_BASE_URL || "").trim();
+      const baseUrl = rawBaseUrl.replace(/\/$/, "");
+      const baseUrlSource = process.env.SPARKCANVAS_PUBLIC_BASE_URL
+        ? "SPARKCANVAS_PUBLIC_BASE_URL"
+        : process.env.PUBLIC_BASE_URL
+          ? "PUBLIC_BASE_URL"
+          : "missing";
+      const signedGeneratedUrls = true;
+      const publicationStrategy: PublishedReferenceResolution["strategy"] = baseUrl ? "public-base-signed" : "unpublished";
+      if (!baseUrl) {
+        return {
+          configured: false,
+          baseUrl: "",
+          baseUrlSource,
+          publicationStrategy,
+          publicationProvider: "public-base-url",
+          signedGeneratedUrls,
+          hostKind: "missing",
+          canUseLocalGeneratedAssets: false,
+          productionReady: false,
+          message: "未设置 SPARKCANVAS_PUBLIC_BASE_URL；本地 /generated 图片不能安全作为生产环境 input_reference。"
+        };
+      }
+      try {
+        const { hostKind, productionReady } = classifyReferenceHost(baseUrl);
+        return {
+          configured: true,
+          baseUrl,
+          baseUrlSource,
+          publicationStrategy,
+          publicationProvider: "public-base-url",
+          signedGeneratedUrls,
+          hostKind,
+          canUseLocalGeneratedAssets: true,
+          productionReady,
+          message: productionReady
+            ? "本地生成图片可被签名为公网 input_reference URL，生产环境首帧引用已就绪。"
+            : hostKind === "public"
+              ? "当前 public base URL 可生成外链，但不是 HTTPS；建议切到公网 HTTPS 域名后再用于生产 input_reference。"
+              : "当前 public base URL 仅适合本机/内网联调；生产环境 input_reference 仍需公网 HTTPS 域名。"
+        };
+      } catch {
+        return {
+          configured: true,
+          baseUrl,
+          baseUrlSource,
+          publicationStrategy,
+          publicationProvider: "public-base-url",
+          signedGeneratedUrls,
+          hostKind: "invalid",
+          canUseLocalGeneratedAssets: false,
+          productionReady: false,
+          message: "SPARKCANVAS_PUBLIC_BASE_URL 不是合法 URL；本地 /generated 图片不能作为生产 input_reference。"
+        };
+      }
+    }
+  };
+}
+
+async function publishLocalReferenceAssetViaHttpUpload(assetUrl: string, options: {
+  endpoint: string;
+  token?: string;
+  label: string;
+}) {
+  if (!options.endpoint) {
+    return { ok: false as const, reason: `missing-${options.label}-url`, url: "" };
+  }
+  const filePath = localPublicPathFromUrl(assetUrl);
+  if (!filePath) {
+    return { ok: false as const, reason: `missing-local-public-file`, url: "" };
+  }
+  const bytes = await readFile(filePath);
+  const ext = path.extname(filePath).toLowerCase();
+  const mime = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : ext === ".webp" ? "image/webp" : ext === ".gif" ? "image/gif" : "image/png";
+  const controller = new AbortController();
+  const timeoutMs = Number(process.env.SPARKCANVAS_REFERENCE_UPLOAD_TIMEOUT_MS ?? process.env.AI_REQUEST_TIMEOUT_MS ?? "120000");
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(options.endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": mime,
+        "x-sparkcanvas-filename": path.basename(filePath),
+        "x-sparkcanvas-source-url": assetUrl,
+        ...(options.token ? { authorization: `Bearer ${options.token}` } : {})
+      },
+      body: bytes,
+      signal: controller.signal
+    });
+    const text = await response.text();
+    let data: unknown = text;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = text;
+    }
+    if (!response.ok) {
+      const message = typeof data === "string" ? data : JSON.stringify(data);
+      return { ok: false as const, reason: `${options.label}-http-${response.status}`, url: "", message: message.slice(0, 240) };
+    }
+    const publishedUrl = typeof data === "object" && data && typeof data === "object"
+      ? (typeof (data as { url?: unknown }).url === "string" && (data as { url: string }).url.trim())
+        || (typeof (data as { publicUrl?: unknown }).publicUrl === "string" && (data as { publicUrl: string }).publicUrl.trim())
+        || (typeof (data as { location?: unknown }).location === "string" && (data as { location: string }).location.trim())
+        || (typeof (data as { objectUrl?: unknown }).objectUrl === "string" && (data as { objectUrl: string }).objectUrl.trim())
+      : "";
+    if (!publishedUrl) {
+      return { ok: false as const, reason: `${options.label}-missing-url`, url: "" };
+    }
+    if (!/^https?:\/\//i.test(publishedUrl)) {
+      return { ok: false as const, reason: `${options.label}-invalid-url`, url: "", message: publishedUrl.slice(0, 240) };
+    }
+    if (isProduction) {
+      try {
+        const { productionReady } = classifyReferenceHost(publishedUrl);
+        if (!productionReady) {
+          return { ok: false as const, reason: `${options.label}-non-production-url`, url: "", message: publishedUrl.slice(0, 240) };
+        }
+      } catch {
+        return { ok: false as const, reason: `${options.label}-invalid-url`, url: "" };
+      }
+    }
+    return { ok: true as const, reason: "uploaded", url: publishedUrl };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return { ok: false as const, reason: `${options.label}-timeout`, url: "" };
+    }
+    return { ok: false as const, reason: `${options.label}-request-failed`, url: "", message: error instanceof Error ? error.message.slice(0, 240) : "unknown error" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function publishLocalReferenceAssetViaUploadService(assetUrl: string) {
+  return publishLocalReferenceAssetViaHttpUpload(assetUrl, {
+    endpoint: (process.env.SPARKCANVAS_REFERENCE_UPLOAD_SERVICE_URL || "").trim(),
+    token: process.env.SPARKCANVAS_REFERENCE_UPLOAD_SERVICE_TOKEN || undefined,
+    label: "upload-service"
+  });
+}
+
+function objectStorageReferencePublicationProvider(): ReferencePublicationProvider {
+  return {
+    id: "object-storage",
+    async resolve(assetUrl?: string) {
+      if (!assetUrl) {
+        return {
+          source: "missing",
+          strategy: "none",
+          url: "",
+          requiresPublicBaseUrl: false,
+          publishReady: false,
+          reason: "missing-reference"
+        };
+      }
+      if (/^https?:\/\//i.test(assetUrl)) {
+        return {
+          source: "external-url",
+          strategy: "direct-external",
+          url: assetUrl,
+          requiresPublicBaseUrl: false,
+          publishReady: true
+        };
+      }
+      if (!assetUrl.startsWith("/")) {
+        return {
+          source: "unsupported",
+          strategy: "unpublished",
+          url: "",
+          requiresPublicBaseUrl: false,
+          publishReady: false,
+          reason: "unsupported-reference-path"
+        };
+      }
+      const source = assetUrl.startsWith("/generated/") ? "local-generated" : "local-public";
+      const published = await publishLocalReferenceAssetViaHttpUpload(assetUrl, {
+        endpoint: (process.env.SPARKCANVAS_REFERENCE_OBJECT_STORAGE_UPLOAD_URL || "").trim(),
+        token: process.env.SPARKCANVAS_REFERENCE_OBJECT_STORAGE_TOKEN || undefined,
+        label: "object-storage"
+      });
+      if (!published.ok) {
+        return {
+          source,
+          strategy: "unpublished",
+          url: "",
+          requiresPublicBaseUrl: false,
+          publishReady: false,
+          reason: published.reason
+        };
+      }
+      const { productionReady } = classifyReferenceHost(published.url);
+      if (isProduction && !productionReady) {
+        return {
+          source,
+          strategy: "unpublished",
+          url: "",
+          requiresPublicBaseUrl: false,
+          publishReady: false,
+          reason: published.reason || "object-storage-non-production-url"
+        };
+      }
+      return {
+        source,
+        strategy: "direct-external",
+        url: published.url,
+        requiresPublicBaseUrl: false,
+        publishReady: true
+      };
+    },
+    status() {
+      const rawBaseUrl = (process.env.SPARKCANVAS_REFERENCE_OBJECT_STORAGE_UPLOAD_URL || "").trim();
+      if (!rawBaseUrl) {
+        return {
+          configured: false,
+          baseUrl: "",
+          baseUrlSource: "missing",
+          publicationStrategy: "unpublished",
+          publicationProvider: "object-storage",
+          signedGeneratedUrls: false,
+          hostKind: "missing",
+          canUseLocalGeneratedAssets: false,
+          productionReady: false,
+          message: "未设置 SPARKCANVAS_REFERENCE_OBJECT_STORAGE_UPLOAD_URL；object-storage 发布链路未启用。"
+        };
+      }
+      try {
+        const { hostKind, productionReady } = classifyReferenceHost(rawBaseUrl);
+        return {
+          configured: true,
+          baseUrl: rawBaseUrl,
+          baseUrlSource: "SPARKCANVAS_REFERENCE_OBJECT_STORAGE_UPLOAD_URL",
+          publicationStrategy: "direct-external",
+          publicationProvider: "object-storage",
+          signedGeneratedUrls: false,
+          hostKind,
+          canUseLocalGeneratedAssets: true,
+          productionReady,
+          message: productionReady
+            ? "object-storage 发布链路已配置；本地参考图可上传后作为公网 input_reference。"
+            : hostKind === "public"
+              ? "object-storage 可返回外链，但当前不是 HTTPS；建议切到公网 HTTPS 再用于生产 input_reference。"
+              : "object-storage 目前仅适合本机/内网联调；生产环境仍需公网 HTTPS 上传出口。"
+        };
+      } catch {
+        return {
+          configured: true,
+          baseUrl: rawBaseUrl,
+          baseUrlSource: "SPARKCANVAS_REFERENCE_OBJECT_STORAGE_UPLOAD_URL",
+          publicationStrategy: "unpublished",
+          publicationProvider: "object-storage",
+          signedGeneratedUrls: false,
+          hostKind: "invalid",
+          canUseLocalGeneratedAssets: false,
+          productionReady: false,
+          message: "SPARKCANVAS_REFERENCE_OBJECT_STORAGE_UPLOAD_URL 不是合法 URL；object-storage 发布链路不可用。"
+        };
+      }
+    }
+  };
+}
+
+function uploadServiceReferencePublicationProvider(): ReferencePublicationProvider {
+  return {
+    id: "upload-service-stub",
+    async resolve(assetUrl?: string) {
+      if (!assetUrl) {
+        return {
+          source: "missing",
+          strategy: "none",
+          url: "",
+          requiresPublicBaseUrl: false,
+          publishReady: false,
+          reason: "missing-reference"
+        };
+      }
+      if (/^https?:\/\//i.test(assetUrl)) {
+        return {
+          source: "external-url",
+          strategy: "direct-external",
+          url: assetUrl,
+          requiresPublicBaseUrl: false,
+          publishReady: true
+        };
+      }
+      if (!assetUrl.startsWith("/")) {
+        return {
+          source: "unsupported",
+          strategy: "unpublished",
+          url: "",
+          requiresPublicBaseUrl: false,
+          publishReady: false,
+          reason: "unsupported-reference-path"
+        };
+      }
+      const source = assetUrl.startsWith("/generated/") ? "local-generated" : "local-public";
+      const published = await publishLocalReferenceAssetViaUploadService(assetUrl);
+      if (!published.ok) {
+        return {
+          source,
+          strategy: "unpublished",
+          url: "",
+          requiresPublicBaseUrl: false,
+          publishReady: false,
+          reason: published.reason
+        };
+      }
+      return {
+        source,
+        strategy: "direct-external",
+        url: published.url,
+        requiresPublicBaseUrl: false,
+        publishReady: true
+      };
+    },
+    status() {
+      const rawBaseUrl = (process.env.SPARKCANVAS_REFERENCE_UPLOAD_SERVICE_URL || "").trim();
+      if (!rawBaseUrl) {
+        return {
+          configured: false,
+          baseUrl: "",
+          baseUrlSource: "missing",
+          publicationStrategy: "unpublished",
+          publicationProvider: "upload-service-stub",
+          signedGeneratedUrls: false,
+          hostKind: "stub",
+          canUseLocalGeneratedAssets: false,
+          productionReady: false,
+          message: "未设置 SPARKCANVAS_REFERENCE_UPLOAD_SERVICE_URL；upload-service 发布链路未启用。"
+        };
+      }
+      try {
+        const { hostKind, productionReady } = classifyReferenceHost(rawBaseUrl);
+        return {
+          configured: true,
+          baseUrl: rawBaseUrl,
+          baseUrlSource: "SPARKCANVAS_REFERENCE_UPLOAD_SERVICE_URL",
+          publicationStrategy: "direct-external",
+          publicationProvider: "upload-service-stub",
+          signedGeneratedUrls: false,
+          hostKind,
+          canUseLocalGeneratedAssets: true,
+          productionReady,
+          message: productionReady
+            ? "upload-service 发布链路已配置；本地参考图可先上传再作为公网 input_reference。"
+            : hostKind === "public"
+              ? "upload-service 可返回外链，但当前不是 HTTPS；建议切到公网 HTTPS 再用于生产 input_reference。"
+              : "upload-service 目前仅适合本机/内网联调；生产环境仍需公网 HTTPS 上传出口。"
+        };
+      } catch {
+        return {
+          configured: true,
+          baseUrl: rawBaseUrl,
+          baseUrlSource: "SPARKCANVAS_REFERENCE_UPLOAD_SERVICE_URL",
+          publicationStrategy: "unpublished",
+          publicationProvider: "upload-service-stub",
+          signedGeneratedUrls: false,
+          hostKind: "invalid",
+          canUseLocalGeneratedAssets: false,
+          productionReady: false,
+          message: "SPARKCANVAS_REFERENCE_UPLOAD_SERVICE_URL 不是合法 URL；upload-service 发布链路不可用。"
+        };
+      }
+    }
+  };
+}
+
+function referencePublicationProvider(): ReferencePublicationProvider {
+  const provider = (process.env.SPARKCANVAS_REFERENCE_PUBLICATION_PROVIDER || "").trim().toLowerCase();
+  if (provider === "object-storage") return objectStorageReferencePublicationProvider();
+  if (provider === "upload-service") return uploadServiceReferencePublicationProvider();
+  return publicBaseUrlPublicationProvider();
+}
+
+async function resolvePublishedReferenceAssetUrl(assetUrl?: string): Promise<PublishedReferenceResolution> {
+  return referencePublicationProvider().resolve(assetUrl);
+}
+
+function describeReferencePublicationFailure(model: string, publication: PublishedReferenceResolution) {
+  const providerStatus = referencePublicationProvider().status();
+  const provider = providerStatus.publicationProvider;
+  const reason = publication.reason || "unknown";
+  const providerLabel = provider === "object-storage"
+    ? "object-storage"
+    : provider === "upload-service-stub"
+      ? "upload-service"
+      : "public-base-url";
+  const hint = provider === "public-base-url"
+    ? "请设置 SPARKCANVAS_PUBLIC_BASE_URL，或先把本地图片上传到图床后再生成视频。"
+    : provider === "object-storage"
+      ? "请检查对象存储上传出口是否返回公网 HTTPS URL，或切回 SPARKCANVAS_PUBLIC_BASE_URL。"
+      : "请检查 upload-service 是否成功返回公网 HTTPS URL，或切回 SPARKCANVAS_PUBLIC_BASE_URL。";
+  return `${model} 的参考图参数需要公网图片链接。当前 provider: ${providerLabel}；发布策略: ${publication.strategy}；失败原因: ${reason}。${hint}`;
+}
+
+async function videoInputReferenceUrl(imageUrl?: string) {
+  return (await resolvePublishedReferenceAssetUrl(imageUrl)).url;
 }
 
 function localGeneratedVideoPath(videoUrl?: string) {
@@ -1773,12 +3146,50 @@ async function materializeVideoUrl(videoUrl: string, outputName: string, index: 
   if (!/^https?:\/\//i.test(videoUrl)) return "";
   await mkdir(generatedDir, { recursive: true });
   const outputPath = path.join(generatedDir, `${outputName}-source-${index + 1}.mp4`);
-  const response = await fetch(videoUrl);
-  if (!response.ok) return "";
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length < 512) return "";
-  await writeFile(outputPath, bytes);
-  return outputPath;
+  const timeoutMs = Number(process.env.SPARKCANVAS_VIDEO_DOWNLOAD_TIMEOUT_MS ?? process.env.AI_REQUEST_TIMEOUT_MS ?? "120000");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(videoUrl, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`video download failed with ${response.status}: ${videoUrl}`);
+    }
+    const bytes = Buffer.from(await Promise.race([
+      response.arrayBuffer(),
+      new Promise<ArrayBuffer>((_, reject) => {
+        setTimeout(() => reject(new Error(`video download timed out after ${Math.round(timeoutMs / 1000)}s: ${videoUrl}`)), timeoutMs);
+      })
+    ]));
+    if (bytes.length < 512) {
+      throw new Error(`video download returned too few bytes (${bytes.length}): ${videoUrl}`);
+    }
+    await writeFile(outputPath, bytes);
+    return outputPath;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`video download timed out after ${Math.round(timeoutMs / 1000)}s: ${videoUrl}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function materializeVideoPublicUrl(videoUrl: string, outputName: string, index: number) {
+  if (!videoUrl) return "";
+  if (videoUrl.startsWith("/generated/")) return videoUrl;
+  const localPath = await materializeVideoUrl(videoUrl, outputName, index);
+  if (!localPath) return "";
+  const relativePath = path.relative(generatedDir, localPath);
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) return "";
+  return `/generated/${relativePath.split(path.sep).join("/")}`;
+}
+
+async function bestEffortMaterializeVideoPublicUrl(videoUrl: string, outputName: string, index: number, timeoutMs = Number(process.env.SPARKCANVAS_VIDEO_MATERIALIZE_TIMEOUT_MS ?? "2500")) {
+  return await Promise.race([
+    materializeVideoPublicUrl(videoUrl, outputName, index),
+    new Promise<string>((resolve) => setTimeout(() => resolve(""), timeoutMs))
+  ]);
 }
 
 async function usableVideoFile(filePath: string) {
@@ -1790,13 +3201,39 @@ async function usableVideoFile(filePath: string) {
   }
 }
 
-async function composeLocalVideos(videoUrls: string[], segments: ReturnType<typeof videoSegmentPlan>, outputName: string) {
-  if (!videoUrls.length || videoUrls.length < segments.length || !resolveFfmpegPath()) return "";
+type ComposeVerification = {
+  ok: boolean;
+  mergedUrl: string;
+  sourceCount: number;
+  requiredSegments: number;
+  materializedSegments: number;
+  trimmedSegments: number;
+  continuityChecks: string[];
+  failureReason: string;
+};
+
+async function composeLocalVideosDetailed(videoUrls: string[], segments: ReturnType<typeof videoSegmentPlan>, outputName: string): Promise<ComposeVerification> {
+  const continuityChecks = [
+    `段数校验: 需要 ${segments.length} 段，当前收到 ${videoUrls.length} 个候选片段。`,
+    `时长校验: ${segments.map((segment) => `S${segment.index + 1}=${segment.targetSeconds}s/${segment.modelSeconds}s${segment.trim ? " trim" : ""}`).join(" / ")}`,
+    "连续性校验: 保持统一旁白语言/音色、BGM 节奏、品牌空间、IP/模特与 Logo 安全边距。"
+  ];
+  if (!videoUrls.length) {
+    return { ok: false, mergedUrl: "", sourceCount: 0, requiredSegments: segments.length, materializedSegments: 0, trimmedSegments: segments.filter((segment) => segment.trim).length, continuityChecks, failureReason: "no-video-urls" };
+  }
+  if (videoUrls.length < segments.length) {
+    return { ok: false, mergedUrl: "", sourceCount: videoUrls.length, requiredSegments: segments.length, materializedSegments: 0, trimmedSegments: segments.filter((segment) => segment.trim).length, continuityChecks, failureReason: "insufficient-video-urls" };
+  }
+  if (!resolveFfmpegPath()) {
+    return { ok: false, mergedUrl: "", sourceCount: videoUrls.length, requiredSegments: segments.length, materializedSegments: 0, trimmedSegments: segments.filter((segment) => segment.trim).length, continuityChecks, failureReason: "ffmpeg-unavailable" };
+  }
   await mkdir(generatedDir, { recursive: true });
   const preparedPaths: string[] = [];
   for (const [index, segment] of segments.entries()) {
     const sourcePath = await materializeVideoUrl(videoUrls[index], outputName, index);
-    if (!sourcePath) return "";
+    if (!sourcePath) {
+      return { ok: false, mergedUrl: "", sourceCount: videoUrls.length, requiredSegments: segments.length, materializedSegments: preparedPaths.length, trimmedSegments: segments.filter((item) => item.trim).length, continuityChecks, failureReason: `segment-${index + 1}-materialize-failed` };
+    }
     const segmentPath = path.join(generatedDir, `${outputName}-segment-${index + 1}.mp4`);
     const ok = await runFfmpeg([
       "-i", sourcePath,
@@ -1810,20 +3247,29 @@ async function composeLocalVideos(videoUrls: string[], segments: ReturnType<type
       "-movflags", "+faststart",
       segmentPath
     ]);
-    if (!ok || !existsSync(segmentPath) || !(await usableVideoFile(segmentPath))) return "";
+    if (!ok || !existsSync(segmentPath) || !(await usableVideoFile(segmentPath))) {
+      return { ok: false, mergedUrl: "", sourceCount: videoUrls.length, requiredSegments: segments.length, materializedSegments: preparedPaths.length + 1, trimmedSegments: segments.filter((item) => item.trim).length, continuityChecks, failureReason: `segment-${index + 1}-trim-or-encode-failed` };
+    }
     preparedPaths.push(segmentPath);
   }
   if (preparedPaths.length === 1) {
     const finalPath = path.join(generatedDir, `${outputName}.mp4`);
     renameSync(preparedPaths[0], finalPath);
-    return await usableVideoFile(finalPath) ? `/generated/${outputName}.mp4` : "";
+    const mergedUrl = await usableVideoFile(finalPath) ? `/generated/${outputName}.mp4` : "";
+    return { ok: Boolean(mergedUrl), mergedUrl, sourceCount: videoUrls.length, requiredSegments: segments.length, materializedSegments: preparedPaths.length, trimmedSegments: segments.filter((item) => item.trim).length, continuityChecks, failureReason: mergedUrl ? "" : "single-segment-finalize-failed" };
   }
   const listPath = path.join(generatedDir, `${outputName}-concat.txt`);
   const outputPath = path.join(generatedDir, `${outputName}.mp4`);
   const listBody = preparedPaths.map((filePath) => `file '${String(filePath).replace(/'/g, "'\\''")}'`).join("\n");
   await writeFile(listPath, listBody);
   const ok = await runFfmpeg(["-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", outputPath]);
-  return ok && existsSync(outputPath) && await usableVideoFile(outputPath) ? `/generated/${outputName}.mp4` : "";
+  const mergedUrl = ok && existsSync(outputPath) && await usableVideoFile(outputPath) ? `/generated/${outputName}.mp4` : "";
+  return { ok: Boolean(mergedUrl), mergedUrl, sourceCount: videoUrls.length, requiredSegments: segments.length, materializedSegments: preparedPaths.length, trimmedSegments: segments.filter((item) => item.trim).length, continuityChecks, failureReason: mergedUrl ? "" : "concat-failed" };
+}
+
+async function composeLocalVideos(videoUrls: string[], segments: ReturnType<typeof videoSegmentPlan>, outputName: string) {
+  const result = await composeLocalVideosDetailed(videoUrls, segments, outputName);
+  return result.mergedUrl;
 }
 
 async function concatLocalVideos(videoUrls: string[], outputName: string) {
@@ -1916,40 +3362,41 @@ function videoModelNeedsFirstFrameFallback(model: string) {
 async function createFirstFrameLockedVideo(firstFrameUrl: string, outputName: string, settings?: { ratio?: string; duration?: string }) {
   const sourcePath = localPublicPathFromUrl(firstFrameUrl);
   if (!sourcePath || !resolveFfmpegPath()) return "";
+  const preparedSourcePath = await compactReferenceImage(sourcePath, `${outputName}-first-frame`, 0);
   const durationSeconds = videoDurationSeconds(settings);
-  const frames = Math.max(1, durationSeconds * 30);
   const { width, height } = videoCanvasSize(settings);
   await mkdir(generatedDir, { recursive: true });
   const outputPath = path.join(generatedDir, `${outputName}.mp4`);
   const filter = [
     `scale=${width}:${height}:force_original_aspect_ratio=increase`,
     `crop=${width}:${height}`,
-    `zoompan=z='min(1.04,1+0.04*on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=30`,
     "format=yuv420p"
   ].join(",");
   const ok = await runFfmpeg([
     "-loop", "1",
-    "-i", sourcePath,
+    "-framerate", "12",
+    "-i", preparedSourcePath,
     "-f", "lavfi",
     "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-    "-filter_complex", `[0:v]${filter}[v]`,
-    "-map", "[v]",
-    "-map", "1:a",
+    "-vf", filter,
+    "-map", "0:v:0",
+    "-map", "1:a:0",
     "-t", String(durationSeconds),
     "-shortest",
     "-c:v", "libx264",
-    "-preset", "veryfast",
+    "-preset", "ultrafast",
     "-pix_fmt", "yuv420p",
     "-c:a", "aac",
     "-movflags", "+faststart",
     outputPath
-  ], 180000);
+  ], 30000);
   return ok && existsSync(outputPath) && await usableVideoFile(outputPath) ? `/generated/${outputName}.mp4` : "";
 }
 
 function localPublicPathFromUrl(imageUrl?: string) {
   if (!imageUrl?.startsWith("/")) return undefined;
-  const relative = imageUrl.replace(/^\/+/, "");
+  const [pathname] = imageUrl.split(/[?#]/, 1);
+  const relative = pathname.replace(/^\/+/, "");
   const candidate = relative.startsWith("generated/")
     ? path.join(generatedDir, relative.replace(/^generated\//, ""))
     : path.join(frontendPublicDir, relative);
@@ -2129,13 +3576,6 @@ function imageGenerationConfig(modelName?: string) {
 }
 
 function serviceConfig(kind: "text" | "video") {
-  if (process.env.SPARKCANVAS_DISABLE_IMAGE_GEN === "1") {
-    return {
-      baseUrl: defaultAiBaseUrl,
-      apiKey: "",
-      model: kind === "text" ? "gpt-5.4" : "grok-imagine-1.0-video-super"
-    };
-  }
   const prefix = kind === "text" ? "TEXT_GEN" : "VIDEO_GEN";
   const modelFallback = kind === "text" ? "gpt-5.4" : "grok-imagine-1.0-video-super";
   const baseUrl = process.env[`${prefix}_BASE_URL`]
@@ -2355,10 +3795,12 @@ async function refreshPendingVideoOutputs(limit = 2) {
         const segmentPlan = videoSegmentPlan(durationSeconds, config.model);
         const composedUrl = videoNeedsCompose(durationSeconds, config.model)
           ? await composeLocalVideos(urls, segmentPlan, `xmanx-${frame.id}-${output.id}-refresh-final`)
-          : urls[0];
+          : await materializeVideoPublicUrl(urls[0], `xmanx-${frame.id}-${output.id}-refresh-final`, 0);
         if (composedUrl) {
           output.videoUrl = composedUrl;
           output.copy = appendCopyNote(cleanVideoStatusNotes(output.copy, "ready"), `MP4 文件已生成: ${composedUrl}`);
+        } else {
+          output.copy = appendCopyNote(output.copy, "视频模型已返回临时 URL，但本地下载保存失败；未标记为最终 MP4。");
         }
         return true;
       } else if (statuses.length) {
@@ -2388,14 +3830,14 @@ async function refreshPendingVideoOutputs(limit = 2) {
       if (urls.length === videoIds.length) {
         const durationSeconds = videoDurationSeconds(frame.settings);
         const segmentPlan = videoSegmentPlan(durationSeconds, config.model);
-        const composedUrl = urls.length === 1
-          ? urls[0]
-          : videoIds.length > 1 || videoNeedsCompose(durationSeconds, config.model)
+        const composedUrl = videoIds.length > 1 || videoNeedsCompose(durationSeconds, config.model)
           ? await composeLocalVideos(urls, segmentPlan, `xmanx-${frame.id}-${node.id}-refresh-final`)
-          : urls[0];
+          : await materializeVideoPublicUrl(urls[0], `xmanx-${frame.id}-${node.id}-refresh-final`, 0);
         if (composedUrl) {
           node.videoUrl = composedUrl;
           node.body = appendCopyNote(cleanVideoStatusNotes(node.body, "ready"), `MP4 文件已生成: ${composedUrl}`);
+        } else {
+          node.body = appendCopyNote(node.body, "视频模型已返回临时 URL，但本地下载保存失败；未标记为最终 MP4。");
         }
         return true;
       } else if (statuses.length) {
@@ -2437,11 +3879,12 @@ async function runVideoGeneration(prompt: string, modelName?: string, settings?:
   const config = serviceConfig("video");
   if (!config.apiKey) return undefined;
   const model = modelName || config.model;
-  const inputReference = videoInputReferenceUrl(options.firstFrameUrl);
-  if (options.firstFrameUrl && !inputReference && !videoModelNeedsFirstFrameFallback(model)) {
-    throw new Error(`${model} 的参考图参数需要公网图片链接。请设置 SPARKCANVAS_PUBLIC_BASE_URL，或先把本地图片上传到图床后再生成视频。`);
-  }
-  if (options.firstFrameUrl && !inputReference && videoModelNeedsFirstFrameFallback(model)) {
+  const referencePublication = await resolvePublishedReferenceAssetUrl(options.firstFrameUrl);
+  const inputReference = referencePublication.url;
+  if (options.firstFrameUrl && !inputReference) {
+    if (isProduction || !videoModelNeedsFirstFrameFallback(model)) {
+      throw new Error(describeReferencePublicationFailure(model, referencePublication));
+    }
     const videoUrl = await createFirstFrameLockedVideo(options.firstFrameUrl, `first-frame-locked-${nanoid(8)}`, settings);
     if (videoUrl) {
       return {
@@ -2487,11 +3930,12 @@ async function createVideoGenerationJob(prompt: string, modelName?: string, sett
   const config = serviceConfig("video");
   if (!config.apiKey) return undefined;
   const model = modelName || config.model;
-  const inputReference = videoInputReferenceUrl(options.firstFrameUrl);
-  if (options.firstFrameUrl && !inputReference && !videoModelNeedsFirstFrameFallback(model)) {
-    throw new Error(`${model} 的参考图参数需要公网图片链接。请设置 SPARKCANVAS_PUBLIC_BASE_URL，或先把本地图片上传到图床后再生成视频。`);
-  }
-  if (options.firstFrameUrl && !inputReference && videoModelNeedsFirstFrameFallback(model)) {
+  const referencePublication = await resolvePublishedReferenceAssetUrl(options.firstFrameUrl);
+  const inputReference = referencePublication.url;
+  if (options.firstFrameUrl && !inputReference) {
+    if (isProduction || !videoModelNeedsFirstFrameFallback(model)) {
+      throw new Error(describeReferencePublicationFailure(model, referencePublication));
+    }
     const videoUrl = await createFirstFrameLockedVideo(options.firstFrameUrl, `first-frame-locked-${nanoid(8)}`, settings);
     if (videoUrl) {
       return {
@@ -2539,6 +3983,10 @@ async function createVideoProbe(prompt: string, modelName?: string) {
   };
 }
 
+function publicBaseUrlStatus() {
+  return referencePublicationProvider().status();
+}
+
 function aiStatus() {
   const imageConfig = imageGenerationConfig(models[0].model);
   const textConfig = serviceConfig("text");
@@ -2565,7 +4013,8 @@ function aiStatus() {
       baseUrl: videoConfig.baseUrl,
       model: videoConfig.model,
       provider: "yijiarj"
-    }
+    },
+    publicReference: publicBaseUrlStatus()
   };
 }
 
@@ -3246,9 +4695,8 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         if (videoUrls.length === segmentPlan.length) {
           const composedUrl = videoNeedsCompose(durationSeconds, workflowVideoModel)
             ? await composeLocalVideos(videoUrls, segmentPlan, `xmanx-${frame.id}-${output.id || "video"}-final`)
-            : videoUrls[0];
+            : await materializeVideoPublicUrl(videoUrls[0], `xmanx-${frame.id}-${output.id || "video"}-final`, 0);
           if (composedUrl) output.videoUrl = composedUrl;
-          else if (!videoNeedsCompose(durationSeconds, workflowVideoModel)) output.videoUrl = videoUrls[0];
         }
         if (output.videoUrl && firstFrameUrl) output.imageUrl = firstFrameUrl;
         if (fallbackReasons.length) output.copy = appendCopyNote(output.copy, fallbackReasons[0]);
@@ -3257,6 +4705,8 @@ async function fillFrameOutputs(frame: CanvasFrame) {
           output.copy = appendCopyNote(output.copy, output.videoUrl
             ? `所有分段视频已返回并完成裁切/合成: ${output.videoUrl}`
             : "所有分段视频已返回 URL，但本地未完成裁切/合成；需要 ffmpeg 或远端合成服务生成最终 MP4。");
+        } else if (videoUrls.length === segmentPlan.length && !output.videoUrl) {
+          output.copy = appendCopyNote(output.copy, "视频模型已返回临时 URL，但本地下载保存失败；未标记为最终 MP4。");
         }
         output.copy = appendCopyNote(output.copy, output.videoUrl
           ? `最终 MP4 文件已生成: ${output.videoUrl}`
@@ -3378,7 +4828,7 @@ function createFrame(
     finalPrompt,
     taskId,
     steps: buildWorkflow(prompt, brand, settings.brandInject),
-    workflowNodes: requestedWorkflowNodes ?? buildWorkflowNodes(prompt, brand, model, settings, brandContext, settings.brandInject),
+    workflowNodes: requestedWorkflowNodes ?? buildWorkflowNodes(prompt, brand, model, settings, brandContext, settings.brandInject, buildWorkflowBridge(prompt, brand, settings, settings.brandInject)),
     outputs: requestedOutputs ?? outputTargets.map((target, index) => ({
       id: nanoid(6),
       title: labelForOutputTarget(target),
@@ -3436,7 +4886,7 @@ function buildWorkflow(prompt: string, brand?: Brand, brandInject = true) {
   ];
 }
 
-function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (typeof models)[number], settings: GenerationSettings, brandContext = brand ? buildBrandContext(brand) : "", brandInjected = settings.brandInject) {
+function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (typeof models)[number], settings: GenerationSettings, brandContext = brand ? buildBrandContext(brand) : "", brandInjected = settings.brandInject, bridge?: WorkflowBridge) {
   const resolved = resolvePromptAssets(prompt, brand);
   const promptRefs = resolved.imageReferences;
   const outputTargets = resolved.outputs.length
@@ -3639,7 +5089,7 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
       h: 330
     });
   }
-  return nodes;
+  return bridge ? applyWorkflowBridgeToNodes(nodes, bridge) : nodes;
 }
 
 async function completeTask(taskId: string) {
@@ -3784,6 +5234,10 @@ app.get("/workspace/export", (_req, res) => {
 
 app.get("/brands", (_req, res) => {
   res.json(db.brands);
+});
+
+app.get("/entities", (_req, res) => {
+  res.json(db.brands.map((brand) => brandToEntity(brand)));
 });
 
 app.post("/brands", async (req, res) => {
@@ -4065,6 +5519,82 @@ app.post("/ai/resolve-references", async (req, res) => {
   });
 });
 
+app.post("/ai/resolve-graph", async (req, res) => {
+  const input = z.object({
+    prompt: z.string().min(1),
+    brandId: z.string().nullable().optional(),
+    brandInject: z.boolean().optional()
+  }).parse(req.body);
+  res.json(buildResolverGraph(input.prompt, {
+    brandId: input.brandId,
+    brandInject: input.brandInject
+  }));
+});
+
+app.post("/ai/ir", async (req, res) => {
+  const input = z.object({
+    prompt: z.string().min(1),
+    brandId: z.string().nullable().optional(),
+    brandInject: z.boolean().optional(),
+    settings: generationSettingsPatchSchema.optional()
+  }).parse(req.body);
+  const ir = buildCreativeIR(input.prompt, {
+    brandId: input.brandId,
+    brandInject: input.brandInject,
+    settings: input.settings
+  });
+  res.json(ir);
+});
+
+app.post("/ai/plan", async (req, res) => {
+  const input = z.object({
+    prompt: z.string().min(1),
+    brandId: z.string().nullable().optional(),
+    brandInject: z.boolean().optional(),
+    settings: generationSettingsPatchSchema.optional()
+  }).parse(req.body);
+  const ir = buildCreativeIR(input.prompt, {
+    brandId: input.brandId,
+    brandInject: input.brandInject,
+    settings: input.settings
+  });
+  res.json(buildPlannerPlanFromCreativeIR(ir));
+});
+
+app.post("/ai/canvas-plan", async (req, res) => {
+  const input = z.object({
+    prompt: z.string().min(1),
+    brandId: z.string().nullable().optional(),
+    brandInject: z.boolean().optional(),
+    settings: generationSettingsPatchSchema.optional()
+  }).parse(req.body);
+  const ir = buildCreativeIR(input.prompt, {
+    brandId: input.brandId,
+    brandInject: input.brandInject,
+    settings: input.settings
+  });
+  const plan = buildPlannerPlanFromCreativeIR(ir);
+  res.json(buildCanvasPlanGraphFromPlan(plan));
+});
+
+app.post("/ai/workflow-bridge", async (req, res) => {
+  const input = z.object({
+    prompt: z.string().min(1),
+    brandId: z.string().nullable().optional(),
+    brandInject: z.boolean().optional(),
+    settings: generationSettingsPatchSchema.optional()
+  }).parse(req.body);
+  const brand = input.brandId === null ? undefined : input.brandId ? db.brands.find((item) => item.id === input.brandId) : inferBrandFromPrompt(input.prompt);
+  const settings = defaultSettings(input.prompt, input.settings);
+  settings.brandInject = Boolean(brand && (input.brandInject ?? (typeof input.settings?.brandInject === "boolean" ? settings.brandInject : promptRequestsWholeBrand(input.prompt, brand))));
+  const bridge = buildWorkflowBridge(input.prompt, brand, settings, settings.brandInject);
+  const model = models[0];
+  res.json({
+    ...bridge,
+    workflowNodes: buildWorkflowNodes(input.prompt, brand, model, settings, brand ? buildBrandContext(brand) : "", settings.brandInject, bridge)
+  });
+});
+
 app.get("/canvas/frames", (_req, res) => {
   res.json(db.frames);
 });
@@ -4167,7 +5697,8 @@ app.patch("/canvas/frames/:id", async (req, res) => {
   frame.outputs = manualOutputs ?? frame.outputs;
   frame.steps = buildWorkflow(frame.prompt, brand, frame.brandInjected);
   if (!manualWorkflowNodes && frame.prompt.trim() && frame.workflowNodes.some((node) => autoCoreNodeIds.has(node.id))) {
-    const rebuiltNodes = buildWorkflowNodes(frame.prompt, hasFrameBrand ? brand : undefined, model, frame.settings, frame.brandContext, frame.brandInjected);
+    const bridge = buildWorkflowBridge(frame.prompt, brand, frame.settings, frame.brandInjected);
+    const rebuiltNodes = buildWorkflowNodes(frame.prompt, hasFrameBrand ? brand : undefined, model, frame.settings, frame.brandContext, frame.brandInjected, bridge);
     frame.workflowNodes = rebuiltNodes.map((node) => {
       const current = frame.workflowNodes.find((item) => item.id === node.id);
       if (!current) return node;
@@ -4495,6 +6026,9 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   const contextBrand = frameContextBrand(frame);
   const settings = input.settings ?? {};
   const selectedVideoModel = input.model || serviceConfig("video").model;
+  if (process.env.SPARKCANVAS_DEBUG_VIDEO_SMOKE === "1") {
+    console.error("[video-smoke] route start", JSON.stringify({ frameId: frame.id, nodeId: node.id, model: selectedVideoModel, firstFrameRefs: (node.refs ?? []).length }));
+  }
   const sourcePrompt = node.type === "output" ? `${frame.prompt}\n${input.prompt.trim()}`.trim() : input.prompt.trim();
   const outputNodes = frame.workflowNodes.filter((item) => item.type === "output");
   const outputIndex = outputNodes.findIndex((item) => item.id === node.id);
@@ -4512,13 +6046,20 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
     ?? visualDraftNode?.refs?.find((reference) => reference.imageUrl)?.imageUrl
     ?? frame.outputs.find((output) => output.kind === "image" && output.imageUrl)?.imageUrl
     ?? "";
+  if (firstFrameUrl && /^data:image\//i.test(firstFrameUrl)) {
+    const materializedFirstFrame = await materializeAssetImageUrl(firstFrameUrl, `xmanx-${frame.id}-${node.id}-first-frame`);
+    if (materializedFirstFrame) {
+      firstFrameUrl = materializedFirstFrame;
+    }
+  }
   let firstFrameNote = "";
   const durationSeconds = videoDurationSeconds(settings);
   const segmentPlan = videoSegmentPlan(durationSeconds, selectedVideoModel);
   const keyframeCount = videoKeyframeCount(durationSeconds);
   const generatedKeyframeRefs: ReferenceItem[] = [];
   let storyboardSheetRef: ReferenceItem | undefined;
-  if (videoRefs.length) {
+  const shouldSynthesizeStoryboardAssets = videoRefs.length > 0 && !firstFrameUrl;
+  if (shouldSynthesizeStoryboardAssets) {
     try {
       const generatedStoryboard = await runImageGenerationSkill(
         videoStoryboardSheetPrompt(sourcePrompt, contextBrand, videoRefs, { ratio: "16:9", duration: `${durationSeconds}s`, contentLanguage: settings.contentLanguage ?? frame.settings.contentLanguage }, segmentPlan),
@@ -4542,7 +6083,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
       firstFrameNote = `视频分镜板生成失败，继续生成单镜头首帧：${error instanceof Error ? error.message.slice(0, 140) : "image skill unavailable"}`;
     }
   }
-  if (videoRefs.length) {
+  if (shouldSynthesizeStoryboardAssets) {
     const startIndex = firstFrameUrl ? 1 : 0;
     const keyframeSourceRefs = stableVideoReferences([...videoRefs, ...(storyboardSheetRef ? [storyboardSheetRef] : [])], 12);
     try {
@@ -4572,6 +6113,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
     } catch (error) {
       firstFrameNote = `视频关键帧生成失败，继续使用视频模型自身能力：${error instanceof Error ? error.message.slice(0, 140) : "image skill unavailable"}`;
     }
+  } else if (firstFrameUrl) {
+    firstFrameNote = firstFrameNote || "已检测到现成首帧/参考图，跳过额外分镜板与关键帧预生成，直接提交视频模型。";
   }
   const videoPromptRefs = [
     ...videoRefs,
@@ -4596,8 +6139,15 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   let videoUrl = "";
   let usedFirstFrame = false;
   let fallbackReason = "";
+  let generationErrorMessage = "";
+  if (process.env.SPARKCANVAS_DEBUG_VIDEO_SMOKE === "1") {
+    console.error("[video-smoke] enter generate-video", JSON.stringify({ frameId: frame.id, nodeId: node.id, firstFrameUrl, segmentCount: segmentPlan.length, effectiveVideoMode, refs: videoRefs.length }));
+  }
   try {
     const segmentResults: VideoRunResult[] = [];
+    if (process.env.SPARKCANVAS_DEBUG_VIDEO_SMOKE === "1") {
+      console.error("[video-smoke] before segment loop", JSON.stringify({ segmentPlan, firstFrameUrl, videoRefs: videoRefs.length, shouldSynthesizeStoryboardAssets }));
+    }
     const segmentFirstFrames = [firstFrameUrl, ...generatedKeyframeRefs.map((reference) => reference.imageUrl).filter(Boolean)];
     for (const segment of segmentPlan) {
       const segmentFirstFrame = segmentFirstFrames[segment.index] ?? firstFrameUrl;
@@ -4607,9 +6157,18 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
         `Segment ${segment.index + 1}/${segmentPlan.length}: generate a ${segment.modelSeconds}s source clip for final ${segment.targetSeconds}s${segment.trim ? "; final editor trims the beginning to target duration" : ""}.`,
         "Keep the same character, logo, store/product environment, voice tone, language and BGM bed across all segments."
       ].join("\n");
+      if (process.env.SPARKCANVAS_DEBUG_VIDEO_SMOKE === "1") {
+        console.error("[video-smoke] before video generation", JSON.stringify({ segmentIndex: segment.index, segmentFirstFrame: Boolean(segmentFirstFrame), segmentPrompt: segmentPrompt.slice(0, 120) }));
+      }
       const result = segmentPlan.length === 1
         ? await runVideoGeneration(segmentPrompt, selectedVideoModel, segmentSettings, { firstFrameUrl: segmentFirstFrame })
         : await createVideoGenerationJob(segmentPrompt, selectedVideoModel, segmentSettings, Number(process.env.WORKFLOW_VIDEO_CREATE_TIMEOUT_MS ?? "45000"), { firstFrameUrl: segmentFirstFrame });
+      if (process.env.SPARKCANVAS_DEBUG_VIDEO_SMOKE === "1") {
+        console.error("[video-smoke] segment finished", JSON.stringify({ segmentIndex: segment.index, hasResult: Boolean(result), videoId: result?.videoId ?? "", videoUrl: result?.videoUrl ?? "" }));
+      }
+      if (process.env.SPARKCANVAS_DEBUG_VIDEO_SMOKE === "1") {
+        console.error("[video-smoke] segment result", JSON.stringify({ segmentIndex: segment.index, hasResult: Boolean(result), videoId: result?.videoId ?? "", videoUrl: result?.videoUrl ?? "", usedFirstFrame: result?.usedFirstFrame ?? false }));
+      }
       if (result) segmentResults.push(result);
     }
     const videoIds = segmentResults.map((result) => result.videoId).filter(Boolean);
@@ -4620,7 +6179,10 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
     if (sourceVideoUrls.length === segmentPlan.length) {
       const composedUrl = videoNeedsCompose(durationSeconds, selectedVideoModel)
         ? await composeLocalVideos(sourceVideoUrls, segmentPlan, `xmanx-${frame.id}-${node.id}-final`)
-        : sourceVideoUrls[0];
+        : await bestEffortMaterializeVideoPublicUrl(sourceVideoUrls[0], `xmanx-${frame.id}-${node.id}-final`, 0);
+      if (process.env.SPARKCANVAS_DEBUG_VIDEO_SMOKE === "1") {
+        console.error("[video-smoke] materialize result", JSON.stringify({ sourceVideoUrls, composedUrl }));
+      }
       if (composedUrl) videoUrl = composedUrl;
     }
     if (videoUrl) {
@@ -4630,16 +6192,20 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
         usedFirstFrame ? "执行状态: 已由视频模型按首帧图生视频生成，并完成最终时长裁切/合成。" : "执行状态: 已由视频模型生成，并完成最终时长裁切/合成。"
       ];
     } else if (videoId) {
+      const localSaveFailed = sourceVideoUrls.length === segmentPlan.length && !videoUrl;
       generationLines = [
         `视频ID: ${videoId}`,
         sourceVideoUrls.length ? `源片URL: ${sourceVideoUrls.join(" / ")}` : "",
-          videoNeedsCompose(durationSeconds, selectedVideoModel)
-          ? "执行状态: 视频片段任务已创建；最终 MP4 需要等待片段 videoUrl 后进入合成/裁切。"
-          : "执行状态: 视频任务已创建但仍在生成，可用 /v1/videos/{video_id} 查询。"
+        localSaveFailed
+          ? "执行状态: 视频模型已返回临时 URL，但本地下载保存失败；未标记为最终 MP4。"
+          : videoNeedsCompose(durationSeconds, selectedVideoModel)
+            ? "执行状态: 视频片段任务已创建；最终 MP4 需要等待片段 videoUrl 后进入合成/裁切。"
+            : "执行状态: 视频任务已创建但仍在生成，可用 /v1/videos/{video_id} 查询。"
       ].filter(Boolean);
     }
   } catch (error) {
-    generationLines = [`执行状态: 视频生成请求失败，${error instanceof Error ? error.message.slice(0, 180) : "unavailable"}`];
+    generationErrorMessage = error instanceof Error ? error.message.slice(0, 180) : "unavailable";
+    generationLines = [`执行状态: 视频生成请求失败，${generationErrorMessage}`];
   }
   const videoPlan = [
     prompt,
@@ -4701,7 +6267,14 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   }
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame, node, videoPlan, model: input.model ?? serviceConfig("video").model, videoId, videoUrl });
+  if (process.env.SPARKCANVAS_DEBUG_VIDEO_SMOKE === "1") {
+    console.error("[video-smoke] route complete", JSON.stringify({ frameId: frame.id, nodeId: node.id, videoId, videoUrl, generationErrorMessage }));
+  }
+  const payload = { frame, node, videoPlan, model: input.model ?? serviceConfig("video").model, videoId, videoUrl };
+  if (generationErrorMessage && !videoId && !videoUrl) {
+    return res.status(500).json(payload);
+  }
+  res.json(payload);
 });
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => {
@@ -4787,7 +6360,8 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-compose", async (req, res) =
     ...(node.refs ?? []).map((reference) => reference.imageUrl ?? "").filter((url) => /\.mp4($|\?)/i.test(url)),
     ...videoNodes.flatMap((item) => (item.refs ?? []).map((reference) => reference.imageUrl ?? "").filter((url) => /\.mp4($|\?)/i.test(url)))
   ].filter((url, index, list) => url && list.indexOf(url) === index);
-  const mergedUrl = segmentUrls.length >= segmentPlan.length ? await composeLocalVideos(segmentUrls, segmentPlan, `xmanx-${frame.id}-${node.id}-merged`) : "";
+  const composeVerification = await composeLocalVideosDetailed(segmentUrls, segmentPlan, `xmanx-${frame.id}-${node.id}-merged`);
+  const mergedUrl = composeVerification.mergedUrl;
   const refs = [
     ...videoNodes.flatMap((item) => item.refs ?? []),
     ...(frame.workflowNodes.find((item) => item.id === "input-image")?.refs ?? [])
@@ -4801,11 +6375,20 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-compose", async (req, res) =
     `分段策略: ${segmentPlan.length} 段 · ${videoSegmentSummary(durationSeconds, composeVideoModel)}`,
     `片段状态: ${segmentUrls.length ? `${segmentUrls.length} 个片段已有 videoUrl` : "暂无可合并 videoUrl，等待各视频片段生成完成"}`,
     `剪辑规则: ${settings.transition ?? "短交叉淡入淡出 + 节奏点硬切"}；保持同一品牌空间、同一 IP/模特、同一 Logo 安全边距。`,
-    `配音规则: 每段单独生成旁白/音效提示，但统一语言、音色、响度、BGM 音色和节奏；不要让用户听出两个不配套的视频。`,
+    `配音规则: ${settings.audioMode ?? "每段单独生成旁白/音效提示，但统一语言、音色、响度、BGM 音色和节奏"}；不要让用户听出两个不配套的视频。`,
     `语言: ${contentLanguageLabel(settings.contentLanguage ?? frame.settings.contentLanguage)}`,
     `品牌约束: ${brandLabel(brand)}; ${brandTone(brand)}; ${brandVisualStyle(brand)}`,
     refs.length ? `视觉引用: ${refs.map((reference) => `${reference.role}:${reference.title}`).join(" / ")}` : "视觉引用: 无",
-    mergedUrl ? `执行状态: 已用 ffmpeg 完成裁切/合成 ${mergedUrl}` : segmentUrls.length >= segmentPlan.length ? "执行状态: 片段存在但本地未完成裁切/合成，请检查 ffmpeg 或远端视频下载状态。" : "执行状态: 已保存合成计划，等待视频片段全部生成。"
+    `合成校验: ${composeVerification.continuityChecks.join(" | ")}`,
+    mergedUrl
+      ? `执行状态: 已用 ffmpeg 完成裁切/合成 ${mergedUrl}`
+      : composeVerification.failureReason === "insufficient-video-urls"
+        ? `执行状态: 片段不足，需 ${composeVerification.requiredSegments} 段、当前仅 ${composeVerification.sourceCount} 段；等待更多 videoUrl 后再合成。`
+        : composeVerification.failureReason === "ffmpeg-unavailable"
+          ? "执行状态: 本地 ffmpeg 不可用，无法完成裁切/合成验证。"
+          : composeVerification.failureReason
+            ? `执行状态: 合成验证失败（${composeVerification.failureReason}），已暴露失败原因供排查。`
+            : "执行状态: 已保存合成计划，等待视频片段全部生成。"
   ].filter(Boolean).join("\n");
 
   node.type = "compose";
@@ -4815,13 +6398,20 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-compose", async (req, res) =
   const targetOutput = frame.outputs.find((output) => output.kind === "video");
   if (targetOutput) {
     if (mergedUrl) targetOutput.videoUrl = mergedUrl;
-    targetOutput.copy = appendCopyNote(targetOutput.copy, mergedUrl
+    const composeStatusNote = mergedUrl
       ? `最终 MP4 已合成: ${mergedUrl}`
-      : `视频合成计划已生成：${segmentPlan.length} 段，等待片段 videoUrl 后裁切/合成。`);
+      : composeVerification.failureReason === "insufficient-video-urls"
+        ? `视频合成计划已生成：${segmentPlan.length} 段，当前仅收到 ${composeVerification.sourceCount}/${composeVerification.requiredSegments} 段 videoUrl；等待更多片段后再裁切/合成。`
+        : composeVerification.failureReason === "ffmpeg-unavailable"
+          ? "视频合成计划已生成，但本地 ffmpeg 不可用，暂时无法完成裁切/合成验证。"
+          : composeVerification.failureReason
+            ? `视频合成验证失败：${composeVerification.failureReason}。请先排查失败原因，再重试裁切/合成。`
+            : `视频合成计划已生成：${segmentPlan.length} 段，等待片段 videoUrl 后裁切/合成。`;
+    targetOutput.copy = appendCopyNote(targetOutput.copy, composeStatusNote);
   }
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame, node, composePlan, mergedUrl, segments: segmentPlan.map((segment) => segment.targetSeconds), segmentPlan });
+  res.json({ frame, node, composePlan, mergedUrl, segments: segmentPlan.map((segment) => segment.targetSeconds), segmentPlan, composeVerification });
 });
 
 app.get("/tasks/:id", (req, res) => {
