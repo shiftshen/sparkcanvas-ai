@@ -42,6 +42,7 @@ import {
   ZoomOut
 } from "lucide-react";
 import "./styles.css";
+import { WorkflowCanvas } from "./canvas/WorkflowCanvas";
 
 const appDesignLanguagePreview = {
   colors,
@@ -2204,6 +2205,8 @@ function App() {
           />
         </>
       )}
+
+      <WorkflowCanvas />
 
       <Canvas
         frame={activeFrame}

@@ -1,0 +1,178 @@
+.sc-workflow-canvas {
+  display: grid;
+  gap: var(--sc-spacing-4);
+  padding: var(--sc-spacing-4);
+  background: var(--sc-color-surface);
+  color: var(--sc-color-text);
+}
+
+.sc-workflow-header,
+.sc-workflow-composer,
+.sc-workflow-sidebar {
+  border: 1px solid var(--sc-color-border);
+  border-radius: var(--sc-border-radius-lg);
+  background: color-mix(in srgb, var(--sc-color-surface) 84%, var(--sc-color-surface-elevated));
+}
+
+.sc-workflow-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sc-spacing-3);
+  padding: var(--sc-spacing-3) var(--sc-spacing-4);
+}
+
+.sc-workflow-header strong,
+.sc-workflow-sidebar strong {
+  display: block;
+  font: var(--sc-font-semibold) var(--sc-font-size-lg)/var(--sc-line-height-tight) var(--sc-font-family);
+}
+
+.sc-workflow-header small,
+.sc-workflow-composer-actions span,
+.sc-workflow-sidebar p {
+  color: var(--sc-color-text-muted);
+}
+
+.sc-workflow-actions,
+.sc-workflow-composer-actions {
+  display: flex;
+  gap: var(--sc-spacing-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.sc-workflow-actions button,
+.sc-workflow-composer-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sc-spacing-2);
+  padding: var(--sc-spacing-2) var(--sc-spacing-3);
+  border-radius: var(--sc-border-radius-md);
+  background: var(--sc-color-surface-elevated);
+  color: var(--sc-color-text);
+}
+
+.sc-workflow-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: var(--sc-spacing-4);
+  min-height: 72vh;
+}
+
+.sc-workflow-main {
+  display: grid;
+  gap: var(--sc-spacing-4);
+}
+
+.sc-workflow-composer {
+  display: grid;
+  gap: var(--sc-spacing-3);
+  padding: var(--sc-spacing-3);
+}
+
+.sc-workflow-composer textarea,
+.sc-workflow-sidebar input,
+.sc-workflow-sidebar textarea {
+  width: 100%;
+  border: 1px solid var(--sc-color-border);
+  border-radius: var(--sc-border-radius-md);
+  background: var(--sc-color-surface);
+  color: var(--sc-color-text);
+  padding: var(--sc-spacing-3);
+}
+
+.sc-workflow-composer textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.sc-workflow-stage {
+  position: relative;
+  overflow: hidden;
+  min-height: 640px;
+  border: 1px solid var(--sc-color-border);
+  border-radius: var(--sc-border-radius-xl);
+  background-color: var(--sc-color-surface);
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--sc-color-border) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--sc-color-border) 55%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.sc-workflow-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.sc-workflow-lines path {
+  fill: none;
+  stroke: var(--sc-color-accent);
+  stroke-width: 2;
+  opacity: 0.8;
+}
+
+.sc-workflow-node {
+  position: absolute;
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  padding: var(--sc-spacing-3);
+  border: 1px solid var(--sc-color-border);
+  border-radius: var(--sc-border-radius-lg);
+  background: color-mix(in srgb, var(--sc-color-surface-elevated) 75%, transparent);
+  color: var(--sc-color-text);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--sc-color-shadow) 18%, transparent);
+}
+
+.sc-workflow-node.selected {
+  border-color: var(--sc-color-accent);
+  box-shadow: 0 0 0 1px var(--sc-color-accent), 0 10px 24px color-mix(in srgb, var(--sc-color-shadow) 20%, transparent);
+}
+
+.sc-workflow-node.agent .sc-workflow-node-type {
+  color: var(--sc-color-accent);
+}
+
+.sc-workflow-node.command .sc-workflow-node-type {
+  color: var(--sc-color-success);
+}
+
+.sc-workflow-node strong {
+  font: var(--sc-font-semibold) var(--sc-font-size-base)/var(--sc-line-height-tight) var(--sc-font-family);
+}
+
+.sc-workflow-node small,
+.sc-workflow-node p {
+  margin: 0;
+  color: var(--sc-color-text-muted);
+}
+
+.sc-workflow-node p {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.sc-workflow-sidebar {
+  display: grid;
+  align-content: start;
+  gap: var(--sc-spacing-3);
+  padding: var(--sc-spacing-4);
+}
+
+.sc-workflow-sidebar label {
+  display: grid;
+  gap: var(--sc-spacing-2);
+  font-size: var(--sc-font-size-sm);
+}
+
+@media (max-width: 1024px) {
+  .sc-workflow-body {
+    grid-template-columns: 1fr;
+  }
+}
