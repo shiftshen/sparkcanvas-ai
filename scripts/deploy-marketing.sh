@@ -28,6 +28,6 @@ rsync -az --delete \
   "$ROOT"/ "$REMOTE:$DEPLOY_PATH/"
 
 ssh "$REMOTE" "cd '$DEPLOY_PATH' && docker compose --env-file .env.production -f config/docker-compose.yml up -d --build --force-recreate backend frontend"
-ssh "$REMOTE" "curl -fsS http://127.0.0.1:23080/api/auth/config >/dev/null && curl -fsS -H 'Authorization: Bearer demo-token' http://127.0.0.1:23080/api/ai/status >/dev/null"
+ssh "$REMOTE" "bash -lc 'set -euo pipefail; for i in \$(seq 1 20); do if curl -fsS http://127.0.0.1:23080/api/auth/config >/dev/null && curl -fsS -H \"Authorization: Bearer demo-token\" http://127.0.0.1:23080/api/ai/status >/dev/null; then exit 0; fi; sleep 3; done; exit 1'"
 
 echo "Deployed $BRANCH to $REMOTE:$DEPLOY_PATH"
