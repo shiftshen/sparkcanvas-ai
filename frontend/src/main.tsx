@@ -2629,14 +2629,14 @@ function LoginScreen({
           >
             {mode === "login" ? (
               <>
-                <label>{labels.account}<input autoComplete="username" value={account} onChange={(event) => setAccount(event.target.value)} /></label>
-                <label>{labels.password}<input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+                <label>{labels.account}<input autoComplete="username" required value={account} onChange={(event) => setAccount(event.target.value)} /></label>
+                <label>{labels.password}<input autoComplete="current-password" required type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
               </>
             ) : (
               <>
-                <label>{labels.name}<input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} /></label>
-                <label>{labels.email}<input autoComplete="email" type="email" value={registerEmail} onChange={(event) => setRegisterEmail(event.target.value)} /></label>
-                <label>{labels.password}<input autoComplete="new-password" type="password" value={registerPassword} onChange={(event) => setRegisterPassword(event.target.value)} /></label>
+                <label>{labels.name}<input autoComplete="name" required value={name} onChange={(event) => setName(event.target.value)} /></label>
+                <label>{labels.email}<input autoComplete="email" required type="email" value={registerEmail} onChange={(event) => setRegisterEmail(event.target.value)} /></label>
+                <label>{labels.password}<input autoComplete="new-password" minLength={6} required type="password" value={registerPassword} onChange={(event) => setRegisterPassword(event.target.value)} /></label>
               </>
             )}
             <button type="submit" disabled={submitting || (mode === "register" && !authConfig?.registrationEnabled)}>
