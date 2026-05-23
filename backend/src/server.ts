@@ -487,6 +487,7 @@ const authToken = process.env.SPARKCANVAS_AUTH_TOKEN || (demoAuthEnabled ? DEMO_
 const adminAccount = process.env.SPARKCANVAS_ADMIN_ACCOUNT;
 const adminPassword = process.env.SPARKCANVAS_ADMIN_PASSWORD;
 const registrationEnabled = !isProduction || process.env.SPARKCANVAS_REGISTRATION_ENABLED === "true" || localAuthValue("SPARKCANVAS_REGISTRATION_ENABLED") === "true";
+const defaultImageModelId = process.env.SPARKCANVAS_DEFAULT_IMAGE_MODEL_ID || localAuthValue("SPARKCANVAS_DEFAULT_IMAGE_MODEL_ID");
 const allowedOrigins = (process.env.SPARKCANVAS_ALLOWED_ORIGINS || (isProduction ? "https://xmanx.com,https://www.xmanx.com" : ""))
   .split(",")
   .map((item) => item.trim())
@@ -500,7 +501,7 @@ const templates = [
   { id: "tpl_brandkit", title: "品牌套装维护", category: "品牌", cost: 10, ratio: "kit", intent: "refresh brand system with logo lockup, color cards, campaign copy and reusable scenes" }
 ];
 
-const models = [
+const models = orderModelsByDefault([
   { id: "vdamo-gpt-image-2", provider: "vdamo", model: "gpt-image-2", name: "vdamo · GPT Image 2", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认图片模型；OpenAI-compatible /v1/images/generations；已验证可真实返回 PNG；通过 IMAGE_GEN_* 配置网关和密钥" },
   { id: "imgen-skill", provider: "otcbot", model: process.env.IMAGE_GEN_MODEL || localAuthValue("IMAGE_GEN_MODEL") || "gpt-5.4", name: "@imgen · image skill", type: "image", costMultiplier: 1, unitCostCny: 0.24, reasoningEffort: "high", description: "保留的本地 image_generation tool 路由，统一走 scripts/generate_image.py；模型、网关和密钥由 IMAGE_GEN_* / auth.json 控制" },
   { id: "yijiarj-nano-banana-2", provider: "yijiarj", model: "nano_banana_2", name: "yijiarj · nano_banana_2", type: "image", costMultiplier: 1, unitCostCny: 0.24, reasoningEffort: "high", description: "默认图片模型，经本地 skill 调用 yijiarj Gemini native image API，支持多图参考；约 ¥0.24/次" },
@@ -510,7 +511,14 @@ const models = [
   { id: "yijiarj-grok-video-720p", provider: "yijiarj", model: "grok-imagine-1.0-video-super-720p", name: "yijiarj · grok video 720p", type: "video", costMultiplier: 4, unitCostCny: 0.58, reasoningEffort: "medium", description: "yijiarj /v1/videos；参考图必须传 input_reference 链接；竖屏用 size=720x1280；约 ¥0.58/次" },
   { id: "yijiarj-veo-3-1-fast", provider: "yijiarj", model: "veo_3_1-fast", name: "yijiarj · veo_3_1-fast", type: "video", costMultiplier: 4, unitCostCny: 0.437, reasoningEffort: "medium", description: "VEO 文生/图生；传图时 ad 分组只支持横屏，自动使用 size=1920x1080；链接约 6 小时过期，完成后需下载本地；约 ¥0.437/次" },
   { id: "yijiarj-veo-3-1-fast-fl", provider: "yijiarj", model: "veo_3_1-fast-fl", name: "yijiarj · veo_3_1-fast-fl", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "VEO 首尾帧模型；不支持纯文生，必须传 input_reference，支持多图用 | 分隔" }
-];
+]);
+
+function orderModelsByDefault<T extends { id: string; type: string }>(items: T[]) {
+  if (!defaultImageModelId) return items;
+  const preferred = items.find((item) => item.id === defaultImageModelId && item.type === "image");
+  if (!preferred) return items;
+  return [preferred, ...items.filter((item) => item.id !== preferred.id)];
+}
 
 const assetRoleSchema = z.object({
   role: z.enum(["logo", "ip", "product", "model", "storefront", "environment", "menu", "equipment", "general"]),
