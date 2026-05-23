@@ -108,7 +108,7 @@ curl http://localhost:4100/health
 
 ## 7. 模型和 Skill 验收
 
-- 默认图片角色是 `@imgen · image skill`。
+- 默认图片模型是 `vdamo · GPT Image 2`，旧 `@imgen · image skill` 仍必须保留为可选路由。
 - 图片生成走本地 skill 脚本，不应由前端直接请求图片 API。
 - 文本、图片、视频模型必须可切换，但默认值必须可用。
 - `/api/ai/status` 和 `/api/ai/diagnostics` 只能返回脱敏配置，不得返回密钥。

@@ -158,7 +158,8 @@ def is_gemini_image_model(model: str) -> bool:
 def is_openai_image_model(model: str) -> bool:
     normalized = model.lower()
     return (
-        normalized.startswith("grok-imagine-image")
+        normalized.startswith("gpt-image-")
+        or normalized.startswith("grok-imagine-image")
         or normalized.startswith("image2")
     )
 

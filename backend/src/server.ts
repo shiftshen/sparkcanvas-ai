@@ -480,7 +480,7 @@ const frontendPublicDir = path.join(projectRoot, "frontend", "public");
 const generatedDir = process.env.SPARKCANVAS_GENERATED_DIR ?? path.join(frontendPublicDir, "generated");
 const brandUploadDir = path.join(generatedDir, "brand-assets");
 const defaultAiBaseUrl = "https://api.yijiarj.cn/v1";
-const defaultImageGenBaseUrl = defaultAiBaseUrl;
+const defaultImageGenBaseUrl = "https://api.vdamo.com/v1";
 const isProduction = process.env.NODE_ENV === "production";
 const demoAuthEnabled = !isProduction || process.env.SPARKCANVAS_DEMO_AUTH === "true";
 const authToken = process.env.SPARKCANVAS_AUTH_TOKEN || (demoAuthEnabled ? DEMO_TOKEN : "");
@@ -501,7 +501,8 @@ const templates = [
 ];
 
 const models = [
-  { id: "imgen-skill", provider: "otcbot", model: process.env.IMAGE_GEN_MODEL || localAuthValue("IMAGE_GEN_MODEL") || "gpt-5.4", name: "@imgen · image skill", type: "image", costMultiplier: 1, unitCostCny: 0.24, reasoningEffort: "high", description: "默认图片角色，统一走本地 scripts/generate_image.py；模型、网关和密钥由 IMAGE_GEN_* / auth.json 控制，默认经 Responses API 调用 image_generation" },
+  { id: "vdamo-gpt-image-2", provider: "vdamo", model: "gpt-image-2", name: "vdamo · GPT Image 2", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认图片模型；OpenAI-compatible /v1/images/generations；已验证可真实返回 PNG；通过 IMAGE_GEN_* 配置网关和密钥" },
+  { id: "imgen-skill", provider: "otcbot", model: process.env.IMAGE_GEN_MODEL || localAuthValue("IMAGE_GEN_MODEL") || "gpt-5.4", name: "@imgen · image skill", type: "image", costMultiplier: 1, unitCostCny: 0.24, reasoningEffort: "high", description: "保留的本地 image_generation tool 路由，统一走 scripts/generate_image.py；模型、网关和密钥由 IMAGE_GEN_* / auth.json 控制" },
   { id: "yijiarj-nano-banana-2", provider: "yijiarj", model: "nano_banana_2", name: "yijiarj · nano_banana_2", type: "image", costMultiplier: 1, unitCostCny: 0.24, reasoningEffort: "high", description: "默认图片模型，经本地 skill 调用 yijiarj Gemini native image API，支持多图参考；约 ¥0.24/次" },
   { id: "cliproxyapi-gpt-5-4", provider: "cliproxyapi", model: "gpt-5.4", name: "cliproxyapi · gpt-5.4", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
   { id: "cliproxyapi-gpt-5", provider: "cliproxyapi", model: "gpt-5", name: "cliproxyapi · gpt-5", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
@@ -4230,7 +4231,7 @@ function aiStatus() {
       baseUrlSource: imageConfig.baseUrlSource,
       model: imageConfig.model,
       keySource: imageConfig.apiKey ? imageConfig.keySource : "missing",
-      provider: imageConfig.model === "nano_banana_2" ? "yijiarj" : "cliproxyapi",
+      provider: imageConfig.model.startsWith("gpt-image-") ? "vdamo" : imageConfig.model === "nano_banana_2" ? "yijiarj" : "cliproxyapi",
       skill: "scripts/generate_image.py"
     },
     textGeneration: {
@@ -4316,9 +4317,9 @@ function modelDiagnostics() {
       clipSeconds: isVideo ? videoModelClipSeconds(item.model) : undefined,
       configured,
       route: isImage ? "scripts/generate_image.py" : isVideo ? `${videoConfig.baseUrl}/videos` : `${textConfig.baseUrl}/chat/completions`,
-      status: item.id === "imgen-skill" ? "recommended" : configured ? "candidate" : "missing_key",
-      note: item.id === "imgen-skill"
-        ? "默认推荐。@imgen 会走本地 skill，并把 $ 引用图片真实传入。"
+      status: item.id === models[0].id ? "recommended" : configured ? "candidate" : "missing_key",
+      note: item.id === models[0].id
+        ? "默认推荐。GPT Image 2 走 /v1/images/generations；旧 @imgen skill 和其它模型仍保留可选。"
         : item.description
     };
   });

@@ -67,7 +67,7 @@ SparkCanvas 的产品目标不是复刻一个普通画布，而是让品牌资�
 
 必须通过：
 
-- `@imgen` 默认调用本地图片生成 skill。
+- 默认图片模型调用 `vdamo · GPT Image 2`；`@imgen` 本地图片 skill 仍必须保留为可选回退/兼容路由。
 - `$logo`、`$ip`、`$menu.buffet` 等图片变量进入 `imageReferences`。
 - `$copy.slogan` 等文本变量展开到最终 prompt。
 - `$dapot` 可引用整个品牌上下文。

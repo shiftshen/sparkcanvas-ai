@@ -175,7 +175,8 @@ try {
   const initial = await request("/workspace");
   assert(initial.brands.some((brand) => brand.id === "brand_xmanx" && brand.active), "XMANX should be the active default brand");
   assert(initial.templates.some((template) => template.id === "tpl_brandkit"), "brand kit template should exist");
-  assert(initial.models[0]?.id === "imgen-skill", "default image role should be @imgen skill");
+  assert(initial.models[0]?.id === "vdamo-gpt-image-2", "default image model should be vdamo GPT Image 2");
+  assert(initial.models.some((model) => model.id === "imgen-skill"), "model selector should still keep the @imgen skill route");
   assert(initial.models.some((model) => model.id === "yijiarj-nano-banana-2"), "model selector should still expose yijiarj nano_banana_2");
   assert(initial.models.some((model) => model.id === "yijiarj-grok-video-720p"), "model selector should expose verified yijiarj video model");
   assert(initial.models.some((model) => model.id === "cliproxyapi-gpt-5"), "model selector should keep legacy switchable models");
@@ -192,7 +193,8 @@ try {
   assert(!("apiKey" in aiDiagnostics.imageGeneration), "AI diagnostics must not expose secrets");
   assert(aiDiagnostics.publicReference?.productionReady === false, "AI diagnostics should include non-production public reference readiness locally");
   const modelDiagnostics = await request("/ai/models/diagnostics");
-  assert(modelDiagnostics.models.some((item) => item.id === "imgen-skill" && item.status === "recommended"), "model diagnostics should mark @imgen as the recommended image route");
+  assert(modelDiagnostics.models.some((item) => item.id === "vdamo-gpt-image-2" && item.status === "recommended"), "model diagnostics should mark vdamo GPT Image 2 as the recommended image route");
+  assert(modelDiagnostics.models.some((item) => item.id === "imgen-skill" && item.status !== "recommended"), "model diagnostics should keep @imgen selectable without marking it as the default");
   assert(modelDiagnostics.models.some((item) => item.id === "yijiarj-veo-3-1-fast" && item.type === "video"), "model diagnostics should include switchable video candidates");
   assert(modelDiagnostics.models.some((item) => item.model === "veo_3_1-fast" && item.clipSeconds === 8), "veo_3_1-fast should be planned as an 8s fixed video model");
   assert(modelDiagnostics.models.some((item) => item.model === "grok-imagine-1.0-video-super" && item.clipSeconds === 10), "grok video super should remain planned as a 10s fixed video model");

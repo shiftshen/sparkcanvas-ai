@@ -31,14 +31,15 @@ export GOOGLE_CLIENT_ID='YOUR_GOOGLE_CLIENT_ID'
 
 ### 图片生成配置
 
-图片生成走本地 skill 脚本 `scripts/generate_image.py`，由后端调用，不在前端直接请求图片 API。默认图片角色为 `@imgen · image skill`，实际模型、网关和密钥由 `IMAGE_GEN_*` 或本地私有 `auth.json` 控制；文本默认用当前账号已验证可用的 `gpt-5.4`。视频走 yijiarj `/v1/videos`，参考图必须按模型能力表传公网 `input_reference` 链接和 `size`，不能传本地路径或旧的 `image_url/aspect_ratio`。
+图片生成由后端调用 `scripts/generate_image.py` 执行，不在前端直接请求图片 API。默认图片模型为 `vdamo · GPT Image 2`，经 OpenAI-compatible `/v1/images/generations` 生成；旧的 `@imgen · image skill`、`nano_banana_2` 和 cliproxyapi 路由仍保留在模型选择器里。实际模型、网关和密钥由 `IMAGE_GEN_*` 或本地私有 `auth.json` 控制；文本默认用当前账号已验证可用的 `gpt-5.4`。视频走 yijiarj `/v1/videos`，参考图必须按模型能力表传公网 `input_reference` 链接和 `size`，不能传本地路径或旧的 `image_url/aspect_ratio`。
 
 推荐使用环境变量：
 
 ```bash
 export YIJIARJ_BASE_URL='https://api.yijiarj.cn/v1'
 export YIJIARJ_API_KEY='YOUR_YIJIARJ_API_KEY'
-export IMAGE_GEN_MODEL='nano_banana_2'
+export IMAGE_GEN_BASE_URL='https://api.vdamo.com/v1'
+export IMAGE_GEN_MODEL='gpt-image-2'
 export VIDEO_GEN_MODEL='grok-imagine-1.0-video-super'
 export TEXT_GEN_MODEL='gpt-5.4'
 npm run dev
@@ -54,7 +55,8 @@ export SPARKCANVAS_PUBLIC_BASE_URL='https://xmanx.com'
 
 模型能力规则：
 
-- `nano_banana_2`：默认图片模型，统一经本地 `@imgen` skill 调用，约 ¥0.24/次。视频目标时先生成分镜/首帧参考图；海报/广告图目标时才生成最终广告图片。
+- `gpt-image-2`：默认图片模型，走 vdamo OpenAI-compatible `/v1/images/generations`，已通过最小真实出图测试。视频目标时先生成分镜/首帧参考图；海报/广告图目标时才生成最终广告图片。
+- `nano_banana_2`：保留的 yijiarj 图片模型，可从模型选择器切换；约 ¥0.24/次。
 - `grok-imagine-1.0-video-super`：最低成本视频模型，约 ¥0.38/次；固定单次输出按 10 秒规划；支持 `input_reference` 图片链接，竖屏可用 `size=720x1280`；模型池可能临时返回 `No available accounts for video generation`。
 - `grok-imagine-1.0-video-super-720p`：约 ¥0.58/次；固定单次输出按 10 秒规划；支持 `input_reference` 图片链接，竖屏可用 `size=720x1280`。
 - `veo_3_1-fast`：约 ¥0.437/次；固定单次输出按 8 秒规划；支持文生和图生；ad 分组传图只支持横屏，系统会把图生请求尺寸固定为 `1920x1080`；生成链接约 6 小时过期，必须下载到本地或自己的服务器。

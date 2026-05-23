@@ -115,7 +115,7 @@ Image generation must use the local project skill:
 
 ```bash
 python3 scripts/generate_image.py \
-  --model nano_banana_2 \
+  --model gpt-image-2 \
   --prompt "Create a commercial image..." \
   --output frontend/public/generated/test.png \
   --format png \
@@ -124,6 +124,19 @@ python3 scripts/generate_image.py \
 ```
 
 Default image model:
+
+- `gpt-image-2`
+- Provider: vdamo OpenAI-compatible API
+- Route: `scripts/generate_image.py` with `/v1/images/generations`
+- Verified with a real PNG probe before switching defaults.
+
+Retained image routes:
+
+- `@imgen · image skill`
+- `nano_banana_2`
+- cliproxyapi `gpt-5.4` / `gpt-5`
+
+Legacy image model:
 
 - `nano_banana_2`
 - Approx cost: `¥0.24 / request`
@@ -216,9 +229,9 @@ Required for real generation:
 {
   "YIJIARJ_BASE_URL": "https://api.yijiarj.cn/v1",
   "YIJIARJ_API_KEY": "YOUR_YIJIARJ_API_KEY",
-  "IMAGE_GEN_BASE_URL": "https://api.yijiarj.cn/v1",
+  "IMAGE_GEN_BASE_URL": "https://api.vdamo.com/v1",
   "IMAGE_GEN_KEY": "YOUR_IMAGE_GEN_KEY",
-  "IMAGE_GEN_MODEL": "nano_banana_2",
+  "IMAGE_GEN_MODEL": "gpt-image-2",
   "VIDEO_GEN_MODEL": "grok-imagine-1.0-video-super",
   "TEXT_GEN_MODEL": "gpt-5.4",
   "SPARKCANVAS_PUBLIC_BASE_URL": "https://xmanx.com"
