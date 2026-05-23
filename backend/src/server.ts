@@ -3734,6 +3734,10 @@ function applyGeneratedFileAuthToFrame(frame: CanvasFrame, token?: string) {
   };
 }
 
+function applyGeneratedFileAuthToNode(frame: CanvasFrame, node: WorkflowNode, token?: string) {
+  return applyGeneratedFileAuthToFrame(frame, token).workflowNodes.find((item) => item.id === node.id) ?? node;
+}
+
 function applyGeneratedFileAuthToWorkspace(token?: string) {
   if (!isProduction || !(token || process.env.SPARKCANVAS_AUTH_TOKEN)) {
     return { brands: db.brands, assets: db.assets, frames: db.frames };
@@ -6241,7 +6245,7 @@ app.post("/canvas/frames/:id/run", async (req, res) => {
   db.tasks.unshift(task);
   await persistDb();
   void completeTask(taskId);
-  res.status(202).json({ taskId, task, frame, credits: req.authUser!.credits });
+  res.status(202).json({ taskId, task, frame: applyGeneratedFileAuthToFrame(frame, req.authToken), credits: req.authUser!.credits });
 });
 
 function ensureFrameWorkflowNode(frame: CanvasFrame, nodeId: string) {
@@ -6336,7 +6340,13 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
 
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame, node, imageUrl, generated, message: generated ? "图片已由本地 skill 生成。" : generationNote });
+  res.json({
+    frame: applyGeneratedFileAuthToFrame(frame, req.authToken),
+    node: applyGeneratedFileAuthToNode(frame, node, req.authToken),
+    imageUrl: generatedFileUrl(imageUrl, req.authToken),
+    generated,
+    message: generated ? "图片已由本地 skill 生成。" : generationNote
+  });
 });
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
@@ -6394,7 +6404,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
   node.type = "process";
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame, node, text: generatedText, mode: textMode, model: input.model ?? serviceConfig("text").model });
+  res.json({ frame: applyGeneratedFileAuthToFrame(frame, req.authToken), node: applyGeneratedFileAuthToNode(frame, node, req.authToken), text: generatedText, mode: textMode, model: input.model ?? serviceConfig("text").model });
 });
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) => {
@@ -6479,7 +6489,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-script", async (req, res) =>
   if (wantsTable) node.refs = storyboardRefs;
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame, node, script, model: input.model ?? serviceConfig("text").model });
+  res.json({ frame: applyGeneratedFileAuthToFrame(frame, req.authToken), node: applyGeneratedFileAuthToNode(frame, node, req.authToken), script, model: input.model ?? serviceConfig("text").model });
 });
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => {
@@ -6749,7 +6759,14 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
   if (process.env.SPARKCANVAS_DEBUG_VIDEO_SMOKE === "1") {
     console.error("[video-smoke] route complete", JSON.stringify({ frameId: frame.id, nodeId: node.id, videoId, videoUrl, generationErrorMessage }));
   }
-  const payload = { frame, node, videoPlan, model: input.model ?? serviceConfig("video").model, videoId, videoUrl };
+  const payload = {
+    frame: applyGeneratedFileAuthToFrame(frame, req.authToken),
+    node: applyGeneratedFileAuthToNode(frame, node, req.authToken),
+    videoPlan,
+    model: input.model ?? serviceConfig("video").model,
+    videoId,
+    videoUrl: generatedFileUrl(videoUrl, req.authToken)
+  };
   if (generationErrorMessage && !videoId && !videoUrl) {
     return res.status(500).json(payload);
   }
@@ -6801,7 +6818,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
   node.body = audioPlan;
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame, node, audioPlan, model: input.model ?? "cliproxyapi · gpt-5.4" });
+  res.json({ frame: applyGeneratedFileAuthToFrame(frame, req.authToken), node: applyGeneratedFileAuthToNode(frame, node, req.authToken), audioPlan, model: input.model ?? "cliproxyapi · gpt-5.4" });
 });
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-compose", async (req, res) => {
@@ -6890,14 +6907,14 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-compose", async (req, res) =
   }
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame, node, composePlan, mergedUrl, segments: segmentPlan.map((segment) => segment.targetSeconds), segmentPlan, composeVerification });
+  res.json({ frame: applyGeneratedFileAuthToFrame(frame, req.authToken), node: applyGeneratedFileAuthToNode(frame, node, req.authToken), composePlan, mergedUrl: generatedFileUrl(mergedUrl, req.authToken), segments: segmentPlan.map((segment) => segment.targetSeconds), segmentPlan, composeVerification });
 });
 
 app.get("/tasks/:id", (req, res) => {
   const task = db.tasks.find((item) => item.id === req.params.id);
   if (!task) return res.status(404).json({ message: "Task not found" });
   const frame = db.frames.find((item) => item.id === task.frameId);
-  res.json({ task, frame, credits: req.authUser!.credits });
+  res.json({ task, frame: frame ? applyGeneratedFileAuthToFrame(frame, req.authToken) : frame, credits: req.authUser!.credits });
 });
 
 app.post("/generate", async (req, res) => {
@@ -6965,7 +6982,7 @@ app.post("/generate", async (req, res) => {
   db.tasks.unshift(task);
   await persistDb();
   void completeTask(taskId);
-  res.status(201).json({ taskId, task, frame, credits: req.authUser!.credits });
+  res.status(201).json({ taskId, task, frame: applyGeneratedFileAuthToFrame(frame, req.authToken), credits: req.authUser!.credits });
 });
 
 const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
