@@ -1591,9 +1591,27 @@ async function migrateAuthDb() {
     }));
     changed = true;
   }
-  if (!db.users.length && (!isProduction || process.env.SPARKCANVAS_DEMO_AUTH === "true")) {
-    db.users.unshift(defaultAuthUser(1260));
-    changed = true;
+  if (demoAuthEnabled) {
+    const demoExisting = findAuthUser(DEFAULT_DEMO_ACCOUNT) ?? findAuthUser(DEFAULT_DEMO_EMAIL);
+    if (demoExisting) {
+      const demoPatch: Partial<AuthUser> = {};
+      if (demoExisting.name !== "Shift") demoPatch.name = "Shift";
+      if (demoExisting.username !== DEFAULT_DEMO_ACCOUNT) demoPatch.username = DEFAULT_DEMO_ACCOUNT;
+      if (demoExisting.email !== DEFAULT_DEMO_EMAIL) demoPatch.email = DEFAULT_DEMO_EMAIL;
+      if (demoExisting.provider !== "email") demoPatch.provider = "email";
+      if (!verifyPassword(DEFAULT_DEMO_PASSWORD, demoExisting.passwordHash)) demoPatch.passwordHash = passwordHash(DEFAULT_DEMO_PASSWORD);
+      if (Object.keys(demoPatch).length) {
+        db.users = db.users.map((user) => user.id === demoExisting.id ? {
+          ...user,
+          ...demoPatch,
+          updatedAt: timestamp
+        } : user);
+        changed = true;
+      }
+    } else {
+      db.users.unshift(defaultAuthUser(1260));
+      changed = true;
+    }
   }
   if (adminAccount && adminPassword) {
     const adminExisting = findAuthUser(adminAccount);
