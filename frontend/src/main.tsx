@@ -340,14 +340,17 @@ type User = {
 
 type AuthConfig = {
   registrationEnabled: boolean;
+  registrationReason?: string;
   google: {
     configured: boolean;
     clientId: string;
+    reason?: string;
   };
   demo: {
     enabled: boolean;
     defaultAccount: string;
     defaultPassword: string;
+    reason?: string;
   };
 };
 
@@ -1753,7 +1756,12 @@ function App() {
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [panel, setPanel] = useState<PanelKey>(null);
   const [locale, setLocaleState] = useState<Locale>(defaultLocale in i18n ? defaultLocale : "zh");
-  const [siteMode] = useState(() => window.location.pathname.startsWith("/site") || new URLSearchParams(window.location.search).get("site") === "1");
+  const [siteMode] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("app") === "1") return false;
+    if (params.get("site") === "1") return true;
+    return !window.location.pathname.startsWith("/workspace") && !window.location.pathname.startsWith("/app");
+  });
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1777,6 +1785,10 @@ function App() {
 
   function openSiteMode() {
     window.location.assign("/site");
+  }
+
+  function openWorkspaceMode() {
+    window.location.assign("/workspace");
   }
 
   async function loadWorkspace() {
@@ -1829,7 +1841,7 @@ function App() {
 
   async function completeAuth(result: { token: string; user: User }) {
     window.localStorage.setItem("sparkcanvas.token", result.token);
-    window.location.assign("/");
+    window.location.assign("/workspace");
   }
 
   async function login(account: string, password: string) {
@@ -2258,7 +2270,7 @@ function App() {
   }
 
   if (loading) return <div className="rh-loading"><Loader2 className="spin" /> SparkCanvas</div>;
-  if (siteMode || !user) return <LoginScreen locale={locale} setLocale={setLocale} error={error} authConfig={authConfig} onLogin={(account, password) => login(account, password)} onRegister={(payload) => register(payload)} onGoogleLogin={(credential) => loginWithGoogle(credential)} />;
+  if (siteMode || !user) return <LoginScreen locale={locale} setLocale={setLocale} error={error} authConfig={authConfig} currentUser={user} onOpenWorkspace={openWorkspaceMode} onLogin={(account, password) => login(account, password)} onRegister={(payload) => register(payload)} onGoogleLogin={(credential) => loginWithGoogle(credential)} />;
 
   return (
     <div className="rh-app" data-theme-mode={themeMode}>
@@ -2414,6 +2426,8 @@ function LoginScreen({
   setLocale,
   error,
   authConfig,
+  currentUser,
+  onOpenWorkspace,
   onLogin,
   onRegister,
   onGoogleLogin
@@ -2422,6 +2436,8 @@ function LoginScreen({
   setLocale: (locale: Locale) => void;
   error: string;
   authConfig: AuthConfig | null;
+  currentUser: User | null;
+  onOpenWorkspace: () => void;
   onLogin: (account: string, password: string) => Promise<void>;
   onRegister: (payload: { name: string; email: string; password: string }) => Promise<void>;
   onGoogleLogin: (credential: string) => Promise<void>;
@@ -2444,7 +2460,7 @@ function LoginScreen({
     name: locale === "zh" ? "名称" : locale === "th" ? "ชื่อ" : "Name",
     email: locale === "zh" ? "邮箱" : locale === "th" ? "อีเมล" : "Email",
     google: locale === "zh" ? "使用 Google 登录" : locale === "th" ? "เข้าสู่ระบบด้วย Google" : "Continue with Google",
-    googleMissing: locale === "zh" ? "配置 GOOGLE_CLIENT_ID 后启用 Google 登录" : locale === "th" ? "ตั้งค่า GOOGLE_CLIENT_ID เพื่อเปิด Google" : "Set GOOGLE_CLIENT_ID to enable Google sign-in",
+    googleMissing: locale === "zh" ? "配置 SPARKCANVAS_GOOGLE_CLIENT_ID 或 GOOGLE_CLIENT_ID 后启用 Google 登录" : locale === "th" ? "ตั้งค่า SPARKCANVAS_GOOGLE_CLIENT_ID หรือ GOOGLE_CLIENT_ID เพื่อเปิด Google" : "Set SPARKCANVAS_GOOGLE_CLIENT_ID or GOOGLE_CLIENT_ID to enable Google sign-in",
     defaultLogin: locale === "zh" ? "默认可用账号" : locale === "th" ? "บัญชีเริ่มต้น" : "Default login",
     submitLogin: locale === "zh" ? "进入工作台" : locale === "th" ? "เข้าเวิร์กสเปซ" : "Open workspace",
     submitRegister: locale === "zh" ? "创建账号并进入" : locale === "th" ? "สร้างบัญชีและเข้าใช้งาน" : "Create account",
@@ -2574,8 +2590,14 @@ function LoginScreen({
         <div id="auth-panel" className="rh-auth-card">
           <div className="rh-auth-head">
             <span className="rh-site-badge">{copy.cta}</span>
-            <small>{locale === "zh" ? "默认账号、邮箱注册和 Google 登录都在这里。" : locale === "th" ? "บัญชีเริ่มต้น สมัครอีเมล และ Google login อยู่ตรงนี้" : "Default login, email registration, and Google sign-in all live here."}</small>
+            <small>{currentUser ? (locale === "zh" ? `当前已登录为 ${currentUser.name}，可以直接进入工作台。` : locale === "th" ? `เข้าสู่ระบบแล้วเป็น ${currentUser.name} กดเข้าเวิร์กสเปซได้เลย` : `You are already signed in as ${currentUser.name}; jump to the workspace.`) : (locale === "zh" ? "默认账号、邮箱注册和 Google 登录都在这里。" : locale === "th" ? "บัญชีเริ่มต้น สมัครอีเมล และ Google login อยู่ตรงนี้" : "Default login, email registration, and Google sign-in all live here.")}</small>
           </div>
+          {currentUser && (
+            <button type="button" className="rh-auth-default" onClick={onOpenWorkspace}>
+              <strong>{locale === "zh" ? "进入工作台" : locale === "th" ? "เข้าเวิร์กสเปซ" : "Open workspace"}</strong>
+              <span>{currentUser.email}</span>
+            </button>
+          )}
           <div className="rh-auth-tabs">
             <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>{labels.login}</button>
             <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")} disabled={!authConfig?.registrationEnabled}>{labels.register}</button>
@@ -2627,7 +2649,8 @@ function LoginScreen({
           ) : (
             <button type="button" className="rh-google-disabled" disabled>{labels.googleMissing}</button>
           )}
-          {mode === "register" && !authConfig?.registrationEnabled && <small className="rh-auth-note">{labels.registeringDisabled}</small>}
+          {!authConfig?.google.configured && <small className="rh-auth-note">{authConfig?.google.reason || labels.googleMissing}</small>}
+          {mode === "register" && !authConfig?.registrationEnabled && <small className="rh-auth-note">{authConfig?.registrationReason || labels.registeringDisabled}</small>}
           <div className="rh-auth-preview">
             <img src="/site-assets/sparkcanvas-hero-v2.png" alt="SparkCanvas AI canvas workflow" />
             <div>

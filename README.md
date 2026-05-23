@@ -17,12 +17,14 @@ npm install
 npm run dev
 ```
 
-打开 `http://localhost:3100`。本地默认账号已内置并显示在登录页：账号 `shift`，密码 `123456`；也可以用邮箱密码注册新账号。
+打开 `http://localhost:3100` 会进入官网首页；登录或点击进入工作台后会跳转到 `http://localhost:3100/workspace`。本地默认账号已内置并显示在登录页：账号 `shift`，密码 `123456`；也可以用邮箱密码注册新账号。
 
-Google 登录使用 Google Identity Services。配置后端公开 client id 即可在登录页启用：
+Google 登录使用 Google Identity Services。配置后端公开 client id 即可在登录页启用；推荐使用项目专用变量，也兼容通用 `GOOGLE_CLIENT_ID`：
 
 ```bash
 export SPARKCANVAS_GOOGLE_CLIENT_ID='YOUR_GOOGLE_CLIENT_ID'
+# or
+export GOOGLE_CLIENT_ID='YOUR_GOOGLE_CLIENT_ID'
 ```
 
 本地数据会持久化到 `backend/data/sparkcanvas.json`，包括品牌、资产、任务、画布和积分。
@@ -68,6 +70,12 @@ export SPARKCANVAS_PUBLIC_BASE_URL='https://xmanx.com'
 - API：`https://xmanx.com/api`
 
 这样不需要单独维护 `api.xmanx.com` 的跨域、Cookie 和证书策略。Docker 配置位于 `config/docker-compose.yml`，Nginx 参考配置位于 `config/nginx-xmanx.com.conf`。
+
+生产默认关闭公开演示账号。只有在受控内测时才显式设置：
+
+```bash
+export SPARKCANVAS_DEMO_AUTH=true
+```
 
 ### 验证
 

@@ -4,7 +4,7 @@ Date: 2026-05-20
 
 ## Delivered
 
-- Added a public website route: `/?site=1`
+- Added a public website route: `/` and `/site`
 - Added language switcher with Chinese, English, and Thai.
 - Added generated website assets:
   - `frontend/public/site-assets/sparkcanvas-logo-skill.png`
@@ -37,7 +37,7 @@ The website and guide explain:
 
 Verified in the local browser:
 
-- `/?site=1` loads the public homepage even when the user is logged in.
+- `/` and `/site` load the public homepage even when the user is logged in.
 - Chinese homepage renders: `像写代码一样用 AI 设计品牌内容`.
 - English homepage renders: `Design with AI like writing code`.
 - Thai homepage renders: `ออกแบบด้วย AI`.

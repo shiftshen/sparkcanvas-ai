@@ -150,6 +150,12 @@ try {
   const refilledUser = await request("/me/credits/refill", { method: "POST", body: JSON.stringify({}) });
   assert(refilledUser.credits === 1260, "local demo credit refill should keep demo account testable");
 
+  const authConfig = await request("/auth/config");
+  assert(authConfig.demo?.enabled === true, "local auth config should expose demo login");
+  assert(authConfig.demo?.defaultAccount === "shift", "local auth config should expose the default demo account");
+  assert(typeof authConfig.registrationReason === "string" && authConfig.registrationReason.length > 0, "auth config should explain registration availability");
+  assert(typeof authConfig.google?.reason === "string" && authConfig.google.reason.length > 0, "auth config should explain Google availability");
+
   const initial = await request("/workspace");
   assert(initial.brands.some((brand) => brand.id === "brand_xmanx" && brand.active), "XMANX should be the active default brand");
   assert(initial.templates.some((template) => template.id === "tpl_brandkit"), "brand kit template should exist");

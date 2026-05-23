@@ -5454,14 +5454,23 @@ app.get("/auth/config", (_req, res) => {
   const clientId = googleClientId();
   res.json({
     registrationEnabled,
+    registrationReason: registrationEnabled
+      ? "Registration is available in this environment."
+      : "Registration is disabled in this environment.",
     google: {
       configured: Boolean(clientId),
-      clientId: clientId || ""
+      clientId: clientId || "",
+      reason: clientId
+        ? "Google sign-in is configured."
+        : "Set SPARKCANVAS_GOOGLE_CLIENT_ID or GOOGLE_CLIENT_ID to enable Google sign-in."
     },
     demo: {
       enabled: demoAuthEnabled,
       defaultAccount: demoAuthEnabled ? DEFAULT_DEMO_ACCOUNT : "",
-      defaultPassword: demoAuthEnabled ? DEFAULT_DEMO_PASSWORD : ""
+      defaultPassword: demoAuthEnabled ? DEFAULT_DEMO_PASSWORD : "",
+      reason: demoAuthEnabled
+        ? "Demo login is available in this environment."
+        : "Demo login is disabled in production."
     }
   });
 });
