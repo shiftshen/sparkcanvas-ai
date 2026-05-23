@@ -5413,6 +5413,57 @@ async function verifyGoogleCredential(credential: string) {
 }
 
 const app = express();
+app.set("trust proxy", 1);
+
+type AuthRateLimitState = {
+  count: number;
+  resetAt: number;
+};
+
+const authRateLimits = new Map<string, AuthRateLimitState>();
+const authRateLimitRules = {
+  login: { limit: 10, windowMs: 2 * 60 * 1000 },
+  register: { limit: 4, windowMs: 10 * 60 * 1000 },
+  google: { limit: 10, windowMs: 2 * 60 * 1000 }
+} as const;
+
+function authRateLimitKey(kind: keyof typeof authRateLimitRules, identifier: string) {
+  return `${kind}:${identifier}`;
+}
+
+function takeAuthRateLimitSlot(kind: keyof typeof authRateLimitRules, identifier: string) {
+  const { limit, windowMs } = authRateLimitRules[kind];
+  const key = authRateLimitKey(kind, identifier);
+  const current = Date.now();
+  const state = authRateLimits.get(key);
+  if (!state || state.resetAt <= current) {
+    authRateLimits.set(key, { count: 1, resetAt: current + windowMs });
+    return { allowed: true as const, remaining: limit - 1, resetAt: current + windowMs };
+  }
+  if (state.count >= limit) {
+    return { allowed: false as const, remaining: 0, resetAt: state.resetAt };
+  }
+  state.count += 1;
+  authRateLimits.set(key, state);
+  return { allowed: true as const, remaining: limit - state.count, resetAt: state.resetAt };
+}
+
+function clearExpiredAuthRateLimits() {
+  const current = Date.now();
+  for (const [key, state] of authRateLimits) {
+    if (state.resetAt <= current) authRateLimits.delete(key);
+  }
+}
+
+function authRateLimitError(res: Response, state: { resetAt: number }, message: string) {
+  const retryAfterSeconds = Math.max(1, Math.ceil((state.resetAt - Date.now()) / 1000));
+  return res.status(429).setHeader("Retry-After", String(retryAfterSeconds)).json({ message });
+}
+
+function authClientId(req: Request) {
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
+
 function installAsyncRouteCatcher(target: express.Express) {
   const methods = ["get", "post", "patch", "delete", "use"] as const;
   const mutableTarget = target as unknown as Record<(typeof methods)[number], (...args: unknown[]) => unknown>;
@@ -5444,6 +5495,10 @@ app.use(cors({
   credentials: false
 }));
 app.use(express.json({ limit: "20mb" }));
+app.use((_req, _res, next) => {
+  clearExpiredAuthRateLimits();
+  next();
+});
 app.use("/generated", generatedFileMiddleware, express.static(generatedDir));
 
 app.get("/health", (_req, res) => {
@@ -5478,6 +5533,8 @@ app.get("/auth/config", (_req, res) => {
 app.post("/auth/login", async (req, res) => {
   const parsed = z.object({ account: z.string(), password: z.string() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid login payload" });
+  const rateLimitState = takeAuthRateLimitSlot("login", `${authClientId(req)}:${parsed.data.account.trim().toLowerCase()}`);
+  if (!rateLimitState.allowed) return authRateLimitError(res, rateLimitState, "Too many login attempts, please wait and try again.");
   const user = findAuthUser(parsed.data.account.trim());
   if (!user || !verifyPassword(parsed.data.password, user.passwordHash)) {
     return res.status(401).json({ message: "Invalid email/account or password" });
@@ -5496,6 +5553,8 @@ app.post("/auth/register", async (req, res) => {
   }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid registration payload" });
   const email = parsed.data.email.trim().toLowerCase();
+  const rateLimitState = takeAuthRateLimitSlot("register", `${authClientId(req)}:${email}`);
+  if (!rateLimitState.allowed) return authRateLimitError(res, rateLimitState, "Too many registration attempts, please wait and try again.");
   if (findAuthUser(email)) return res.status(409).json({ message: "Account already exists" });
   const timestamp = now();
   const user: AuthUser = {
@@ -5519,6 +5578,8 @@ app.post("/auth/register", async (req, res) => {
 app.post("/auth/google", async (req, res) => {
   const parsed = z.object({ credential: z.string().min(10) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid Google login payload" });
+  const rateLimitState = takeAuthRateLimitSlot("google", authClientId(req));
+  if (!rateLimitState.allowed) return authRateLimitError(res, rateLimitState, "Too many Google sign-in attempts, please wait and try again.");
   try {
     const verified = await verifyGoogleCredential(parsed.data.credential);
     const existing = db.users.find((user) => user.googleSub === verified.sub || user.email.toLowerCase() === verified.email.toLowerCase());

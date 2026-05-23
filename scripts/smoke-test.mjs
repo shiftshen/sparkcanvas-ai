@@ -141,6 +141,22 @@ try {
   });
   assert(wrongLogin.status === 401, "demo login should reject invalid credentials");
 
+  let rateLimited = false;
+  const bruteAccount = "bruteforce@example.com";
+  for (let attempt = 0; attempt < 11; attempt += 1) {
+    const response = await fetch(`${baseUrl}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account: bruteAccount, password: "wrong-password" })
+    });
+    if (attempt < 10) {
+      assert(response.status === 401, `login attempt ${attempt + 1} should still be rejected normally`);
+    } else {
+      rateLimited = response.status === 429;
+      assert(rateLimited, "login attempts should be rate limited after repeated failures");
+    }
+  }
+
   const login = await request("/auth/login", {
     method: "POST",
     body: JSON.stringify({ account: "shift", password: "123456" })
