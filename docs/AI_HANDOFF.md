@@ -313,6 +313,7 @@ Smoke coverage includes:
 
 ## 9. Known Risks / Next Work
 
+- `aiStatus.launchReadiness` is the production gate. It should remain blocked until VDAMO image/text keys, yijiarj video keys, and public `input_reference` publishing are configured together.
 - Public upload of local reference images is still a deployment dependency. For production, use `SPARKCANVAS_PUBLIC_BASE_URL` or implement controlled upload to owned object storage.
 - Character consistency depends on the quality of supplied references and whether the selected video model honors `input_reference`.
 - `grok-imagine-1.0-video-super` is cheapest but may temporarily fail because the provider has no available accounts.

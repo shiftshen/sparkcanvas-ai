@@ -69,6 +69,8 @@ export SPARKCANVAS_PUBLIC_BASE_URL='https://xmanx.com'
 
 登录后可通过 `GET /api/ai/status` 查看脱敏后的 API 配置状态。接口只返回 base URL、模型、密钥来源和是否已配置，不返回密钥值。
 
+上线闸门由 `aiStatus.launchReadiness` 返回并在顶部状态栏显示。只有 VDAMO 图片 API、VDAMO 文本 API、yijiarj 视频 API、公网 `input_reference` 发布能力全部就绪时，才会显示 `Launch ready`。缺少 `YIJIARJ_API_KEY`、`VIDEO_GEN_KEY`、`SPARKCANVAS_PUBLIC_BASE_URL` 或上传/对象存储发布配置时，状态会保持 `Launch blocked`，避免误把本地模拟 smoke 当作视频生产可用。
+
 ### 生产域名
 
 生产部署按单域名收敛：

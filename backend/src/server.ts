@@ -4306,6 +4306,48 @@ function publicBaseUrlStatus() {
   return referencePublicationProvider().status();
 }
 
+function launchReadinessStatus() {
+  const imageConfig = imageGenerationConfig(defaultImageModel().model);
+  const textConfig = serviceConfig("text");
+  const videoConfig = serviceConfig("video");
+  const publicReference = publicBaseUrlStatus();
+  const checks = [
+    {
+      id: "image-api",
+      label: "VDAMO image API",
+      ready: Boolean(imageConfig.apiKey && imageConfig.baseUrl),
+      message: imageConfig.apiKey ? `Ready: ${imageConfig.model}` : "Missing IMAGE_GEN_KEY or VDAMO_OPENAI_API_KEY."
+    },
+    {
+      id: "text-api",
+      label: "VDAMO text API",
+      ready: Boolean(textConfig.apiKey && textConfig.baseUrl),
+      message: textConfig.apiKey ? `Ready: ${textConfig.model}` : "Missing TEXT_GEN_KEY, VDAMO_OPENAI_API_KEY, or VDAMO_GEMINI_API_KEY."
+    },
+    {
+      id: "video-api",
+      label: "yijiarj video API",
+      ready: Boolean(videoConfig.apiKey && videoConfig.baseUrl),
+      message: videoConfig.apiKey ? `Ready: ${videoConfig.model}` : "Missing VIDEO_GEN_KEY or YIJIARJ_API_KEY."
+    },
+    {
+      id: "public-reference",
+      label: "Public input_reference URLs",
+      ready: publicReference.productionReady,
+      message: publicReference.message
+    }
+  ];
+  const missing = checks.filter((item) => !item.ready);
+  return {
+    productionReady: missing.length === 0,
+    level: missing.length === 0 ? "ready" : videoConfig.apiKey || imageConfig.apiKey || textConfig.apiKey ? "blocked" : "missing",
+    summary: missing.length === 0
+      ? "Launch-ready: image, text, video, and public reference publishing are configured."
+      : `Launch blocked: ${missing.map((item) => item.label).join(", ")}.`,
+    checks
+  };
+}
+
 function aiStatus() {
   const imageConfig = imageGenerationConfig(defaultImageModel().model);
   const textConfig = serviceConfig("text");
@@ -4333,7 +4375,8 @@ function aiStatus() {
       model: videoConfig.model,
       provider: "yijiarj"
     },
-    publicReference: publicBaseUrlStatus()
+    publicReference: publicBaseUrlStatus(),
+    launchReadiness: launchReadinessStatus()
   };
 }
 

@@ -274,6 +274,12 @@ type AiStatus = {
     productionReady: boolean;
     message: string;
   };
+  launchReadiness?: {
+    productionReady: boolean;
+    level: "ready" | "blocked" | "missing";
+    summary: string;
+    checks: Array<{ id: string; label: string; ready: boolean; message: string }>;
+  };
 };
 type AiDiagnostics = AiStatus & {
   runtime: {
@@ -2294,6 +2300,11 @@ function App() {
         </div>
         <div className="rh-top-meta">
           <span>{model?.name ?? "VDAMO · GPT Image 2"}</span>
+          {aiStatus?.launchReadiness && (
+            <em className={aiStatus.launchReadiness.productionReady ? "ready" : "missing"} title={aiStatus.launchReadiness.summary}>
+              {aiStatus.launchReadiness.productionReady ? "Launch ready" : "Launch blocked"}
+            </em>
+          )}
           <em className={aiStatus?.imageGeneration.configured ? "ready" : "missing"}>
             {aiStatus?.imageGeneration.configured ? `API · ${aiStatus.imageGeneration.model}` : "API key missing"}
           </em>
@@ -5161,6 +5172,11 @@ function BottomComposer(props: {
         </span>
         {props.aiStatus?.publicReference && !props.aiStatus.publicReference.productionReady && (
           <small title={props.aiStatus.publicReference.message}>{props.aiStatus.publicReference.message}</small>
+        )}
+        {props.aiStatus?.launchReadiness && !props.aiStatus.launchReadiness.productionReady && (
+          <small title={props.aiStatus.launchReadiness.checks.filter((item) => !item.ready).map((item) => item.message).join(" · ")}>
+            {props.aiStatus.launchReadiness.summary}
+          </small>
         )}
         <i><b style={{ width: `${props.frame?.progress ?? 0}%` }} /></i>
       </div>

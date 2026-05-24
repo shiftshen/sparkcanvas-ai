@@ -197,6 +197,9 @@ try {
   assert(!("apiKey" in aiStatus.imageGeneration), "AI status must not expose secrets");
   assert(aiStatus.publicReference?.productionReady === false, "local smoke should mark public reference URLs as not production-ready by default");
   assert(typeof aiStatus.publicReference?.message === "string" && aiStatus.publicReference.message.length > 0, "AI status should explain public reference readiness");
+  assert(aiStatus.launchReadiness?.productionReady === false, "local smoke should block launch readiness when video/public reference config is missing");
+  assert(aiStatus.launchReadiness?.checks?.some((item) => item.id === "video-api" && item.ready === false), "launch readiness should require yijiarj video API configuration");
+  assert(aiStatus.launchReadiness?.checks?.some((item) => item.id === "public-reference" && item.ready === false), "launch readiness should require public input_reference publishing");
   const aiDiagnostics = await request("/ai/diagnostics");
   assert(aiDiagnostics.runtime.endpoint.includes("/images/generations"), "AI diagnostics should expose the VDAMO image API endpoint");
   assert(
@@ -210,6 +213,7 @@ try {
   assert(aiDiagnostics.runtime.canAttemptGeneration === false, "local smoke disables image generation and should report that API generation cannot be attempted");
   assert(!("apiKey" in aiDiagnostics.imageGeneration), "AI diagnostics must not expose secrets");
   assert(aiDiagnostics.publicReference?.productionReady === false, "AI diagnostics should include non-production public reference readiness locally");
+  assert(aiDiagnostics.launchReadiness?.summary?.includes("Launch blocked"), "AI diagnostics should explain launch blockers");
   const modelDiagnostics = await request("/ai/models/diagnostics");
   assert(modelDiagnostics.models.some((item) => item.id === "vdamo-gpt-image-2" && item.status === "recommended"), "model diagnostics should mark vdamo GPT Image 2 as the recommended image route");
   assert(modelDiagnostics.models.some((item) => item.id === "vdamo-gemini-2-5-flash-image" && item.status === "disabled"), "model diagnostics should retain disabled Gemini image probe results");
