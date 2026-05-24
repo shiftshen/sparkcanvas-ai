@@ -98,6 +98,14 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function normalizeOpenAiCompatibleBaseUrl(value, defaultBaseUrl = "https://api.vdamo.com/v1") {
+  const normalized = (value || defaultBaseUrl)
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/(?:chat\/completions|images\/generations|responses|models)$/i, "");
+  return /\/v\d+(?:beta)?$/i.test(normalized) ? normalized : `${normalized}/v1`;
+}
+
 function runProcess(command, args, options = {}) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { stdio: "ignore", ...options });
@@ -176,11 +184,13 @@ try {
   assert(initial.brands.some((brand) => brand.id === "brand_xmanx" && brand.active), "XMANX should be the active default brand");
   assert(initial.templates.some((template) => template.id === "tpl_brandkit"), "brand kit template should exist");
   assert(initial.models[0]?.id === "vdamo-gpt-image-2", "default image model should be vdamo GPT Image 2");
-  assert(initial.models.some((model) => model.id === "imgen-skill"), "model selector should still keep the @imgen skill route");
-  assert(initial.models.some((model) => model.id === "yijiarj-nano-banana-2"), "model selector should still expose yijiarj nano_banana_2");
+  assert(initial.models.some((model) => model.id === "vdamo-gpt-image-1-5"), "model selector should expose VDAMO GPT Image 1.5 fallback");
+  assert(initial.models.some((model) => model.id === "vdamo-gpt-5-4-mini" && model.type === "text"), "workspace should expose VDAMO text models for editor tools");
+  assert(!initial.models.some((model) => model.id === "vdamo-gemini-2-5-flash-image"), "disabled Gemini image probes should not be selectable in the workspace");
+  assert(!initial.models.some((model) => model.id === "yijiarj-nano-banana-2"), "legacy nano_banana_2 image route should not be selectable");
   assert(initial.models.some((model) => model.id === "yijiarj-grok-video-720p"), "model selector should expose verified yijiarj video model");
-  assert(initial.models.some((model) => model.id === "cliproxyapi-gpt-5"), "model selector should keep legacy switchable models");
-  assert(typeof initial.ai?.imageGeneration?.model === "string" && initial.ai.imageGeneration.model.length > 0, "workspace should expose sanitized AI skill status");
+  assert(!initial.models.some((model) => model.id === "cliproxyapi-gpt-5"), "legacy cliproxyapi image routes should not be selectable");
+  assert(typeof initial.ai?.imageGeneration?.model === "string" && initial.ai.imageGeneration.model.length > 0, "workspace should expose sanitized AI API status");
 
   const aiStatus = await request("/ai/status");
   assert(typeof aiStatus.imageGeneration.baseUrl === "string" && aiStatus.imageGeneration.baseUrl.includes("/v1"), "AI status should expose image generation base URL");
@@ -188,13 +198,21 @@ try {
   assert(aiStatus.publicReference?.productionReady === false, "local smoke should mark public reference URLs as not production-ready by default");
   assert(typeof aiStatus.publicReference?.message === "string" && aiStatus.publicReference.message.length > 0, "AI status should explain public reference readiness");
   const aiDiagnostics = await request("/ai/diagnostics");
-  assert(aiDiagnostics.runtime.scriptExists === true, "AI diagnostics should find the local image skill script");
-  assert(aiDiagnostics.runtime.helpOk === true, "AI diagnostics should verify the local image skill CLI");
+  assert(aiDiagnostics.runtime.endpoint.includes("/images/generations"), "AI diagnostics should expose the VDAMO image API endpoint");
+  assert(
+    normalizeOpenAiCompatibleBaseUrl("https://api.vdamo.com/v1/images/generations") === "https://api.vdamo.com/v1",
+    "OpenAI-compatible base URL normalization should strip full image endpoint paths"
+  );
+  assert(
+    normalizeOpenAiCompatibleBaseUrl("https://api.vdamo.com/v1/chat/completions") === "https://api.vdamo.com/v1",
+    "OpenAI-compatible base URL normalization should strip full chat endpoint paths"
+  );
+  assert(aiDiagnostics.runtime.canAttemptGeneration === false, "local smoke disables image generation and should report that API generation cannot be attempted");
   assert(!("apiKey" in aiDiagnostics.imageGeneration), "AI diagnostics must not expose secrets");
   assert(aiDiagnostics.publicReference?.productionReady === false, "AI diagnostics should include non-production public reference readiness locally");
   const modelDiagnostics = await request("/ai/models/diagnostics");
   assert(modelDiagnostics.models.some((item) => item.id === "vdamo-gpt-image-2" && item.status === "recommended"), "model diagnostics should mark vdamo GPT Image 2 as the recommended image route");
-  assert(modelDiagnostics.models.some((item) => item.id === "imgen-skill" && item.status !== "recommended"), "model diagnostics should keep @imgen selectable without marking it as the default");
+  assert(modelDiagnostics.models.some((item) => item.id === "vdamo-gemini-2-5-flash-image" && item.status === "disabled"), "model diagnostics should retain disabled Gemini image probe results");
   assert(modelDiagnostics.models.some((item) => item.id === "yijiarj-veo-3-1-fast" && item.type === "video"), "model diagnostics should include switchable video candidates");
   assert(modelDiagnostics.models.some((item) => item.model === "veo_3_1-fast" && item.clipSeconds === 8), "veo_3_1-fast should be planned as an 8s fixed video model");
   assert(modelDiagnostics.models.some((item) => item.model === "grok-imagine-1.0-video-super" && item.clipSeconds === 10), "grok video super should remain planned as a 10s fixed video model");
@@ -397,7 +415,7 @@ try {
     })
   });
   assert(resolvedRefs.imageReferences.some((reference) => reference.role === "model" && reference.imageUrl), "resolved CAL resources should expose concrete image references");
-  assert(resolvedRefs.agents.includes("imgen"), "@imgen should be parsed as the image generation skill agent");
+  assert(resolvedRefs.agents.includes("imgen"), "@imgen should be parsed as the image generation API agent");
   assert(resolvedRefs.textReferences.some((reference) => reference.key.endsWith(".copy.slogan") && reference.value === brand.slogan), "$copy.slogan should resolve to current brand slogan");
   assert(resolvedRefs.lockedTexts.includes("会员免费锅底") && resolvedRefs.tags.includes("高级感") && resolvedRefs.params["尺寸"] === "1080x1350", "CAL parser should extract locked text, tags and params");
   assert(resolvedRefs.prompt.includes(`"${brand.slogan}"`) && resolvedRefs.finalPrompt.includes("图片资源"), "resolved payload should expand text and keep image reference summary");
@@ -614,7 +632,7 @@ try {
     method: "POST",
     body: JSON.stringify({
       prompt: "马",
-      modelId: "imgen-skill",
+      modelId: "vdamo-gpt-image-2",
       settings: { ratio: "1:1", count: 1, quality: "hd", strength: 70, brandInject: false }
     })
   });
@@ -645,7 +663,7 @@ try {
   });
   const plainAudioGenerated = await request(`/canvas/frames/${emptyFrame.id}/nodes/${plainAudioNode.id}/generate-audio`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "simple beat", model: "gpt-5.4", settings: { mode: "配乐", duration: "15s", scene: "广告短视频", loop: false, translate: false } })
+    body: JSON.stringify({ prompt: "simple beat", model: "gpt-5.4-mini", settings: { mode: "配乐", duration: "15s", scene: "广告短视频", loop: false, translate: false } })
   });
   assert(/品牌约束:\s*无品牌/.test(plainAudioGenerated.audioPlan), `unbranded audio nodes should stay unbranded: ${plainAudioGenerated.audioPlan}`);
   assert(!plainAudioGenerated.audioPlan.includes("XMANX") && !plainAudioGenerated.audioPlan.includes("xmanx.com"), "unbranded audio nodes should not inject XMANX unless referenced");
@@ -655,7 +673,7 @@ try {
     body: JSON.stringify({
       prompt: "@imgen /生成海报 马 -> 图片",
       mode: "magic",
-      modelId: "imgen-skill",
+      modelId: "vdamo-gpt-image-2",
       brandId: null,
       brandInject: false,
       settings: { ratio: "1:1", count: 1, quality: "hd", strength: 70, duration: 0, brandInject: false },
@@ -676,7 +694,7 @@ try {
     body: JSON.stringify({
       prompt: "为 xmanx 生成一个 5.1 促销海报",
       mode: "magic",
-      modelId: "imgen-skill",
+      modelId: "vdamo-gpt-image-2",
       settings: { ratio: "4:5", count: 1, quality: "hd", strength: 70, duration: 0 },
       x: 260,
       y: 200
@@ -693,7 +711,7 @@ try {
     body: JSON.stringify({
       prompt: "为 xmanx 生成 5.1 活动竖屏 PNG",
       mode: "magic",
-      modelId: "imgen-skill",
+      modelId: "vdamo-gpt-image-2",
       outputTarget: "png",
       orientation: "portrait",
       settings: { ratio: "9:16", count: 1, quality: "hd", strength: 70, duration: 0, contentLanguage: "zh-th" },
@@ -711,7 +729,7 @@ try {
     body: JSON.stringify({
       prompt: "@imgen /生成海报 使用 $logo $ip $product，为 xmanx 生成 5.1 活动教材和短视频 -> pdf 和 mp4",
       mode: "magic",
-      modelId: "imgen-skill",
+      modelId: "vdamo-gpt-image-2",
       settings: { ratio: "16:9", count: 1, quality: "hd", strength: 70, duration: 8 },
       x: 300,
       y: 240
@@ -745,7 +763,7 @@ try {
     body: JSON.stringify({
       prompt: "@imgen /生成视频 使用 $logo $ip，为 xmanx 生成 20 秒品牌短视频 -> mp4",
       mode: "magic",
-      modelId: "imgen-skill",
+      modelId: "vdamo-gpt-image-2",
       outputTarget: "mp4",
       orientation: "landscape",
       settings: { ratio: "16:9", count: 1, quality: "hd", strength: 70, duration: 20, contentLanguage: "zh-en" },
@@ -774,7 +792,7 @@ try {
   const rerun = await request(`/canvas/frames/${multiOutputCompleted.frame.id}/run`, {
     method: "POST",
     body: JSON.stringify({
-      modelId: "imgen-skill",
+      modelId: "vdamo-gpt-image-2",
       settings: { ratio: "16:9", count: 1, quality: "hd", strength: 72, duration: 8, contentLanguage: "zh-th" }
     })
   });
@@ -790,7 +808,7 @@ try {
     body: JSON.stringify({
       prompt: '@imgen /生成海报 使用 $model $logo，显示 $copy.slogan，为 xmanx.com 黑橙色运动鞋生成首发海报，主题 %新品上市',
       mode: "magic",
-      modelId: "imgen-skill",
+      modelId: "vdamo-gpt-image-2",
       brandId: brand.id,
       brandInject: true,
       settings: { ratio: "4:5", count: 2, quality: "hd", strength: 66, duration: 0, brandInject: true },
@@ -802,7 +820,7 @@ try {
 
   const completed = await waitForTask(generated.taskId);
   assert(completed.frame.progress === 100, "completed frame should reach 100%");
-  assert(completed.frame.modelName === "@imgen · image skill", "selected @imgen skill role should be stored on the frame");
+  assert(completed.frame.modelName === "VDAMO · GPT Image 2", "selected VDAMO image model should be stored on the frame");
   assert(completed.frame.brandId === brand.id && completed.frame.brandInjected === true, "generated frame should store brand injection state");
   assert(completed.frame.brandContext.includes("XM Smoke IP"), "brand context should include IP details");
   assert(completed.frame.finalPrompt.includes("$copy.brand_name XMANX Smoke") && completed.frame.finalPrompt.includes("【本次任务】"), "final prompt should include code-style organized brand context");
@@ -845,11 +863,11 @@ try {
       brandContext: editedWorkflowNodes.find((node) => node.id === "brand").body,
       workflowNodes: editedWorkflowNodes,
       outputs: editedOutputs,
-      modelId: "cliproxyapi-gpt-5",
+      modelId: "vdamo-gpt-image-1",
       settings: { ratio: "16:9", width: 1280, height: 720, count: 4, quality: "ultra", strength: 88, duration: 5, brandInject: true, contentLanguage: "en-th" }
     })
   });
-  assert(savedWorkflow.modelId === "cliproxyapi-gpt-5" && savedWorkflow.modelName.includes("gpt-5"), "model switch should persist");
+  assert(savedWorkflow.modelId === "vdamo-gpt-image-1" && savedWorkflow.modelName.includes("GPT Image 1"), "model switch should persist");
   assert(savedWorkflow.brandId === brand.id, `workflow save should keep selected brand: ${savedWorkflow.brandId} !== ${brand.id}`);
   assert(savedWorkflow.settings.ratio === "16:9" && savedWorkflow.settings.width === 1280 && savedWorkflow.settings.height === 720 && savedWorkflow.settings.quality === "ultra" && savedWorkflow.settings.strength === 88 && savedWorkflow.settings.contentLanguage === "en-th", "generation parameters, custom dimensions and content language should persist");
   assert(savedWorkflow.workflowNodes.find((node) => node.id === "input-image").body.includes("可编辑参考图"), "reference node edits should persist");
@@ -868,20 +886,20 @@ try {
 
   const textNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_text/generate-text`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "写一段兔兔赛跑的故事剧情", model: "gpt-5.4", translate: false, contentLanguage: "en-th" })
+    body: JSON.stringify({ prompt: "写一段兔兔赛跑的故事剧情", model: "gpt-5.4-mini", translate: false, contentLanguage: "en-th" })
   });
   assert(textNode.node.type === "process" && !textNode.text.includes("| 镜号 |"), "text node should generate editable text, not storyboard table");
   assert(textNode.text.includes("English + Thai"), "text generation should carry selected content language");
 
   const legacyTextModeNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_text/generate-text`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "用普通文本解释 DAPOT 的品牌语气", model: "gpt-5.4", translate: false, mode: "text" })
+    body: JSON.stringify({ prompt: "用普通文本解释 DAPOT 的品牌语气", model: "gpt-5.4-mini", translate: false, mode: "text" })
   });
   assert(legacyTextModeNode.node.type === "process" && legacyTextModeNode.mode === "story", "legacy text mode should normalize to editable story text");
 
   const scriptNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_script/generate-script`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "生成三镜头分镜表格", model: "gpt-5.4", translate: false })
+    body: JSON.stringify({ prompt: "生成三镜头分镜表格", model: "gpt-5.4-mini", translate: false })
   });
   assert(scriptNode.script.includes("| 镜号 |") && scriptNode.node.type === "script", "script node should generate storyboard table");
 
@@ -957,7 +975,7 @@ try {
 
   const audioNode = await request(`/canvas/frames/${generated.frame.id}/nodes/node_smoke_audio/generate-audio`, {
     method: "POST",
-    body: JSON.stringify({ prompt: "生成科技感节奏配乐", model: "gpt-5.4", settings: { mode: "配乐", duration: "15s", scene: "广告短视频", loop: false, translate: false } })
+    body: JSON.stringify({ prompt: "生成科技感节奏配乐", model: "gpt-5.4-mini", settings: { mode: "配乐", duration: "15s", scene: "广告短视频", loop: false, translate: false } })
   });
   assert(audioNode.audioPlan.includes("音频类型: 配乐") && audioNode.node.type === "audio", "audio node should save generation plan");
 

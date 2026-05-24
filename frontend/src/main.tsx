@@ -109,7 +109,7 @@ type Template = {
 type ModelOption = {
   id: string;
   name: string;
-  type: "image" | "video";
+  type: "text" | "image" | "video";
   costMultiplier: number;
   unitCostCny?: number;
   description: string;
@@ -260,7 +260,7 @@ type AiStatus = {
     model: string;
     keySource: string;
     provider: string;
-    skill: string;
+    route: string;
   };
   textGeneration?: { configured: boolean; baseUrl: string; model: string; provider: string };
   videoGeneration?: { configured: boolean; baseUrl: string; model: string; provider: string };
@@ -277,8 +277,10 @@ type AiStatus = {
 };
 type AiDiagnostics = AiStatus & {
   runtime: {
-    scriptExists: boolean;
-    helpOk: boolean;
+    endpoint: string;
+    model?: string;
+    provider?: string;
+    configured: boolean;
     message: string;
     canAttemptGeneration: boolean;
   };
@@ -438,18 +440,26 @@ function composerPlaceholderForBrand(brand: Brand | undefined, locale: Locale) {
   if (locale === "th") return `@imgen /generate-poster use $${key}.logo $${key}.ip $${key}.product, สร้าง TikTok campaign สำหรับ ${brand.name} -> JPG`;
   return `@imgen /生成海报 使用 $${key}.logo $${key}.ip $${key}.product，为 ${brand.name} 生成 TikTok 投放海报 -> JPG`;
 }
+
+function availableTextModels(models: ModelOption[]) {
+  return models.filter((item) => item.type === "text");
+}
+
+function availableImageModels(models: ModelOption[]) {
+  return models.filter((item) => item.type === "image");
+}
 const defaultLocale = ((window.localStorage.getItem("sparkcanvas.locale") as Locale | null)
   || (navigator.language.toLowerCase().startsWith("th") ? "th" : navigator.language.toLowerCase().startsWith("en") ? "en" : "zh")) as Locale;
 const i18n = {
   zh: {
     nav: { projects: "项目", templates: "模板", assets: "我的素材", history: "历史记录", tutorial: "教程", brand: "品牌" },
     drawer: { projects: "项目 / 画布", templates: "模板库", assets: "我的素材", history: "历史记录", tutorial: "教程", brand: "品牌管理" },
-    topStatus: "在底部 CAL 输入框编写提示词，$ 图片资源会作为真实参考图传入 skill",
+    topStatus: "在底部 CAL 输入框编写提示词，$ 图片资源会作为真实参考图传入图片 API",
     generate: "生成",
     check: "检查",
     topbar: {
       website: "SparkCanvas 官网",
-      diagnostics: "检查本地图片生成 Skill",
+      diagnostics: "检查 VDAMO 图片 API",
       refillCredits: "恢复本地演示积分",
       refill: "恢复积分"
     },
@@ -483,10 +493,10 @@ const i18n = {
       needPrompt: "请输入一句自然语言或 CAL 指令",
       noCredits: "积分不足，无法提交生成任务",
       generating: "生成中",
-      ready: "Skill ready · runtime ok",
-      keyMissing: "Skill key missing",
-      runtimeKeyMissing: "Skill runtime ok · key missing",
-      skillReady: "Skill ready"
+      ready: "API ready · runtime ok",
+      keyMissing: "API key missing",
+      runtimeKeyMissing: "API runtime ok · key missing",
+      skillReady: "API ready"
     },
     login: {
       badge: "CAL 1.0 · Prompt Asset Reference System",
@@ -496,7 +506,7 @@ const i18n = {
       secondary: "查看 CAL 教材",
       note: "默认账号可直接登录，也可以注册新邮箱账号。Google 登录需先配置客户端 ID。",
       prompt: "@imgen /生成海报 使用 $logo $ip $product，生成 5.1 活动教材和短视频 -> pdf 和 mp4",
-      stats: ["@imgen 图片 Skill", "$ 真实素材引用", "可控工作流画布"],
+      stats: ["@imgen 图片 API", "$ 真实素材引用", "可控工作流画布"],
       features: [
         ["品牌资产变量化", "$logo / $ip / $product 会作为真实参考图传入模型。"],
         ["可见即所得画布", "每个节点都能编辑、继续向后生成、替换历史版本。"],
@@ -514,7 +524,7 @@ const i18n = {
     tutorial: [
       ["1. 建品牌", "在品牌管理里上传 Logo、产品、IP、模特等参考图，补齐口号、定位、禁用词。"],
       ["2. 写 CAL", "像写代码一样输入：@imgen /生成海报 使用 $logo $product，显示 $copy.slogan -> 海报；也可以 -> pdf 和 mp4。"],
-      ["3. 真引用", "$logo、$ip、$product 会作为真实图片传入 skill；$copy.slogan 会展开成文案。"],
+      ["3. 真引用", "$logo、$ip、$product 会作为真实图片传入 API；$copy.slogan 会展开成文案。"],
       ["4. 加节点", "双击空白处或点击线路 +，继续添加图片、文本、脚本、视频、合成或音频配置节点。"],
       ["5. 可控迭代", "点击节点后在底部固定面板调整模型、比例、提示词、历史版本和素材替换。"]
     ]
@@ -522,12 +532,12 @@ const i18n = {
   en: {
     nav: { projects: "Projects", templates: "Templates", assets: "Assets", history: "History", tutorial: "Guide", brand: "Brand" },
     drawer: { projects: "Projects", templates: "Templates", assets: "Assets", history: "History", tutorial: "Guide", brand: "Brand Kit" },
-    topStatus: "Write CAL prompts in the bottom composer. $ image resources are sent to the skill as real references.",
+    topStatus: "Write CAL prompts in the bottom composer. $ image resources are sent to the image API as real references.",
     generate: "Generate",
     check: "Check",
     topbar: {
       website: "SparkCanvas website",
-      diagnostics: "Check local image-generation skill",
+      diagnostics: "Check VDAMO image API",
       refillCredits: "Restore local demo credits",
       refill: "Refill"
     },
@@ -561,10 +571,10 @@ const i18n = {
       needPrompt: "Enter natural language or a CAL command",
       noCredits: "Not enough credits to submit generation",
       generating: "Generating",
-      ready: "Skill ready · runtime ok",
-      keyMissing: "Skill key missing",
-      runtimeKeyMissing: "Skill runtime ok · key missing",
-      skillReady: "Skill ready"
+      ready: "API ready · runtime ok",
+      keyMissing: "API key missing",
+      runtimeKeyMissing: "API runtime ok · key missing",
+      skillReady: "API ready"
     },
     login: {
       badge: "CAL 1.0 · Prompt Asset Reference System",
@@ -574,7 +584,7 @@ const i18n = {
       secondary: "Read CAL guide",
       note: "Use the default account to sign in or register a new email account. Google login requires a configured client ID.",
       prompt: "@imgen /generate-poster use $logo $ip $product, create a 5.1 campaign guide and short video -> pdf and mp4",
-      stats: ["@imgen image skill", "$ real asset refs", "controllable workflow canvas"],
+      stats: ["@imgen image API", "$ real asset refs", "controllable workflow canvas"],
       features: [
         ["Brand assets as variables", "$logo / $ip / $product are passed to models as real image references."],
         ["WYSIWYG canvas", "Every node can be edited, extended, regenerated, and replaced with version history."],
@@ -592,7 +602,7 @@ const i18n = {
     tutorial: [
       ["1. Build a brand", "Upload logo, product, IP, model references, then complete slogan, positioning, and forbidden terms."],
       ["2. Write CAL", "Type like code: @imgen /generate-poster use $logo $product, show $copy.slogan -> poster; or -> pdf and mp4."],
-      ["3. Real references", "$logo, $ip, and $product are sent to the skill as images; $copy.slogan expands as text."],
+      ["3. Real references", "$logo, $ip, and $product are sent to the API as images; $copy.slogan expands as text."],
       ["4. Add nodes", "Double-click the canvas or use line + controls to add image, text, script, video, compose, and audio-plan nodes."],
       ["5. Iterate with control", "Select a node and tune model, ratio, prompt, versions, and asset replacement in the bottom panel."]
     ]
@@ -600,12 +610,12 @@ const i18n = {
   th: {
     nav: { projects: "โปรเจกต์", templates: "เทมเพลต", assets: "แอสเซ็ต", history: "ประวัติ", tutorial: "คู่มือ", brand: "แบรนด์" },
     drawer: { projects: "โปรเจกต์", templates: "เทมเพลต", assets: "แอสเซ็ต", history: "ประวัติ", tutorial: "คู่มือ", brand: "จัดการแบรนด์" },
-    topStatus: "เขียนพรอมป์ CAL ด้านล่าง โดยรูปภาพ $ จะถูกส่งให้ skill เป็นภาพอ้างอิงจริง",
+    topStatus: "เขียนพรอมป์ CAL ด้านล่าง โดยรูปภาพ $ จะถูกส่งให้ API เป็นภาพอ้างอิงจริง",
     generate: "สร้าง",
     check: "ตรวจสอบ",
     topbar: {
       website: "เว็บไซต์ SparkCanvas",
-      diagnostics: "ตรวจสอบสกิลสร้างภาพในเครื่อง",
+      diagnostics: "ตรวจสอบ VDAMO image API",
       refillCredits: "กู้เครดิตเดโมในเครื่อง",
       refill: "เติมเครดิต"
     },
@@ -639,10 +649,10 @@ const i18n = {
       needPrompt: "พิมพ์ภาษาธรรมชาติหรือคำสั่ง CAL",
       noCredits: "เครดิตไม่พอสำหรับการสร้าง",
       generating: "กำลังสร้าง",
-      ready: "Skill ready · runtime ok",
-      keyMissing: "Skill key missing",
-      runtimeKeyMissing: "Skill runtime ok · key missing",
-      skillReady: "Skill ready"
+      ready: "API ready · runtime ok",
+      keyMissing: "API key missing",
+      runtimeKeyMissing: "API runtime ok · key missing",
+      skillReady: "API ready"
     },
     login: {
       badge: "CAL 1.0 · ระบบอ้างอิงทรัพยากรในพรอมป์",
@@ -652,7 +662,7 @@ const i18n = {
       secondary: "อ่านคู่มือ CAL",
       note: "ใช้บัญชีเริ่มต้นเพื่อเข้าสู่ระบบ หรือสมัครบัญชีอีเมลใหม่ได้ Google login ต้องตั้งค่า client ID ก่อน",
       prompt: "@imgen /generate-poster use $logo $ip $product, create a 5.1 campaign guide and short video -> pdf and mp4",
-      stats: ["@imgen image skill", "$ อ้างอิงแอสเซ็ตจริง", "workflow canvas ที่ควบคุมได้"],
+      stats: ["@imgen image API", "$ อ้างอิงแอสเซ็ตจริง", "workflow canvas ที่ควบคุมได้"],
       features: [
         ["แอสเซ็ตแบรนด์เป็นตัวแปร", "$logo / $ip / $product ถูกส่งเป็นภาพอ้างอิงจริงให้โมเดล"],
         ["แคนวาส WYSIWYG", "ทุกโหนดแก้ไข ต่อสาย สร้างใหม่ และแทนที่เวอร์ชันได้"],
@@ -670,7 +680,7 @@ const i18n = {
     tutorial: [
       ["1. สร้างแบรนด์", "อัปโหลดโลโก้ สินค้า IP โมเดล และเติม slogan, positioning, forbidden terms"],
       ["2. เขียน CAL", "พิมพ์เหมือนโค้ด: @imgen /generate-poster use $logo $product, show $copy.slogan -> poster หรือ -> pdf and mp4"],
-      ["3. อ้างอิงจริง", "$logo, $ip, $product ถูกส่งเป็นรูปจริงให้ skill; $copy.slogan ถูกขยายเป็นข้อความ"],
+      ["3. อ้างอิงจริง", "$logo, $ip, $product ถูกส่งเป็นรูปจริงให้ API; $copy.slogan ถูกขยายเป็นข้อความ"],
       ["4. เพิ่มโหนด", "ดับเบิลคลิกบนแคนวาสหรือกด + บนเส้นเพื่อเพิ่ม image/text/script/video/compose/audio plan"],
       ["5. คุมการทำซ้ำ", "เลือกโหนดแล้วปรับ model, ratio, prompt, versions และ asset replacement ที่แผงล่าง"]
     ]
@@ -1357,7 +1367,7 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = [], brands: Brand[] 
     });
   if (!brand) {
     const neutral = "#f97316";
-    const agents: MentionItem[] = [{ id: "agent_imgen", token: "@imgen", group: "agent", kind: "agent", role: "imgen", title: "imgen", description: "图片生成 Skill：无品牌项目也可直接生成，只有显式 $ 引用才会传参考图", color: "#111827" }];
+    const agents: MentionItem[] = [{ id: "agent_imgen", token: "@imgen", group: "agent", kind: "agent", role: "imgen", title: "imgen", description: "图片生成 API：无品牌项目也可直接生成，只有显式 $ 引用才会传参考图", color: "#111827" }];
     const commands: MentionItem[] = commandDefinitions(locale).map(([token, role, description]) => ({
       id: `command_${role}`,
       token,
@@ -1383,7 +1393,7 @@ function buildMentionItems(brand?: Brand, assets: Asset[] = [], brands: Brand[] 
   const key = currentBrandKey(brand);
   const hasText = (value?: string) => Boolean(value?.trim());
   const agents: MentionItem[] = [
-    ["@imgen", "imgen", "图片生成 Skill：通过本地脚本调用 otcbot / yijiarj 图片生成能力"]
+    ["@imgen", "imgen", "图片生成 API：通过 VDAMO OpenAI 兼容网关调用图片生成能力"]
   ].map(([token, role, description]) => ({
     id: `agent_${role}`,
     token,
@@ -1906,7 +1916,7 @@ function App() {
       setAiDiagnostics(result);
       setAiStatus(result);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Skill 检查失败");
+      setError(caught instanceof Error ? caught.message : "API 检查失败");
     }
   }
 
@@ -2283,9 +2293,9 @@ function App() {
           <span>{t.topStatus}</span>
         </div>
         <div className="rh-top-meta">
-          <span>{model?.name ?? "@imgen · image skill"}</span>
+          <span>{model?.name ?? "VDAMO · GPT Image 2"}</span>
           <em className={aiStatus?.imageGeneration.configured ? "ready" : "missing"}>
-            {aiStatus?.imageGeneration.configured ? `Skill · ${aiStatus.imageGeneration.model}` : "Skill key missing"}
+            {aiStatus?.imageGeneration.configured ? `API · ${aiStatus.imageGeneration.model}` : "API key missing"}
           </em>
           <button type="button" onClick={() => void checkAiDiagnostics()} title={aiDiagnostics?.runtime.message ?? t.topbar.diagnostics}>
             <RefreshCw />{t.check}
@@ -2654,7 +2664,7 @@ function LoginScreen({
           <div className="rh-auth-preview">
             <img src="/site-assets/sparkcanvas-hero-v2.png" alt="SparkCanvas AI canvas workflow" />
             <div>
-              <strong>@imgen skill</strong>
+              <strong>@imgen API</strong>
               <span>$logo + $product + $copy.slogan {"->"} JPG / PDF / MP4</span>
             </div>
           </div>
@@ -3785,7 +3795,7 @@ function Canvas(props: {
         {visibleNodes.map((node) => (
           <NodeCard
             key={node.id}
-            node={node.type === "model" ? { ...node, body: props.model?.name ?? "@imgen · image skill" } : node}
+            node={node.type === "model" ? { ...node, body: props.model?.name ?? "VDAMO · GPT Image 2" } : node}
             output={node.type === "output" ? outputForNode(props.frame, outputNodes, node.id) : (node.type === "video" || node.type === "compose") ? videoOutput : undefined}
             refs={node.id === "input-image" ? refs : node.refs ?? []}
             selected={selectedNode === node.id || props.editingNodeId === node.id}
@@ -4005,7 +4015,7 @@ function NodeCard(props: {
           </div>
         </div>
       ) : props.node.type === "model" ? (
-        <div className="rh-node-body compact"><Settings2 /><strong>{props.node.body || "@imgen · image skill"}</strong></div>
+        <div className="rh-node-body compact"><Settings2 /><strong>{props.node.body || "VDAMO · GPT Image 2"}</strong></div>
       ) : props.node.type === "process" ? (
         <button type="button" className={`rh-text-tile ${props.node.body ? "filled" : ""}`} onClick={(event) => { event.stopPropagation(); props.onEdit(); }}>
           {props.node.body ? (
@@ -4115,7 +4125,7 @@ function MentionPopover({ items, compact = false, onPick }: { items: MentionItem
                 key={`${item.group}_${item.id}_${item.token}`}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => onPick(item)}
-                title={item.kind === "resource" ? `${item.token} · 生成时作为真实参考图传入 skill` : `${item.token} · ${item.description}`}
+                title={item.kind === "resource" ? `${item.token} · 生成时作为真实参考图传入图片 API` : `${item.token} · ${item.description}`}
               >
                 {item.imageUrl ? <span style={{ backgroundImage: `url(${item.imageUrl})` }} /> : <i style={{ background: item.color }}>{mentionIconText(item, item.kind === "copy" ? "#" : item.token[0] ?? "$")}</i>}
                 <b>{item.token}</b>
@@ -4175,16 +4185,17 @@ function NodeEditor({
   const [generating, setGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(0);
   const [generationMessage, setGenerationMessage] = useState("");
-  const imageModels = models.filter((item) => item.type === "image");
-  const [imageModelId, setImageModelId] = useState(imageModels[0]?.id ?? "imgen-skill");
+  const imageModels = availableImageModels(models);
+  const textModels = availableTextModels(models);
+  const [imageModelId, setImageModelId] = useState(imageModels[0]?.id ?? "vdamo-gpt-image-2");
   const [imageRatio, setImageRatio] = useState(frameSettings.ratio);
   const [imageQuality, setImageQuality] = useState<GenerationSettings["quality"]>(frameSettings.quality);
   const [imageCount, setImageCount] = useState(frameSettings.count);
   const [imageStrength, setImageStrength] = useState(frameSettings.strength);
   const [contentLanguage, setContentLanguage] = useState<ContentLanguage>(frameSettings.contentLanguage ?? defaultSettings.contentLanguage);
-  const [textModel, setTextModel] = useState("gpt-5.4");
+  const [textModel, setTextModel] = useState(textModels[0]?.model ?? "gpt-5.4-mini");
   const [translateText, setTranslateText] = useState(false);
-  const [scriptModel, setScriptModel] = useState("gpt-5.4");
+  const [scriptModel, setScriptModel] = useState(textModels[0]?.model ?? "gpt-5.4-mini");
   const [translateScript, setTranslateScript] = useState(false);
   const [videoMode, setVideoMode] = useState("图生视频");
   const [videoModel, setVideoModel] = useState("grok-imagine-1.0-video-super");
@@ -4193,7 +4204,7 @@ function NodeEditor({
   const [videoSound, setVideoSound] = useState(true);
   const [translateVideo, setTranslateVideo] = useState(false);
   const [audioMode, setAudioMode] = useState("配乐");
-  const [audioModel, setAudioModel] = useState("gpt-5.4");
+  const [audioModel, setAudioModel] = useState(textModels[0]?.model ?? "gpt-5.4-mini");
   const [audioDuration, setAudioDuration] = useState("15s");
   const [audioScene, setAudioScene] = useState("广告短视频");
   const [audioLoop, setAudioLoop] = useState(false);
@@ -4273,7 +4284,7 @@ function NodeEditor({
     const currentDraft = draft;
     if (!currentDraft) return;
     setGenerating(true);
-    setGenerationMessage("已提交到本地图片生成 Skill...");
+    setGenerationMessage("已提交到 VDAMO 图片 API...");
     setGenerationProgress(8);
     onGenerationProgress(8);
     const timer = window.setInterval(() => {
@@ -4298,7 +4309,7 @@ function NodeEditor({
         setDraft(result.node);
         onSave({ title: result.node.title, body: result.node.body, preview: result.node.preview, refs: result.node.refs });
       }
-      setGenerationMessage(result?.generated === false ? (result.message ?? "已使用降级图片替换，请检查 Skill 配置。") : "生成完成，已替换当前节点图片。");
+      setGenerationMessage(result?.generated === false ? (result.message ?? "已使用降级图片替换，请检查 API 配置。") : "生成完成，已替换当前节点图片。");
       completed = true;
       setGenerationProgress(100);
       onGenerationProgress(100);
@@ -4443,7 +4454,7 @@ function NodeEditor({
         )}
         <div className="rh-image-editor-footer">
           <select value={imageModelId} onChange={(event) => setImageModelId(event.target.value)}>
-            {imageModels.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            {imageModels.map((item) => <option key={item.id} value={item.id}>{modelOptionLabel(item, locale)}</option>)}
           </select>
           <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={contentLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
@@ -4561,9 +4572,7 @@ function NodeEditor({
         )}
         <div className="rh-text-editor-footer">
           <select value={textModel} onChange={(event) => setTextModel(event.target.value)}>
-            <option>gpt-5.4</option>
-            <option>deepseek-ai/DeepSeek-V4-Flash</option>
-            <option>Lib Nano Pro</option>
+            {textModels.map((item) => <option key={item.id} value={item.model ?? item.id}>{modelOptionLabel(item, locale)}</option>)}
           </select>
           <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={contentLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
@@ -4667,7 +4676,7 @@ function NodeEditor({
           <button type="button" className="ghost" title="关闭" onClick={onClose}><X /></button>
         </div>
         <div className="rh-audio-editor-toolbar">
-          <span><Music2 />当前音频只生成可编辑配置，真实音频 Skill 接入后再开放执行</span>
+          <span><Music2 />当前音频只生成可编辑配置，真实音频 API 接入后再开放执行</span>
         </div>
         <input className="rh-audio-node-title" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} onBlur={() => onSave({ title: draft.title })} />
         <textarea
@@ -4687,8 +4696,7 @@ function NodeEditor({
         </div>
         <div className="rh-audio-editor-footer">
           <select value={audioModel} onChange={(event) => setAudioModel(event.target.value)}>
-            <option>gpt-5.4</option>
-            <option>deepseek-ai/DeepSeek-V4-Flash</option>
+            {textModels.map((item) => <option key={item.id} value={item.model ?? item.id}>{modelOptionLabel(item, locale)}</option>)}
           </select>
           <select value={audioDuration} onChange={(event) => setAudioDuration(event.target.value)}>
             <option>5s</option><option>10s</option><option>15s</option><option>30s</option><option>60s</option>
@@ -4742,8 +4750,7 @@ function NodeEditor({
         {activeDraftQuery && <MentionPopover items={filteredDraftMentionItems} compact onPick={appendMention} />}
         <div className="rh-script-editor-footer">
           <select value={scriptModel} onChange={(event) => setScriptModel(event.target.value)}>
-            <option>gpt-5.4</option>
-            <option>deepseek-ai/DeepSeek-V4-Flash</option>
+            {textModels.map((item) => <option key={item.id} value={item.model ?? item.id}>{modelOptionLabel(item, locale)}</option>)}
           </select>
           <select className="rh-content-language-select" value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value as ContentLanguage)} title={contentLanguageTitle}>
             {contentLanguageOptions.map((option) => <option value={option.id} key={option.id}>{contentLanguageLabel(option.id, locale, true)}</option>)}
@@ -5079,7 +5086,7 @@ function BottomComposer(props: {
       {activeQuery && (
         <div className="rh-mention-popover">
           <strong>{activeQuery.symbol === "@" ? "@ 智能体" : activeQuery.symbol === "#" ? "# 文本引用兼容" : activeQuery.symbol === "/" ? "/ 命令" : activeQuery.symbol === "$" ? "$ 资源/文案" : "% 标签"}</strong>
-          <em>{activeQuery.symbol === "$" || activeQuery.symbol === "#" || activeQuery.symbol === "@" ? "图片资源会作为真实参考图传入 skill，文本资源会展开；旧 @/# 会自动转 CAL" : "按 CAL 语言规则生成结构化执行参数"}</em>
+          <em>{activeQuery.symbol === "$" || activeQuery.symbol === "#" || activeQuery.symbol === "@" ? "图片资源会作为真实参考图传入图片 API，文本资源会展开；旧 @/# 会自动转 CAL" : "按 CAL 语言规则生成结构化执行参数"}</em>
           {filteredMentionItems.map((item) => (
             <button type="button" key={`${item.group}_${item.id}_${item.token}`} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(item)}>
               <span style={item.imageUrl ? { backgroundImage: `url(${item.imageUrl})` } : { background: item.color }}>{mentionIconText(item, activeQuery.symbol)}</span>
@@ -5092,8 +5099,8 @@ function BottomComposer(props: {
       )}
       <div className="rh-composer-row">
         {workflowMode && <span className="rh-workflow-pill"><Route />CAL</span>}
-        <select value={props.model?.id ?? "imgen-skill"} onChange={(event) => props.onUpdateFrame({ modelId: event.target.value })}>
-          {props.models.filter((item) => item.type === "image").map((item) => <option value={item.id} key={item.id}>{modelOptionLabel(item, props.locale)}</option>)}
+        <select value={props.model?.id ?? "vdamo-gpt-image-2"} onChange={(event) => props.onUpdateFrame({ modelId: event.target.value })}>
+          {availableImageModels(props.models).map((item) => <option value={item.id} key={item.id}>{modelOptionLabel(item, props.locale)}</option>)}
         </select>
         <select className="rh-brand-select" value={props.frame?.brandId ?? ""} onChange={(event) => updateProjectBrand(event.target.value)} title={t.projectBrand}>
           <option value="">{t.brandNone}</option>
@@ -5146,7 +5153,7 @@ function BottomComposer(props: {
               ? t.rerunExisting
             : props.frame?.outputs?.some((output) => output.imageUrl)
               ? t.generatedOnCanvas
-            : props.aiDiagnostics?.runtime.helpOk
+            : props.aiDiagnostics?.runtime.configured
               ? props.aiDiagnostics.runtime.canAttemptGeneration ? t.ready : t.runtimeKeyMissing
             : props.aiStatus?.imageGeneration.configured
               ? `${t.skillReady} · ${props.aiStatus.imageGeneration.keySource}`

@@ -479,8 +479,8 @@ const projectRoot = path.resolve(__dirname, "../..");
 const frontendPublicDir = path.join(projectRoot, "frontend", "public");
 const generatedDir = process.env.SPARKCANVAS_GENERATED_DIR ?? path.join(frontendPublicDir, "generated");
 const brandUploadDir = path.join(generatedDir, "brand-assets");
-const defaultAiBaseUrl = "https://api.yijiarj.cn/v1";
-const defaultImageGenBaseUrl = "https://api.vdamo.com/v1";
+const defaultVideoGenBaseUrl = "https://api.yijiarj.cn/v1";
+const defaultVdamoBaseUrl = "https://api.vdamo.com/v1";
 const isProduction = process.env.NODE_ENV === "production";
 const demoAuthEnabled = !isProduction || process.env.SPARKCANVAS_DEMO_AUTH === "true";
 const authToken = process.env.SPARKCANVAS_AUTH_TOKEN || (demoAuthEnabled ? DEMO_TOKEN : "");
@@ -502,22 +502,68 @@ const templates = [
 ];
 
 const models = orderModelsByDefault([
-  { id: "vdamo-gpt-image-2", provider: "vdamo", model: "gpt-image-2", name: "vdamo · GPT Image 2", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "默认图片模型；OpenAI-compatible /v1/images/generations；已验证可真实返回 PNG；通过 IMAGE_GEN_* 配置网关和密钥" },
-  { id: "imgen-skill", provider: "otcbot", model: process.env.IMAGE_GEN_MODEL || localAuthValue("IMAGE_GEN_MODEL") || "gpt-5.4", name: "@imgen · image skill", type: "image", costMultiplier: 1, unitCostCny: 0.24, reasoningEffort: "high", description: "保留的本地 image_generation tool 路由，统一走 scripts/generate_image.py；模型、网关和密钥由 IMAGE_GEN_* / auth.json 控制" },
-  { id: "yijiarj-nano-banana-2", provider: "yijiarj", model: "nano_banana_2", name: "yijiarj · nano_banana_2", type: "image", costMultiplier: 1, unitCostCny: 0.24, reasoningEffort: "high", description: "默认图片模型，经本地 skill 调用 yijiarj Gemini native image API，支持多图参考；约 ¥0.24/次" },
-  { id: "cliproxyapi-gpt-5-4", provider: "cliproxyapi", model: "gpt-5.4", name: "cliproxyapi · gpt-5.4", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
-  { id: "cliproxyapi-gpt-5", provider: "cliproxyapi", model: "gpt-5", name: "cliproxyapi · gpt-5", type: "image", costMultiplier: 1, reasoningEffort: "high", description: "兼容图片模型，本地 image-generation-gpt skill，经 /v1/responses 调用 image_generation" },
+  { id: "vdamo-gpt-image-2", provider: "vdamo-openai", group: "openai", model: "gpt-image-2", name: "VDAMO · GPT Image 2", type: "image", costMultiplier: 1, reasoningEffort: "high", route: "/v1/images/generations", description: "默认图片模型；VDAMO OpenAI 分组；/v1/images/generations；已通过真实 PNG 出图测试" },
+  { id: "vdamo-gpt-image-1-5", provider: "vdamo-openai", group: "openai", model: "gpt-image-1.5", name: "VDAMO · GPT Image 1.5", type: "image", costMultiplier: 1, reasoningEffort: "high", route: "/v1/images/generations", description: "VDAMO OpenAI 分组图片模型；已通过真实 PNG 出图测试，可作为 gpt-image-2 回退候选" },
+  { id: "vdamo-gpt-image-1", provider: "vdamo-openai", group: "openai", model: "gpt-image-1", name: "VDAMO · GPT Image 1", type: "image", costMultiplier: 1, reasoningEffort: "high", route: "/v1/images/generations", description: "VDAMO OpenAI 分组图片模型；已通过真实 PNG 出图测试" },
+  { id: "vdamo-gemini-3-1-flash-image", provider: "vdamo-google", group: "google", model: "gemini-3.1-flash-image", name: "VDAMO · Gemini 3.1 Flash Image", type: "image", costMultiplier: 1, reasoningEffort: "medium", enabled: false, availability: "probe_failed", route: "/v1/responses", description: "VDAMO Google 分组列出该图片模型，但当前探测未返回可用图片，暂不开放生产选择" },
+  { id: "vdamo-gemini-2-5-flash-image", provider: "vdamo-google", group: "google", model: "gemini-2.5-flash-image", name: "VDAMO · Gemini 2.5 Flash Image", type: "image", costMultiplier: 1, reasoningEffort: "medium", enabled: false, availability: "probe_failed", route: "/v1/responses", description: "VDAMO Google 分组列出该图片模型，但当前探测返回账号不可用/接口不可用，暂不开放生产选择" },
+  { id: "vdamo-gpt-5-4-mini", provider: "vdamo-openai", group: "openai", model: "gpt-5.4-mini", name: "VDAMO · GPT 5.4 Mini", type: "text", costMultiplier: 1, reasoningEffort: "medium", route: "/v1/chat/completions", description: "默认文本/脚本优化模型；VDAMO OpenAI 分组；已通过 OK 探测" },
+  { id: "vdamo-gpt-5-4", provider: "vdamo-openai", group: "openai", model: "gpt-5.4", name: "VDAMO · GPT 5.4", type: "text", costMultiplier: 1, reasoningEffort: "high", route: "/v1/chat/completions", description: "VDAMO OpenAI 分组文本模型" },
+  { id: "vdamo-gpt-5-5", provider: "vdamo-openai", group: "openai", model: "gpt-5.5", name: "VDAMO · GPT 5.5", type: "text", costMultiplier: 1, reasoningEffort: "high", route: "/v1/chat/completions", description: "VDAMO OpenAI 分组高阶文本模型" },
+  { id: "vdamo-gpt-5-3-codex", provider: "vdamo-openai", group: "openai", model: "gpt-5.3-codex", name: "VDAMO · GPT 5.3 Codex", type: "text", costMultiplier: 1, reasoningEffort: "high", route: "/v1/chat/completions", description: "VDAMO OpenAI 分组代码/工作流文本模型" },
+  { id: "vdamo-gpt-5-3-codex-spark", provider: "vdamo-openai", group: "openai", model: "gpt-5.3-codex-spark", name: "VDAMO · GPT 5.3 Codex Spark", type: "text", costMultiplier: 1, reasoningEffort: "high", route: "/v1/chat/completions", description: "VDAMO OpenAI 分组代码/工作流文本模型" },
+  { id: "vdamo-gpt-5-2", provider: "vdamo-openai", group: "openai", model: "gpt-5.2", name: "VDAMO · GPT 5.2", type: "text", costMultiplier: 1, reasoningEffort: "medium", route: "/v1/chat/completions", description: "VDAMO OpenAI 分组文本模型" },
+  { id: "vdamo-gemini-2-5-flash", provider: "vdamo-google", group: "google", model: "gemini-2.5-flash", name: "VDAMO · Gemini 2.5 Flash", type: "text", costMultiplier: 1, reasoningEffort: "medium", route: "/v1/chat/completions", description: "VDAMO Google 分组文本模型；已通过 OK 探测" },
+  { id: "vdamo-gemini-2-0-flash", provider: "vdamo-google", group: "google", model: "gemini-2.0-flash", name: "VDAMO · Gemini 2.0 Flash", type: "text", costMultiplier: 1, reasoningEffort: "medium", route: "/v1/chat/completions", description: "VDAMO Google 分组文本模型" },
+  { id: "vdamo-gemini-2-5-pro", provider: "vdamo-google", group: "google", model: "gemini-2.5-pro", name: "VDAMO · Gemini 2.5 Pro", type: "text", costMultiplier: 1, reasoningEffort: "high", route: "/v1/chat/completions", description: "VDAMO Google 分组文本模型" },
+  { id: "vdamo-gemini-3-5-flash", provider: "vdamo-google", group: "google", model: "gemini-3.5-flash", name: "VDAMO · Gemini 3.5 Flash", type: "text", costMultiplier: 1, reasoningEffort: "medium", route: "/v1/chat/completions", description: "VDAMO Google 分组文本模型" },
+  { id: "vdamo-gemini-3-flash-preview", provider: "vdamo-google", group: "google", model: "gemini-3-flash-preview", name: "VDAMO · Gemini 3 Flash Preview", type: "text", costMultiplier: 1, reasoningEffort: "medium", route: "/v1/chat/completions", description: "VDAMO Google 分组预览文本模型" },
+  { id: "vdamo-gemini-3-pro-preview", provider: "vdamo-google", group: "google", model: "gemini-3-pro-preview", name: "VDAMO · Gemini 3 Pro Preview", type: "text", costMultiplier: 1, reasoningEffort: "high", route: "/v1/chat/completions", description: "VDAMO Google 分组预览文本模型" },
+  { id: "vdamo-gemini-3-1-pro-preview", provider: "vdamo-google", group: "google", model: "gemini-3.1-pro-preview", name: "VDAMO · Gemini 3.1 Pro Preview", type: "text", costMultiplier: 1, reasoningEffort: "high", route: "/v1/chat/completions", description: "VDAMO Google 分组预览文本模型" },
   { id: "yijiarj-grok-video-super", provider: "yijiarj", model: "grok-imagine-1.0-video-super", name: "yijiarj · grok video super", type: "video", costMultiplier: 4, unitCostCny: 0.38, reasoningEffort: "medium", description: "最低成本视频模型；yijiarj /v1/videos；参考图必须传 input_reference 链接；竖屏用 size=720x1280；约 ¥0.38/次，模型池可能临时无可用账号" },
   { id: "yijiarj-grok-video-720p", provider: "yijiarj", model: "grok-imagine-1.0-video-super-720p", name: "yijiarj · grok video 720p", type: "video", costMultiplier: 4, unitCostCny: 0.58, reasoningEffort: "medium", description: "yijiarj /v1/videos；参考图必须传 input_reference 链接；竖屏用 size=720x1280；约 ¥0.58/次" },
   { id: "yijiarj-veo-3-1-fast", provider: "yijiarj", model: "veo_3_1-fast", name: "yijiarj · veo_3_1-fast", type: "video", costMultiplier: 4, unitCostCny: 0.437, reasoningEffort: "medium", description: "VEO 文生/图生；传图时 ad 分组只支持横屏，自动使用 size=1920x1080；链接约 6 小时过期，完成后需下载本地；约 ¥0.437/次" },
   { id: "yijiarj-veo-3-1-fast-fl", provider: "yijiarj", model: "veo_3_1-fast-fl", name: "yijiarj · veo_3_1-fast-fl", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "VEO 首尾帧模型；不支持纯文生，必须传 input_reference，支持多图用 | 分隔" }
 ]);
 
-function orderModelsByDefault<T extends { id: string; type: string }>(items: T[]) {
+function orderModelsByDefault<T extends { id: string; type: string; enabled?: boolean }>(items: T[]) {
   if (!defaultImageModelId) return items;
-  const preferred = items.find((item) => item.id === defaultImageModelId && item.type === "image");
+  const preferred = items.find((item) => item.id === defaultImageModelId && item.type === "image" && item.enabled !== false);
   if (!preferred) return items;
   return [preferred, ...items.filter((item) => item.id !== preferred.id)];
+}
+
+function providerGroupForModel(modelName?: string) {
+  const normalized = String(modelName ?? "").toLowerCase();
+  return normalized.startsWith("gemini-") ? "google" : "openai";
+}
+
+function providerForModel(modelName?: string) {
+  return providerGroupForModel(modelName) === "google" ? "vdamo-google" : "vdamo-openai";
+}
+
+function publicModels() {
+  return models.filter((item) => item.enabled !== false);
+}
+
+function findModelById(modelId?: string) {
+  return publicModels().find((item) => item.id === modelId);
+}
+
+function defaultImageModel() {
+  return publicModels().find((item) => item.type === "image") ?? models[0];
+}
+
+function defaultTextModel() {
+  return publicModels().find((item) => item.type === "text")?.model ?? "gpt-5.4-mini";
+}
+
+function openAiCompatibleBaseUrl(value: string, defaultBaseUrl = defaultVdamoBaseUrl) {
+  const normalized = (value || defaultBaseUrl)
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/(?:chat\/completions|images\/generations|responses|models)$/i, "");
+  return /\/v\d+(?:beta)?$/i.test(normalized) ? normalized : `${normalized}/v1`;
 }
 
 const assetRoleSchema = z.object({
@@ -1748,7 +1794,7 @@ async function migrateDb() {
     }
     const hasFrameBrand = Boolean(frame.brandId && db.brands.some((item) => item.id === frame.brandId));
     const brand = hasFrameBrand ? findBrand(frame.brandId) : undefined;
-    const model = models.find((item) => item.id === frame.modelId) ?? models[0];
+    const model = findModelById(frame.modelId) ?? defaultImageModel();
     if (!frame.settings) {
       frame.settings = defaultSettings(frame.prompt);
       changed = true;
@@ -1782,7 +1828,7 @@ async function migrateDb() {
       frame.finalPrompt = buildFinalPrompt(frame.prompt, frame.brandContext, frame.brandInjected, brand);
       changed = true;
     }
-    if (!frame.modelId || !frame.modelName || !models.some((item) => item.id === frame.modelId)) {
+    if (!frame.modelId || !frame.modelName || !findModelById(frame.modelId)) {
       frame.modelId = model.id;
       frame.modelName = model.name;
       changed = true;
@@ -2539,7 +2585,7 @@ function buildFinalPrompt(prompt: string, brandContext: string, inject: boolean,
   ].filter(Boolean).join("\n");
   const taskPrompt = referenceSummary ? `${resolved.prompt}\n\n【资源解析】\n${referenceSummary}` : resolved.prompt;
   if (!inject) return taskPrompt;
-  return `${brandContext}\n\n【本次任务】${taskPrompt}\n\n请按 CAL 1.0 执行：@ 是智能体，/ 是命令，$ 是真实资源，双引号是锁定画面文字，% 是主题标签，: 是参数，-> 是输出。$ 图片资源已作为真实参考图传入 skill；$copy 和 $brand 文本资源已展开。严格保持品牌字段、素材角色、色彩、Logo/IP/商品一致。`;
+  return `${brandContext}\n\n【本次任务】${taskPrompt}\n\n请按 CAL 1.0 执行：@ 是智能体，/ 是命令，$ 是真实资源，双引号是锁定画面文字，% 是主题标签，: 是参数，-> 是输出。$ 图片资源已作为真实参考图传入 VDAMO 图片 API；$copy 和 $brand 文本资源已展开。严格保持品牌字段、素材角色、色彩、Logo/IP/商品一致。`;
 }
 
 function stripCalForExecution(prompt: string, resolved: ResolvedPromptAssets) {
@@ -3796,65 +3842,75 @@ function localAuthWithSource(...names: string[]) {
 function imageGenerationConfig(modelName?: string) {
   if (process.env.SPARKCANVAS_DISABLE_IMAGE_GEN === "1") {
     return {
-      baseUrl: defaultImageGenBaseUrl,
+      baseUrl: defaultVdamoBaseUrl,
       apiKey: "",
-      model: modelName || "gpt-5.4",
+      model: modelName || "gpt-image-2",
       keySource: "disabled",
       baseUrlSource: "disabled"
     };
   }
-  const localBaseUrl = localAuthWithSource("IMAGE_GEN_BASE_URL", "YIJIARJ_BASE_URL", "OTCBOT_BASE_URL", "CPA_BASE_URL", "OPENAI_BASE_URL");
-  const localApiKey = localAuthWithSource("IMAGE_GEN_KEY", "YIJIARJ_API_KEY", "OTCBOT_API_KEY", "CPA_API_KEY", "OPENAI_API_KEY");
+  const model = modelName || process.env.IMAGE_GEN_MODEL || localAuthValue("IMAGE_GEN_MODEL") || "gpt-image-2";
+  const modelGroup = providerGroupForModel(model);
+  const groupKeyNames = modelGroup === "google"
+    ? ["VDAMO_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"]
+    : ["VDAMO_OPENAI_API_KEY", "OPENAI_API_KEY"];
+  const localBaseUrl = localAuthWithSource("IMAGE_GEN_BASE_URL", "VDAMO_BASE_URL", "OPENAI_BASE_URL");
+  const localGroupApiKey = localAuthWithSource(...groupKeyNames);
+  const localGenericApiKey = localAuthWithSource("IMAGE_GEN_KEY");
   const baseUrl = process.env.IMAGE_GEN_BASE_URL
-    || process.env.YIJIARJ_BASE_URL
-    || process.env.OTCBOT_BASE_URL
-    || process.env.CPA_BASE_URL
+    || process.env.VDAMO_BASE_URL
     || process.env.OPENAI_BASE_URL
     || localBaseUrl.value
-    || defaultImageGenBaseUrl;
+    || defaultVdamoBaseUrl;
   const apiKey = process.env.IMAGE_GEN_KEY
-    || process.env.YIJIARJ_API_KEY
-    || process.env.OTCBOT_API_KEY
-    || process.env.CPA_API_KEY
-    || process.env.OPENAI_API_KEY
-    || localApiKey.value;
+    || groupKeyNames.map((name) => process.env[name]).find(Boolean)
+    || localGenericApiKey.value
+    || localGroupApiKey.value;
   return {
-    baseUrl,
+    baseUrl: openAiCompatibleBaseUrl(baseUrl),
     apiKey,
-    model: modelName || process.env.IMAGE_GEN_MODEL || localAuthValue("IMAGE_GEN_MODEL") || "nano_banana_2",
+    model,
     keySource: process.env.IMAGE_GEN_KEY ? "IMAGE_GEN_KEY"
-      : process.env.YIJIARJ_API_KEY ? "YIJIARJ_API_KEY"
-        : process.env.OTCBOT_API_KEY ? "OTCBOT_API_KEY"
-          : process.env.CPA_API_KEY ? "CPA_API_KEY"
-            : process.env.OPENAI_API_KEY ? "OPENAI_API_KEY"
-              : localApiKey.source,
+      : groupKeyNames.find((name) => process.env[name]) ?? (localGenericApiKey.value ? localGenericApiKey.source : localGroupApiKey.source),
     baseUrlSource: process.env.IMAGE_GEN_BASE_URL ? "IMAGE_GEN_BASE_URL"
-      : process.env.YIJIARJ_BASE_URL ? "YIJIARJ_BASE_URL"
-        : process.env.OTCBOT_BASE_URL ? "OTCBOT_BASE_URL"
-          : process.env.CPA_BASE_URL ? "CPA_BASE_URL"
-            : process.env.OPENAI_BASE_URL ? "OPENAI_BASE_URL"
-              : localBaseUrl.value ? localBaseUrl.source : "default"
+      : process.env.VDAMO_BASE_URL ? "VDAMO_BASE_URL"
+        : process.env.OPENAI_BASE_URL ? "OPENAI_BASE_URL"
+          : localBaseUrl.value ? localBaseUrl.source : "default"
   };
 }
 
-function serviceConfig(kind: "text" | "video") {
+function serviceConfig(kind: "text" | "video", modelOverride?: string) {
   const prefix = kind === "text" ? "TEXT_GEN" : "VIDEO_GEN";
-  const modelFallback = kind === "text" ? "gpt-5.4" : "grok-imagine-1.0-video-super";
-  const baseUrl = process.env[`${prefix}_BASE_URL`]
-    || localAuthValue(`${prefix}_BASE_URL`)
-    || process.env.YIJIARJ_BASE_URL
-    || localAuthValue("YIJIARJ_BASE_URL")
-    || process.env.OPENAI_BASE_URL
-    || localAuthValue("OPENAI_BASE_URL")
-    || defaultAiBaseUrl;
-  const apiKey = process.env[`${prefix}_KEY`]
-    || localAuthValue(`${prefix}_KEY`)
-    || process.env.YIJIARJ_API_KEY
-    || localAuthValue("YIJIARJ_API_KEY")
-    || process.env.OPENAI_API_KEY
-    || localAuthValue("OPENAI_API_KEY");
-  const model = process.env[`${prefix}_MODEL`] || localAuthValue(`${prefix}_MODEL`) || modelFallback;
-  return { baseUrl: baseUrl.replace(/\/$/, ""), apiKey, model };
+  const modelFallback = kind === "text" ? "gpt-5.4-mini" : "grok-imagine-1.0-video-super";
+  const model = modelOverride || process.env[`${prefix}_MODEL`] || localAuthValue(`${prefix}_MODEL`) || modelFallback;
+  const modelGroup = providerGroupForModel(model);
+  const groupKeyNames = modelGroup === "google"
+    ? ["VDAMO_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"]
+    : ["VDAMO_OPENAI_API_KEY", "OPENAI_API_KEY"];
+  const baseUrl = kind === "text"
+    ? process.env[`${prefix}_BASE_URL`]
+      || localAuthValue(`${prefix}_BASE_URL`)
+      || process.env.VDAMO_BASE_URL
+      || localAuthValue("VDAMO_BASE_URL")
+      || process.env.OPENAI_BASE_URL
+      || localAuthValue("OPENAI_BASE_URL")
+      || defaultVdamoBaseUrl
+    : process.env[`${prefix}_BASE_URL`]
+      || localAuthValue(`${prefix}_BASE_URL`)
+      || process.env.YIJIARJ_BASE_URL
+      || localAuthValue("YIJIARJ_BASE_URL")
+      || defaultVideoGenBaseUrl;
+  const apiKey = kind === "text"
+    ? process.env[`${prefix}_KEY`]
+      || localAuthValue(`${prefix}_KEY`)
+      || groupKeyNames.map((name) => process.env[name]).find(Boolean)
+      || localAuthValue(...groupKeyNames)
+    : process.env[`${prefix}_KEY`]
+      || localAuthValue(`${prefix}_KEY`)
+      || process.env.YIJIARJ_API_KEY
+      || localAuthValue("YIJIARJ_API_KEY");
+  const normalizedBaseUrl = kind === "text" ? openAiCompatibleBaseUrl(baseUrl) : baseUrl.replace(/\/$/, "");
+  return { baseUrl: normalizedBaseUrl, apiKey, model };
 }
 
 function requestHeaders(apiKey: string) {
@@ -3949,7 +4005,8 @@ async function runTextGeneration(prompt: string, modelName?: string, system = "�
   const config = serviceConfig("text");
   if (!config.apiKey) return undefined;
   const model = modelName || config.model;
-  const data = await postJson(`${config.baseUrl}/chat/completions`, config.apiKey, {
+  const modelConfig = model === config.model ? config : serviceConfig("text", model);
+  const data = await postJson(`${modelConfig.baseUrl}/chat/completions`, modelConfig.apiKey, {
     model,
     messages: [
       { role: "system", content: system },
@@ -4250,7 +4307,7 @@ function publicBaseUrlStatus() {
 }
 
 function aiStatus() {
-  const imageConfig = imageGenerationConfig(models[0].model);
+  const imageConfig = imageGenerationConfig(defaultImageModel().model);
   const textConfig = serviceConfig("text");
   const videoConfig = serviceConfig("video");
   return {
@@ -4261,14 +4318,14 @@ function aiStatus() {
       baseUrlSource: imageConfig.baseUrlSource,
       model: imageConfig.model,
       keySource: imageConfig.apiKey ? imageConfig.keySource : "missing",
-      provider: imageConfig.model.startsWith("gpt-image-") ? "vdamo" : imageConfig.model === "nano_banana_2" ? "yijiarj" : "cliproxyapi",
-      skill: "scripts/generate_image.py"
+      provider: providerForModel(imageConfig.model),
+      route: "/v1/images/generations"
     },
     textGeneration: {
       configured: Boolean(textConfig.apiKey && textConfig.baseUrl),
       baseUrl: textConfig.baseUrl,
       model: textConfig.model,
-      provider: "yijiarj"
+      provider: providerForModel(textConfig.model)
     },
     videoGeneration: {
       configured: Boolean(videoConfig.apiKey && videoConfig.baseUrl),
@@ -4281,82 +4338,56 @@ function aiStatus() {
 }
 
 async function imageSkillDiagnostics() {
-  const imageConfig = imageGenerationConfig(models[0].model);
-  const scriptPath = path.join(projectRoot, "scripts", "generate_image.py");
-  const scriptExists = existsSync(scriptPath);
-  if (!scriptExists) {
-    return {
-      ...aiStatus(),
-      runtime: {
-        scriptExists,
-        helpOk: false,
-        message: "scripts/generate_image.py not found"
-      }
-    };
-  }
-
-  const helpResult = await new Promise<{ ok: boolean; message: string }>((resolve) => {
-    const child = spawn("python3", [scriptPath, "--help"], { cwd: projectRoot, stdio: ["ignore", "pipe", "pipe"] });
-    let output = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      resolve({ ok: false, message: "python3 --help timed out" });
-    }, 5000);
-    child.stdout.on("data", (chunk) => { output += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { output += chunk.toString(); });
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolve({ ok: false, message: error.message });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ ok: code === 0, message: output.slice(0, 180) || `python exited with code ${code}` });
-    });
-  });
-
+  const imageConfig = imageGenerationConfig(defaultImageModel().model);
+  const configured = Boolean(imageConfig.apiKey && imageConfig.baseUrl);
   return {
     ...aiStatus(),
     runtime: {
-      scriptExists,
-      helpOk: helpResult.ok,
-      message: helpResult.message,
-      canAttemptGeneration: Boolean(imageConfig.apiKey && scriptExists && helpResult.ok)
+      endpoint: `${imageConfig.baseUrl.replace(/\/$/, "")}/images/generations`,
+      model: imageConfig.model,
+      provider: providerForModel(imageConfig.model),
+      configured,
+      message: configured ? "VDAMO image API is configured." : "VDAMO image API key is missing.",
+      canAttemptGeneration: configured
     }
   };
 }
 
 function modelDiagnostics() {
-  const imageConfig = imageGenerationConfig(models[0].model);
   const textConfig = serviceConfig("text");
   const videoConfig = serviceConfig("video");
   return models.map((item) => {
     const isImage = item.type === "image";
     const isVideo = item.type === "video";
+    const isText = item.type === "text";
+    const imageConfig = isImage ? imageGenerationConfig(item.model) : undefined;
     const configured = isImage
-      ? Boolean(imageConfig.apiKey && imageConfig.baseUrl)
+      ? Boolean(imageConfig?.apiKey && imageConfig.baseUrl && item.enabled !== false)
       : isVideo
         ? Boolean(videoConfig.apiKey && videoConfig.baseUrl)
-        : Boolean(textConfig.apiKey && textConfig.baseUrl);
+        : isText ? Boolean(textConfig.apiKey && textConfig.baseUrl && item.enabled !== false) : false;
     return {
       id: item.id,
       name: item.name,
       type: item.type,
       provider: item.provider,
-      model: item.model ?? imageConfig.model,
+      model: item.model ?? imageConfig?.model ?? textConfig.model,
+      group: "group" in item ? item.group : undefined,
+      availability: "availability" in item ? item.availability : item.enabled === false ? "disabled" : "available",
       unitCostCny: "unitCostCny" in item ? item.unitCostCny : undefined,
       clipSeconds: isVideo ? videoModelClipSeconds(item.model) : undefined,
       configured,
-      route: isImage ? "scripts/generate_image.py" : isVideo ? `${videoConfig.baseUrl}/videos` : `${textConfig.baseUrl}/chat/completions`,
-      status: item.id === models[0].id ? "recommended" : configured ? "candidate" : "missing_key",
-      note: item.id === models[0].id
-        ? "默认推荐。GPT Image 2 走 /v1/images/generations；旧 @imgen skill 和其它模型仍保留可选。"
+      route: isImage ? `${imageConfig?.baseUrl ?? defaultVdamoBaseUrl}/images/generations` : isVideo ? `${videoConfig.baseUrl}/videos` : `${textConfig.baseUrl}/chat/completions`,
+      status: item.enabled === false ? "disabled" : item.id === defaultImageModel().id ? "recommended" : configured ? "candidate" : "missing_key",
+      note: item.id === defaultImageModel().id
+        ? "默认推荐。GPT Image 2 走 VDAMO /v1/images/generations；已通过真实 PNG 出图测试。"
         : item.description
     };
   });
 }
 
 async function probeModel(modelId: string, prompt?: string) {
-  const model = models.find((item) => item.id === modelId);
+  const model = findModelById(modelId);
   if (!model) throw new Error(`Unknown model: ${modelId}`);
   const started = Date.now();
   if (model.type === "image") {
@@ -4375,6 +4406,17 @@ async function probeModel(modelId: string, prompt?: string) {
       type: model.type,
       model: model.model ?? imageGenerationConfig().model,
       imageUrl,
+      elapsedMs: Date.now() - started
+    };
+  }
+  if (model.type === "text") {
+    const text = await runTextGeneration(prompt || "只回复 OK", model.model);
+    return {
+      id: model.id,
+      ok: Boolean(text),
+      type: model.type,
+      model: model.model,
+      text: text?.slice(0, 160),
       elapsedMs: Date.now() - started
     };
   }
@@ -4402,8 +4444,65 @@ function imageFormatFromText(text: string): "png" | "jpeg" {
   return /\b(jpe?g|jpg)\b/i.test(text) ? "jpeg" : "png";
 }
 
-function imageExtensionForSkill(format: "png" | "jpeg" | "webp") {
+function imageExtensionForApi(format: "png" | "jpeg" | "webp") {
   return format === "jpeg" ? "jpg" : format;
+}
+
+function imageApiSize(ratio?: string) {
+  const value = ratioForImageSkill(ratio);
+  const mapping: Record<string, string> = {
+    "1:1": "1024x1024",
+    "3:4": "1024x1365",
+    "4:5": "1024x1280",
+    "9:16": "1024x1792",
+    "16:9": "1792x1024"
+  };
+  return mapping[value] ?? "1024x1024";
+}
+
+function firstImageOutput(value: unknown): { kind: "url" | "b64"; value: string } | undefined {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstImageOutput(item);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  for (const key of ["b64_json", "base64", "image_base64", "result"]) {
+    const item = record[key];
+    if (typeof item === "string" && item) return { kind: "b64", value: item };
+  }
+  for (const key of ["url", "image_url"]) {
+    const item = record[key];
+    if (typeof item === "string" && /^https?:\/\//.test(item)) return { kind: "url", value: item };
+  }
+  for (const item of Object.values(record)) {
+    const found = firstImageOutput(item);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+async function writeImageApiOutput(output: { kind: "url" | "b64"; value: string }, outputPath: string) {
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  if (output.kind === "b64") {
+    await writeFile(outputPath, Buffer.from(output.value, "base64"));
+    return;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(process.env.IMAGE_DOWNLOAD_TIMEOUT_MS ?? "120000"));
+  try {
+    const response = await fetch(output.value, { signal: controller.signal, headers: { "User-Agent": "SparkCanvas/0.1 image-download" } });
+    if (!response.ok) throw new Error(`image download failed: HTTP ${response.status}`);
+    await writeFile(outputPath, Buffer.from(await response.arrayBuffer()));
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw new Error("image download timed out");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function detectImageExtension(filePath: string): "png" | "jpg" | "webp" | undefined {
@@ -4478,85 +4577,55 @@ function fallbackImageDataUrl(label = "Image generation unavailable") {
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 }
 
-async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string, settings?: Partial<GenerationSettings>, timeoutMs = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? "180000"), outputFormat: "png" | "jpeg" | "webp" = "png") {
+async function runImageGenerationSkill(prompt: string, references: ReferenceItem[], outputName: string, modelName?: string, settings?: Partial<GenerationSettings>, timeoutMs = Number(process.env.IMAGE_GEN_TIMEOUT_MS ?? "240000"), outputFormat: "png" | "jpeg" | "webp" = "png") {
   const imageConfig = imageGenerationConfig(modelName);
   if (!imageConfig.apiKey || !imageConfig.baseUrl) return undefined;
 
   await mkdir(generatedDir, { recursive: true });
-  const filename = `${outputName}.${imageExtensionForSkill(outputFormat)}`;
+  const filename = `${outputName}.${imageExtensionForApi(outputFormat)}`;
   const outputPath = path.join(generatedDir, filename);
-  const args = [
-    path.join(projectRoot, "scripts", "generate_image.py"),
-    "--prompt",
-    prompt,
-    "--output",
-    outputPath,
-    "--format",
-    outputFormat,
-    "--model",
-    imageConfig.model,
-    "--aspect-ratio",
-    ratioForImageSkill(settings?.ratio),
-    "--image-size",
-    settings?.quality === "ultra" ? "4K" : "2K",
-    "--retries",
-    "4",
-    "--session-id",
-    `sparkcanvas-${outputName}`
-  ];
   const maxReferences = Math.max(1, Math.min(6, Number(process.env.IMAGE_GEN_MAX_REFERENCES ?? "3")));
   const usableReferences = references.filter((reference) => reference.imageUrl).slice(0, maxReferences);
+  const imageInputs: string[] = [];
   for (const [index, reference] of usableReferences.entries()) {
     const filePath = await materializeReferenceImage(reference, outputName, index);
-    if (filePath) args.push("--input-image", filePath);
+    if (filePath) {
+      const bytes = await readFile(filePath);
+      const mime = /\.webp$/i.test(filePath) ? "image/webp" : /\.jpe?g$/i.test(filePath) ? "image/jpeg" : "image/png";
+      imageInputs.push(`data:${mime};base64,${bytes.toString("base64")}`);
+    }
   }
-
-  return new Promise<string>((resolve, reject) => {
-    let settled = false;
-    const child = spawn("python3", args, {
-      cwd: projectRoot,
-      env: {
-        ...process.env,
-        IMAGE_GEN_BASE_URL: imageConfig.baseUrl,
-        IMAGE_GEN_KEY: imageConfig.apiKey,
-        IMAGE_GEN_MODEL: imageConfig.model
-      },
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      child.kill("SIGTERM");
-      reject(new Error(`image generation skill timed out after ${Math.round(timeoutMs / 1000)}s for model ${imageConfig.model}`));
-    }, timeoutMs);
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (code === 0) {
-        const actualExt = detectImageExtension(outputPath);
-        if (!actualExt) return reject(new Error("image generation skill did not produce a valid PNG/JPEG/WEBP file"));
-        const expectedExt = imageExtensionForSkill(outputFormat);
-        if (actualExt && actualExt !== expectedExt) {
-          const actualName = `${outputName}.${actualExt}`;
-          renameSync(outputPath, path.join(generatedDir, actualName));
-          return resolve(`/generated/${actualName}`);
-        }
-        return resolve(`/generated/${filename}`);
-      }
-      reject(new Error(stderr || stdout || `image generation skill exited with code ${code}`));
-    });
-  });
+  if (providerGroupForModel(imageConfig.model) !== "openai") {
+    throw new Error(`VDAMO image model ${imageConfig.model} is not enabled for production image generation`);
+  }
+  const url = `${imageConfig.baseUrl.replace(/\/$/, "")}/images/generations`;
+  const requestPrompt = imageInputs.length
+    ? [
+        prompt,
+        "",
+        "Use the attached reference images as real brand/product/character constraints. Preserve identity, product shape, logo-safe spacing, color system, and composition intent."
+      ].join("\n")
+    : prompt;
+  const payload: Record<string, unknown> = {
+    model: imageConfig.model,
+    prompt: requestPrompt,
+    n: 1,
+    size: imageApiSize(settings?.ratio)
+  };
+  if (imageInputs.length) payload.image = imageInputs;
+  const parsed = await postJson(url, imageConfig.apiKey, payload, timeoutMs);
+  const output = firstImageOutput(parsed);
+  if (!output) throw new Error(`VDAMO image API did not return image data for ${imageConfig.model}`);
+  await writeImageApiOutput(output, outputPath);
+  const actualExt = detectImageExtension(outputPath);
+  if (!actualExt) throw new Error("VDAMO image API did not produce a valid PNG/JPEG/WEBP file");
+  const expectedExt = imageExtensionForApi(outputFormat);
+  if (actualExt !== expectedExt) {
+    const actualName = `${outputName}.${actualExt}`;
+    renameSync(outputPath, path.join(generatedDir, actualName));
+    return `/generated/${actualName}`;
+  }
+  return `/generated/${filename}`;
 }
 
 function generatedReference(id: string, output: Pick<CanvasFrame["outputs"][number], "title" | "copy" | "imageUrl">, color: string, role = "generated"): ReferenceItem | undefined {
@@ -4777,9 +4846,9 @@ async function fillFrameOutputs(frame: CanvasFrame) {
     ...resolvedRefs,
     ...(frame.workflowNodes.find((node) => node.id === "input-image")?.refs ?? [])
   ].filter((reference, index, list) => list.findIndex((item) => item.id === reference.id) === index);
-  const fallbackImage = fallbackImageDataUrl("Skill unavailable");
+  const fallbackImage = fallbackImageDataUrl("Image API unavailable");
   const referenceFallbackImage = refs.find((reference) => ["product", "ip", "model", "storefront", "environment", "logo"].includes(reference.role))?.imageUrl;
-  const model = models.find((item) => item.id === frame.modelId) ?? models[0];
+  const model = findModelById(frame.modelId) ?? defaultImageModel();
   const visualDraftNode = frame.workflowNodes.find((node) => node.id === "visual-draft");
   let sharedVisualUrl = visualDraftNode?.refs?.find((item) => item.imageUrl && ["visual", "generated", "document-preview", "video-preview"].includes(item.role))?.imageUrl;
   let sharedVisualNote = "";
@@ -4803,7 +4872,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         if (!generated) sharedVisualNote = "主视觉使用降级预览：未配置有效图片生成 Key。";
       } catch (error) {
         sharedVisualUrl = fallbackImage;
-        sharedVisualNote = `主视觉使用降级预览：${error instanceof Error ? error.message.slice(0, 120) : "image skill unavailable"}`;
+        sharedVisualNote = `主视觉使用降级预览：${error instanceof Error ? error.message.slice(0, 120) : "image API unavailable"}`;
       }
     }
     const visualRef = generatedReference(
@@ -4839,7 +4908,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         if (!generated) output.copy = appendCopyNote(output.copy, "图片生成未返回结果，已使用主视觉/降级预览。");
       } catch (error) {
         output.imageUrl = sharedVisualUrl ?? referenceFallbackImage ?? fallbackImage;
-        output.copy = appendCopyNote(output.copy, `图片生成降级：${error instanceof Error ? error.message.slice(0, 120) : "image skill unavailable"}`);
+        output.copy = appendCopyNote(output.copy, `图片生成降级：${error instanceof Error ? error.message.slice(0, 120) : "image API unavailable"}`);
       }
       const ref = generatedReference(`generated_${outputNode?.id ?? output.id}_${Date.now().toString(36)}_${index}`, output, outputNode?.preview ?? neutralBrandColor(brand).accent);
       upsertNodeReference(outputNode, ref);
@@ -4859,7 +4928,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
           id: `first_frame_${frame.id}_${index}`,
           role: "first-frame",
           title: "视频首帧",
-          description: "由图片 skill 使用品牌素材生成，作为视频一致性锚点。",
+          description: "由VDAMO 图片 API 使用品牌素材生成，作为视频一致性锚点。",
           color: outputNode?.preview ?? neutralBrandColor(brand).accent,
           imageUrl: sharedVisualUrl
         }] : [])
@@ -4877,7 +4946,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         );
         if (generatedStoryboard) storyboardSheetUrl = generatedStoryboard;
       } catch (error) {
-        output.copy = appendCopyNote(output.copy, `视频分镜板生成降级：${error instanceof Error ? error.message.slice(0, 100) : "image skill unavailable"}`);
+        output.copy = appendCopyNote(output.copy, `视频分镜板生成降级：${error instanceof Error ? error.message.slice(0, 100) : "image API unavailable"}`);
       }
       const storyboardRef = storyboardSheetUrl ? {
         id: `video_storyboard_${frame.id}_${index}`,
@@ -4910,7 +4979,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
           );
           if (generatedKeyframe) keyframeUrls.push(generatedKeyframe);
         } catch (error) {
-          output.copy = appendCopyNote(output.copy, `视频关键帧 ${shotIndex + 1} 生成降级：${error instanceof Error ? error.message.slice(0, 100) : "image skill unavailable"}`);
+          output.copy = appendCopyNote(output.copy, `视频关键帧 ${shotIndex + 1} 生成降级：${error instanceof Error ? error.message.slice(0, 100) : "image API unavailable"}`);
         }
       }
       const firstFrameUrl = keyframeUrls[0] ?? sharedVisualUrl;
@@ -4919,7 +4988,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         id: `video_keyframe_${frame.id}_${index}_${shotIndex}`,
         role: shotIndex === 0 ? "first-frame" : "keyframe",
         title: `视频关键帧 ${shotIndex + 1}/${keyframeCount}`,
-        description: `由图片 skill 根据真实品牌素材生成，用于 ${durationSeconds}s 视频第 ${shotIndex + 1} 段视觉一致性。`,
+        description: `由VDAMO 图片 API 根据真实品牌素材生成，用于 ${durationSeconds}s 视频第 ${shotIndex + 1} 段视觉一致性。`,
         color: outputNode?.preview ?? neutralBrandColor(brand).accent,
         imageUrl
       }));
@@ -4971,7 +5040,7 @@ async function fillFrameOutputs(frame: CanvasFrame) {
         }
         if (output.videoUrl && firstFrameUrl) output.imageUrl = firstFrameUrl;
         if (fallbackReasons.length) output.copy = appendCopyNote(output.copy, fallbackReasons[0]);
-        if (segmentResults.some((video) => video?.usedFirstFrame)) output.copy = appendCopyNote(output.copy, `已提交图片 skill 首帧/关键帧约束视频模型，使用 ${videoPromptRefs.filter((reference) => reference.role !== "first-frame").length} 张品牌参考图生成。`);
+        if (segmentResults.some((video) => video?.usedFirstFrame)) output.copy = appendCopyNote(output.copy, `已提交VDAMO 图片 API 首帧/关键帧约束视频模型，使用 ${videoPromptRefs.filter((reference) => reference.role !== "first-frame").length} 张品牌参考图生成。`);
         if (videoUrls.length === segmentPlan.length && videoNeedsCompose(durationSeconds, workflowVideoModel)) {
           output.copy = appendCopyNote(output.copy, output.videoUrl
             ? `所有分段视频已返回并完成裁切/合成: ${output.videoUrl}`
@@ -5054,7 +5123,7 @@ function createFrame(
   requestedOutputs?: CanvasFrame["outputs"]
 ): CanvasFrame {
   const brand = requestedBrandId === null ? undefined : requestedBrandId ? db.brands.find((item) => item.id === requestedBrandId) : inferBrandFromPrompt(prompt);
-  const model = models.find((item) => item.id === requestedModelId) ?? models[0];
+  const model = findModelById(requestedModelId) ?? defaultImageModel();
   const settings = defaultSettings(prompt, requestedSettings);
   const explicitSettingsBrandInject = typeof requestedSettings?.brandInject === "boolean";
   settings.brandInject = Boolean(brand && (requestedBrandInject ?? (explicitSettingsBrandInject ? settings.brandInject : promptRequestsWholeBrand(prompt, brand))));
@@ -5114,7 +5183,7 @@ function createFrame(
 
 function createEmptyFrame(requestedBrandId?: string | null): CanvasFrame {
   const brand = requestedBrandId ? db.brands.find((item) => item.id === requestedBrandId) : undefined;
-  const model = models[0];
+  const model = defaultImageModel();
   const settings = defaultSettings("", { ratio: "1:1", count: 1, quality: "hd", brandInject: false });
   return {
     id: nanoid(8),
@@ -5323,7 +5392,7 @@ function buildWorkflowNodes(prompt: string, brand: Brand | undefined, model: (ty
           id: videoNodeId,
           type: "video",
           title: `${labelForOutputTarget(target)} 生成`,
-          body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 先用图片 skill 生成/锁定视频首帧，再把首帧提交给视频模型做图生视频；如果模型不接受首帧，必须在输出状态中明确降级。`,
+          body: `CAL: ${calWorkflowLine(prompt, brand, target)}\n执行: 先用VDAMO 图片 API 生成/锁定视频首帧，再把首帧提交给视频模型做图生视频；如果模型不接受首帧，必须在输出状态中明确降级。`,
           parentId: scriptNodeId,
           preview: "#111827",
           refs: referenceItems,
@@ -5688,7 +5757,7 @@ app.get("/workspace", async (req, res) => {
   await repairInterruptedGenerations();
   await refreshPendingVideoOutputs();
   const workspace = applyGeneratedFileAuthToWorkspace(req.authToken);
-  res.json({ user: publicUser(req.authUser!), brands: workspace.brands, assets: workspace.assets, templates, models, frames: workspace.frames, tasks: db.tasks, ai: aiStatus() });
+  res.json({ user: publicUser(req.authUser!), brands: workspace.brands, assets: workspace.assets, templates, models: publicModels(), frames: workspace.frames, tasks: db.tasks, ai: aiStatus() });
 });
 
 app.get("/workspace/export", (req, res) => {
@@ -5696,7 +5765,7 @@ app.get("/workspace/export", (req, res) => {
   res.json({
     exportedAt: now(),
     domain: "xmanx.com",
-    workspace: { user: publicUser(req.authUser!), brands: db.brands, assets: db.assets, templates, models, frames: db.frames, tasks: db.tasks }
+    workspace: { user: publicUser(req.authUser!), brands: db.brands, assets: db.assets, templates, models: publicModels(), frames: db.frames, tasks: db.tasks }
   });
 });
 
@@ -5894,7 +5963,7 @@ app.get("/templates", (_req, res) => {
 });
 
 app.get("/models", (_req, res) => {
-  res.json(models);
+  res.json(publicModels());
 });
 
 app.get("/ai/status", (_req, res) => {
@@ -6107,7 +6176,7 @@ app.patch("/canvas/frames/:id", async (req, res) => {
   Object.assign(frame, { ...input, workflowNodes: frame.workflowNodes, outputs: frame.outputs }, { updatedAt: now() });
 
   if (input.modelId) {
-    const model = models.find((item) => item.id === input.modelId);
+    const model = findModelById(input.modelId);
     if (model) {
       frame.modelId = model.id;
       frame.modelName = model.name;
@@ -6134,7 +6203,7 @@ app.patch("/canvas/frames/:id", async (req, res) => {
     }
   }
 
-  const model = models.find((item) => item.id === frame.modelId) ?? models[0];
+  const model = findModelById(frame.modelId) ?? defaultImageModel();
   const hasFrameBrand = Boolean(frame.brandId && db.brands.some((item) => item.id === frame.brandId));
   const brand = hasFrameBrand ? findBrand(frame.brandId) : activeBrand();
   const generatedBrandContext = buildBrandContext(brand);
@@ -6198,7 +6267,7 @@ app.post("/canvas/frames/:id/run", async (req, res) => {
   }).parse(req.body ?? {});
 
   if (input.modelId) {
-    const model = models.find((item) => item.id === input.modelId);
+    const model = findModelById(input.modelId);
     if (model) {
       frame.modelId = model.id;
       frame.modelName = model.name;
@@ -6253,7 +6322,7 @@ function ensureFrameWorkflowNode(frame: CanvasFrame, nodeId: string) {
   if (existing) return existing;
   if (!autoCoreNodeIds.has(nodeId)) return undefined;
   const brand = frameBrand(frame);
-  const model = models.find((item) => item.id === frame.modelId) ?? models[0];
+  const model = findModelById(frame.modelId) ?? defaultImageModel();
   frame.workflowNodes = mergeWorkflowNodes(
     buildWorkflowNodes(frame.prompt, brand, model, frame.settings, frame.brandContext || (brand ? buildBrandContext(brand) : ""), frame.brandInjected),
     frame.workflowNodes
@@ -6275,7 +6344,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
 
   const brand = frameBrand(frame);
   const colors = neutralBrandColor(brand);
-  const selectedModel = models.find((item) => item.id === input.modelId) ?? models.find((item) => item.id === frame.modelId) ?? models[0];
+  const selectedModel = findModelById(input.modelId) ?? findModelById(frame.modelId) ?? defaultImageModel();
   if (selectedModel.type !== "image") {
     return res.status(400).json({ message: "Selected model is not an image generation model" });
   }
@@ -6290,7 +6359,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
   const shouldInjectBrand = input.settings?.brandInject ?? frame.settings.brandInject;
   const executablePrompt = executableImagePrompt(input.prompt?.trim() || node.body || frame.prompt, Boolean(brand && shouldInjectBrand) ? brand : undefined, node.title || "canvas image", frame.settings);
   const outputName = `node-${frame.id}-${node.id}-${Date.now().toString(36)}`;
-  let imageUrl = fallbackImageDataUrl("Skill unavailable");
+  let imageUrl = fallbackImageDataUrl("Image API unavailable");
   let generationNote = "";
   let generated = false;
 
@@ -6345,7 +6414,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate", async (req, res) => {
     node: applyGeneratedFileAuthToNode(frame, node, req.authToken),
     imageUrl: generatedFileUrl(imageUrl, req.authToken),
     generated,
-    message: generated ? "图片已由本地 skill 生成。" : generationNote
+    message: generated ? "图片已由VDAMO 图片 API 生成。" : generationNote
   });
 });
 
@@ -6397,6 +6466,10 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-text", async (req, res) => {
     if (remote) generatedText = remote;
   } catch (error) {
     generatedText = `${fallbackText}\n\n远程文本模型降级: ${error instanceof Error ? error.message.slice(0, 160) : "unavailable"}`;
+  }
+  const languageLabel = contentLanguageLabel(contentLanguage);
+  if (contentLanguage !== "auto" && !generatedText.includes(languageLabel)) {
+    generatedText = `Content language: ${languageLabel}\n\n${generatedText}`;
   }
 
   node.body = generatedText;
@@ -6569,7 +6642,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
         };
       }
     } catch (error) {
-      firstFrameNote = `视频分镜板生成失败，继续生成单镜头首帧：${error instanceof Error ? error.message.slice(0, 140) : "image skill unavailable"}`;
+      firstFrameNote = `视频分镜板生成失败，继续生成单镜头首帧：${error instanceof Error ? error.message.slice(0, 140) : "image API unavailable"}`;
     }
   }
   if (shouldSynthesizeStoryboardAssets) {
@@ -6588,7 +6661,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
         if (!generated) continue;
         if (!firstFrameUrl) {
           firstFrameUrl = generated;
-          firstFrameNote = `已先用图片 skill 和 ${videoRefs.length} 张参考素材生成视频首帧。`;
+          firstFrameNote = `已先用VDAMO 图片 API 和 ${videoRefs.length} 张参考素材生成视频首帧。`;
         }
         generatedKeyframeRefs.push({
           id: `video_keyframe_${node.id}_${shotIndex}`,
@@ -6600,7 +6673,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
         });
       }
     } catch (error) {
-      firstFrameNote = `视频关键帧生成失败，继续使用视频模型自身能力：${error instanceof Error ? error.message.slice(0, 140) : "image skill unavailable"}`;
+      firstFrameNote = `视频关键帧生成失败，继续使用视频模型自身能力：${error instanceof Error ? error.message.slice(0, 140) : "image API unavailable"}`;
     }
   } else if (firstFrameUrl) {
     firstFrameNote = firstFrameNote || "已检测到现成首帧/参考图，跳过额外分镜板与关键帧预生成，直接提交视频模型。";
@@ -6730,7 +6803,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-video", async (req, res) => 
       id: `first_frame_${node.id}`,
       role: "first-frame",
       title: "视频首帧",
-      description: usedFirstFrame ? "已作为 input_reference 提交给视频模型。" : "由图片 skill/画布输出生成，用于人工检查视频一致性。",
+      description: usedFirstFrame ? "已作为 input_reference 提交给视频模型。" : "由VDAMO 图片 API/画布输出生成，用于人工检查视频一致性。",
       color: node.preview ?? "#111827",
       imageUrl: firstFrameUrl
     });
@@ -6798,11 +6871,12 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
   const resolved = resolvePromptAssets(input.prompt.trim(), brand);
   const prompt = resolved.prompt;
   const contentLanguage = settings.contentLanguage ?? frame.settings.contentLanguage;
+  const selectedAudioModel = input.model ?? defaultTextModel();
   const audioPlan = [
     prompt,
     "",
     `音频类型: ${settings.mode ?? "配乐"}`,
-    `模型: ${input.model ?? "cliproxyapi · gpt-5.4"}`,
+    `模型: ${selectedAudioModel}`,
     `时长: ${settings.duration ?? "15s"}`,
     `场景: ${settings.scene ?? "广告短视频"}`,
     `语言: ${contentLanguageLabel(contentLanguage)}`,
@@ -6810,7 +6884,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
     `翻译: ${settings.translate ? "开启" : "关闭"}`,
     `CAL解析: ${JSON.stringify({ agents: resolved.agents, commands: resolved.commands, imageReferences: resolved.imageReferences.map((item) => item.description), textReferences: resolved.textReferences, lockedTexts: resolved.lockedTexts, tags: resolved.tags, params: resolved.params, outputs: resolved.outputs })}`,
     `品牌约束: ${brandLabel(contextBrand)}; ${brandTone(contextBrand)}; ${brandVisualStyle(contextBrand)}`,
-    "执行状态: 已保存音频生成配置，等待接入真实音频生成 skill。"
+    "执行状态: 已保存音频生成配置，等待接入真实音频生成 API。"
   ].join("\n");
 
   node.type = "audio";
@@ -6818,7 +6892,7 @@ app.post("/canvas/frames/:id/nodes/:nodeId/generate-audio", async (req, res) => 
   node.body = audioPlan;
   frame.updatedAt = now();
   await persistDb();
-  res.json({ frame: applyGeneratedFileAuthToFrame(frame, req.authToken), node: applyGeneratedFileAuthToNode(frame, node, req.authToken), audioPlan, model: input.model ?? "cliproxyapi · gpt-5.4" });
+  res.json({ frame: applyGeneratedFileAuthToFrame(frame, req.authToken), node: applyGeneratedFileAuthToNode(frame, node, req.authToken), audioPlan, model: selectedAudioModel });
 });
 
 app.post("/canvas/frames/:id/nodes/:nodeId/generate-compose", async (req, res) => {

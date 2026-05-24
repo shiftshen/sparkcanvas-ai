@@ -81,10 +81,10 @@ CAL is the prompt/workflow language.
 Core symbols:
 
 - `@` agent or role.
-  - `@imgen`: image generation skill. Image generation should go through local `scripts/generate_image.py`.
+  - `@imgen`: image generation API agent. Image generation should go through the backend VDAMO image API integration.
 - `$` brand resource variable.
   - `$logo`, `$ip`, `$product`, `$menu.soup`, `$xmanx.logo`, `$dapot.ip`
-  - Image resources must be sent as real reference images to the image skill/video workflow.
+  - Image resources must be sent as real reference images to the image API/video workflow.
   - Text resources must be expanded into the executable prompt.
 - `/` command.
   - `/生成海报`, `/生成视频`, `/write-video-script`, `/translate`
@@ -107,45 +107,40 @@ Example commands for manual testing:
 @imgen /生成教材 使用 $logo $ip $menu.soup，为 DAPOT 生成门店自助火锅点餐说明，包含图片和中泰双语文字 -> pdf
 ```
 
-## 4. API And Skill Integration
+## 4. API Integration
 
 ### 4.1 Image generation
 
-Image generation must use the local project skill:
+Image generation must use the backend VDAMO OpenAI-compatible image API:
 
 ```bash
-python3 scripts/generate_image.py \
-  --model gpt-image-2 \
-  --prompt "Create a commercial image..." \
-  --output frontend/public/generated/test.png \
-  --format png \
-  --aspect-ratio 1:1 \
-  --input-image path/to/reference.jpg
+curl -sS https://api.vdamo.com/v1/images/generations \
+  -H "Authorization: Bearer $VDAMO_OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-image-2","prompt":"Create a commercial image...","n":1,"size":"1024x1024"}'
 ```
 
 Default image model:
 
 - `gpt-image-2`
 - Provider: vdamo OpenAI-compatible API
-- Route: `scripts/generate_image.py` with `/v1/images/generations`
+- Route: `/v1/images/generations`
 - Verified with a real PNG probe before switching defaults.
 
-Retained image routes:
+Selectable production image routes:
 
-- `@imgen · image skill`
-- `nano_banana_2`
-- cliproxyapi `gpt-5.4` / `gpt-5`
+- `gpt-image-2`
+- `gpt-image-1.5`
+- `gpt-image-1`
 
-Legacy image model:
+Disabled image probes retained only in diagnostics:
 
-- `nano_banana_2`
-- Approx cost: `¥0.24 / request`
-- Route: local `scripts/generate_image.py`
-- Supports multiple input images after compacting/materializing references.
+- `gemini-2.5-flash-image`
+- `gemini-3.1-flash-image`
 
 Known issue:
 
-- `grok-imagine-image` returned `403 Image generation is not enabled for this group` in current testing. Do not use it as the default image model.
+- Gemini image models are visible from VDAMO model listing, but current probes did not return usable image output or returned account exhaustion. Do not expose them in the production selector until a real image generation route is verified.
 
 ### 4.2 Video generation
 
@@ -227,13 +222,17 @@ Required for real generation:
 
 ```json
 {
+  "VDAMO_BASE_URL": "https://api.vdamo.com/v1",
+  "VDAMO_OPENAI_API_KEY": "YOUR_VDAMO_OPENAI_GROUP_KEY",
+  "VDAMO_GEMINI_API_KEY": "YOUR_VDAMO_GEMINI_GROUP_KEY",
   "YIJIARJ_BASE_URL": "https://api.yijiarj.cn/v1",
   "YIJIARJ_API_KEY": "YOUR_YIJIARJ_API_KEY",
   "IMAGE_GEN_BASE_URL": "https://api.vdamo.com/v1",
-  "IMAGE_GEN_KEY": "YOUR_IMAGE_GEN_KEY",
+  "IMAGE_GEN_KEY": "YOUR_VDAMO_OPENAI_GROUP_KEY",
   "IMAGE_GEN_MODEL": "gpt-image-2",
+  "TEXT_GEN_BASE_URL": "https://api.vdamo.com/v1",
+  "TEXT_GEN_MODEL": "gpt-5.4-mini",
   "VIDEO_GEN_MODEL": "grok-imagine-1.0-video-super",
-  "TEXT_GEN_MODEL": "gpt-5.4",
   "SPARKCANVAS_PUBLIC_BASE_URL": "https://xmanx.com"
 }
 ```
@@ -244,12 +243,12 @@ Do not put real values in Git.
 
 Last verified chain:
 
-1. Generated a video keyframe/reference image with local `@imgen` using `nano_banana_2`.
-2. Uploaded reference image to a temporary public image URL.
-3. Submitted `grok-imagine-1.0-video-super` with correct `input_reference + size=720x1280`.
-4. Result: request accepted and task created, but model failed with `No available accounts for video generation`.
-5. Submitted `veo_3_1-fast` with correct `input_reference + size=1920x1080`.
-6. Result: completed and downloaded a valid MP4.
+1. VDAMO `/v1/chat/completions` returned `OK` for `gpt-5.4-mini` with the OpenAI group key.
+2. VDAMO `/v1/chat/completions` returned `OK` for `gemini-2.5-flash` with the Gemini group key.
+3. VDAMO `/v1/models` listed the requested OpenAI and Gemini model groups.
+4. VDAMO `/v1/images/generations` returned valid PNG files for `gpt-image-2`, `gpt-image-1.5`, and `gpt-image-1`.
+5. Gemini image probes did not produce a usable image output, so those models remain disabled in production selectors.
+6. Existing yijiarj video routing remains separate and still requires public `input_reference` image URLs.
 
 Local output paths from the verification run:
 

@@ -6780,3 +6780,70 @@ svg {
     overflow-x: auto !important;
   }
 }
+
+/* Workspace safe area: keep fixed overlays clear of the bottom composer on every viewport. */
+.rh-app {
+  --rh-workspace-rail-width: 86px;
+  --rh-workspace-composer-clearance: 212px;
+}
+
+@media (max-width: 900px) {
+  .rh-app {
+    --rh-workspace-rail-width: 64px;
+    --rh-workspace-composer-clearance: 216px;
+  }
+}
+
+.rh-canvas {
+  inset: 54px 0 var(--rh-workspace-composer-clearance) var(--rh-workspace-rail-width) !important;
+}
+
+.rh-canvas-controls {
+  left: calc(var(--rh-workspace-rail-width) + 18px) !important;
+  bottom: var(--rh-workspace-composer-clearance) !important;
+}
+
+.rh-minimap {
+  bottom: var(--rh-workspace-composer-clearance) !important;
+}
+
+.rh-selection-pill {
+  bottom: var(--rh-workspace-composer-clearance) !important;
+}
+
+.rh-drawer {
+  bottom: var(--rh-workspace-composer-clearance) !important;
+}
+
+@media (max-width: 900px) {
+  .rh-canvas {
+    inset: 54px 0 var(--rh-workspace-composer-clearance) var(--rh-workspace-rail-width) !important;
+  }
+
+  .rh-canvas-controls {
+    left: 10px !important;
+    right: 10px !important;
+    bottom: var(--rh-workspace-composer-clearance) !important;
+    width: auto !important;
+  }
+
+  .rh-selection-pill {
+    left: 10px !important;
+    right: 10px !important;
+    top: auto !important;
+    bottom: var(--rh-workspace-composer-clearance) !important;
+    width: auto !important;
+    max-width: none !important;
+  }
+
+  .rh-minimap {
+    left: 10px !important;
+    bottom: calc(var(--rh-workspace-composer-clearance) + 8px) !important;
+  }
+
+  .rh-drawer {
+    left: 72px !important;
+    bottom: var(--rh-workspace-composer-clearance) !important;
+    width: min(300px, calc(100vw - 96px)) !important;
+  }
+}

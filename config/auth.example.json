@@ -1,11 +1,15 @@
 {
+  "VDAMO_BASE_URL": "https://api.vdamo.com/v1",
+  "VDAMO_OPENAI_API_KEY": "YOUR_VDAMO_OPENAI_GROUP_KEY",
+  "VDAMO_GEMINI_API_KEY": "YOUR_VDAMO_GEMINI_GROUP_KEY",
   "YIJIARJ_BASE_URL": "https://api.yijiarj.cn/v1",
   "YIJIARJ_API_KEY": "YOUR_YIJIARJ_API_KEY",
   "IMAGE_GEN_BASE_URL": "https://api.vdamo.com/v1",
-  "IMAGE_GEN_KEY": "YOUR_IMAGE_GEN_KEY",
+  "IMAGE_GEN_KEY": "YOUR_VDAMO_OPENAI_GROUP_KEY",
   "IMAGE_GEN_MODEL": "gpt-image-2",
+  "TEXT_GEN_BASE_URL": "https://api.vdamo.com/v1",
+  "TEXT_GEN_MODEL": "gpt-5.4-mini",
   "VIDEO_GEN_MODEL": "grok-imagine-1.0-video-super",
-  "TEXT_GEN_MODEL": "gpt-5.4",
   "SPARKCANVAS_PUBLIC_BASE_URL": "https://xmanx.com",
   "SPARKCANVAS_GOOGLE_CLIENT_ID": "YOUR_GOOGLE_CLIENT_ID",
   "SPARKCANVAS_REGISTRATION_ENABLED": "true"
