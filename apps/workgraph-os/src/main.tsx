@@ -124,6 +124,20 @@ type WorkGraphWorkspace = {
   memories: MemoryObject[];
 };
 
+type WorkGraphObject = {
+  id: string;
+  type: "goal" | "asset" | "brand" | "skill" | "model" | "workflow" | "node" | "result" | "feedback" | "memory";
+  title: string;
+  summary: string;
+  source: "workspace" | "derived";
+  updatedAt: string;
+};
+
+type WorkGraphObjectIndex = {
+  counts: Record<string, number>;
+  objects: WorkGraphObject[];
+};
+
 type StorageState = "browser-local" | "memory-only";
 type StorageMode = StorageState | "filesystem-json";
 
@@ -340,15 +354,18 @@ async function backendRequest(pathname: string, options: RequestInit = {}) {
 async function loadBackendWorkspace() {
   const response = await backendRequest("/workgraph-os/workspace");
   if (!response.ok) throw new Error("backend workspace unavailable");
-  const data = await response.json() as { workspace?: Partial<WorkGraphWorkspace> | null };
+  const data = await response.json() as { workspace?: Partial<WorkGraphWorkspace> | null; objectIndex?: WorkGraphObjectIndex };
   if (!data.workspace) return null;
   return {
-    ...defaultWorkspace(),
-    ...data.workspace,
-    version: 1,
-    materials: data.workspace.materials?.length ? data.workspace.materials : seedMaterials,
-    skills: data.workspace.skills?.length ? data.workspace.skills : skillTemplates
-  } satisfies WorkGraphWorkspace;
+    workspace: {
+      ...defaultWorkspace(),
+      ...data.workspace,
+      version: 1,
+      materials: data.workspace.materials?.length ? data.workspace.materials : seedMaterials,
+      skills: data.workspace.skills?.length ? data.workspace.skills : skillTemplates
+    } satisfies WorkGraphWorkspace,
+    objectIndex: data.objectIndex
+  };
 }
 
 async function saveBackendWorkspace(workspace: WorkGraphWorkspace) {
@@ -494,6 +511,7 @@ function App() {
   const [activeNodeId, setActiveNodeId] = useState("skill");
   const [storageMode, setStorageMode] = useState<StorageMode>(detectStorageState);
   const [backendLoaded, setBackendLoaded] = useState(false);
+  const [objectIndex, setObjectIndex] = useState<WorkGraphObjectIndex | null>(null);
   const [skillSearch, setSkillSearch] = useState("");
   const [newSkillName, setNewSkillName] = useState("");
   const [newSkillCommand, setNewSkillCommand] = useState("");
@@ -531,13 +549,21 @@ function App() {
     feedback: feedback.length,
     memories: memories.length
   };
+  const indexedObjects = objectIndex?.objects ?? [];
+  const objectCount = (
+    indexedKey: WorkGraphObject["type"],
+    fallbackKey: keyof typeof objectCounts
+  ) => objectIndex?.counts?.[indexedKey] ?? objectCounts[fallbackKey];
 
   useEffect(() => {
     let cancelled = false;
     void loadBackendWorkspace()
       .then((loaded) => {
         if (cancelled) return;
-        if (loaded) setWorkspace(loaded);
+        if (loaded) {
+          setWorkspace(loaded.workspace);
+          if (loaded.objectIndex) setObjectIndex(loaded.objectIndex);
+        }
         setStorageMode("filesystem-json");
       })
       .catch(() => {
@@ -555,7 +581,13 @@ function App() {
     saveWorkspace(workspace);
     if (!backendLoaded) return;
     if (storageMode !== "filesystem-json") return;
-    void saveBackendWorkspace(workspace).catch(() => setStorageMode(detectStorageState()));
+    void saveBackendWorkspace(workspace)
+      .then(() => backendRequest("/workgraph-os/objects"))
+      .then((response) => response.ok ? response.json() : null)
+      .then((data: WorkGraphObjectIndex | null) => {
+        if (data?.objects) setObjectIndex(data);
+      })
+      .catch(() => setStorageMode(detectStorageState()));
   }, [backendLoaded, storageMode, workspace]);
 
   function updateWorkspace(updater: (current: WorkGraphWorkspace) => WorkGraphWorkspace) {
@@ -743,9 +775,9 @@ function App() {
         </div>
         <div className="pm-status">
           <span><Bot /> pi-web compatible</span>
-          <span><Library /> {objectCounts.assets} assets</span>
-          <span><Sparkles /> {objectCounts.skills} skills</span>
-          <span><RefreshCcw /> {objectCounts.memories} memories</span>
+          <span><Library /> {objectCount("asset", "assets")} assets</span>
+          <span><Sparkles /> {objectCount("skill", "skills")} skills</span>
+          <span><RefreshCcw /> {objectCount("memory", "memories")} memories</span>
           <span><Archive /> {storageMode === "filesystem-json" ? "filesystem JSON" : storageMode === "browser-local" ? "browser local store" : "memory only"}</span>
           <span><CheckCircle2 /> WGOS local first</span>
         </div>
@@ -799,15 +831,25 @@ function App() {
         <section className="pm-panel compact">
           <div className="pm-panel-head"><strong>对象图谱</strong><Layers3 /></div>
           <div className="pm-object-grid">
-            <span>Goal <strong>{objectCounts.goals}</strong></span>
-            <span>Asset <strong>{objectCounts.assets}</strong></span>
-            <span>Brand <strong>{objectCounts.brands}</strong></span>
-            <span>Skill <strong>{objectCounts.skills}</strong></span>
-            <span>Model <strong>{objectCounts.models}</strong></span>
-            <span>Workflow <strong>{objectCounts.workflows}</strong></span>
-            <span>Result <strong>{objectCounts.results}</strong></span>
-            <span>Feedback <strong>{objectCounts.feedback}</strong></span>
-            <span>Memory <strong>{objectCounts.memories}</strong></span>
+            <span>Goal <strong>{objectCount("goal", "goals")}</strong></span>
+            <span>Asset <strong>{objectCount("asset", "assets")}</strong></span>
+            <span>Brand <strong>{objectCount("brand", "brands")}</strong></span>
+            <span>Skill <strong>{objectCount("skill", "skills")}</strong></span>
+            <span>Model <strong>{objectCount("model", "models")}</strong></span>
+            <span>Workflow <strong>{objectCount("workflow", "workflows")}</strong></span>
+            <span>Result <strong>{objectCount("result", "results")}</strong></span>
+            <span>Feedback <strong>{objectCount("feedback", "feedback")}</strong></span>
+            <span>Memory <strong>{objectCount("memory", "memories")}</strong></span>
+          </div>
+          <div className="pm-object-index">
+            {(indexedObjects.length ? indexedObjects : []).slice(0, 5).map((object) => (
+              <button key={object.id} type="button">
+                <strong>{object.type}</strong>
+                <span>{object.title}</span>
+                <small>{object.summary}</small>
+              </button>
+            ))}
+            {!indexedObjects.length ? <p className="pm-muted">后端对象索引会在连接 filesystem JSON 后显示。</p> : null}
           </div>
         </section>
 

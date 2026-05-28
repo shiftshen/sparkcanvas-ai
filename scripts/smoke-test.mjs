@@ -203,9 +203,19 @@ try {
   const savedWorkGraph = await request("/workgraph-os/workspace", { method: "PUT", body: JSON.stringify(workGraphPayload) });
   assert(savedWorkGraph.workspace?.prompt === workGraphPayload.prompt, "WorkGraph OS workspace should persist the prompt");
   assert(savedWorkGraph.workspace?.feedback?.length === 1, "WorkGraph OS workspace should persist feedback objects");
+  assert(savedWorkGraph.objectIndex?.counts?.asset === 1, "WorkGraph OS workspace save should return an asset object index");
   const reloadedWorkGraph = await request("/workgraph-os/workspace");
   assert(reloadedWorkGraph.workspace?.materials?.[0]?.id === "mat-smoke", "WorkGraph OS workspace should reload from filesystem JSON");
   assert(reloadedWorkGraph.workspace?.memories?.[0]?.id === "mem-smoke", "WorkGraph OS workspace should reload memory objects");
+  const workGraphObjects = await request("/workgraph-os/objects");
+  assert(workGraphObjects.counts?.goal === 1, "WorkGraph OS object index should include a goal object");
+  assert(workGraphObjects.counts?.asset === 1, "WorkGraph OS object index should include asset objects");
+  assert(workGraphObjects.counts?.memory === 1, "WorkGraph OS object index should include memory objects");
+  assert(workGraphObjects.objects.some((item) => item.id === "asset:mat-smoke"), "WorkGraph OS object index should include the saved asset");
+  const memoryObjects = await request("/workgraph-os/objects?type=memory");
+  assert(memoryObjects.objects.length === 1 && memoryObjects.objects[0].id === "memory:mem-smoke", "WorkGraph OS object index should support type filtering");
+  const smokeAssetObject = await request("/workgraph-os/objects/asset/mat-smoke");
+  assert(smokeAssetObject.title === "Smoke asset", "WorkGraph OS object detail should return the requested object");
 
   const initial = await request("/workspace");
   assert(initial.brands.some((brand) => brand.id === "brand_xmanx" && brand.active), "XMANX should be the active default brand");

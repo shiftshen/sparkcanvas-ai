@@ -477,6 +477,18 @@ type WorkGraphOsWorkspace = {
   updatedAt: string;
 };
 
+type WorkGraphOsObjectType = "goal" | "asset" | "brand" | "skill" | "model" | "workflow" | "node" | "result" | "feedback" | "memory";
+
+type WorkGraphOsObject = {
+  id: string;
+  type: WorkGraphOsObjectType;
+  title: string;
+  summary: string;
+  source: "workspace" | "derived";
+  updatedAt: string;
+  payload: unknown;
+};
+
 declare global {
   namespace Express {
     interface Request {
@@ -2011,6 +2023,68 @@ async function writeWorkGraphOsWorkspace(workspace: WorkGraphOsWorkspace) {
   await writeFile(tmpFile, payload);
   if (existsSync(workGraphOsDataFile)) renameSync(workGraphOsDataFile, `${workGraphOsDataFile}.bak`);
   renameSync(tmpFile, workGraphOsDataFile);
+}
+
+function objectField(input: unknown, key: string) {
+  if (!input || typeof input !== "object") return undefined;
+  return (input as Record<string, unknown>)[key];
+}
+
+function objectString(input: unknown, key: string, fallback = "") {
+  const value = objectField(input, key);
+  return typeof value === "string" ? value : fallback;
+}
+
+function workGraphObject(
+  type: WorkGraphOsObjectType,
+  fallbackId: string,
+  title: string,
+  summary: string,
+  payload: unknown,
+  updatedAt: string,
+  source: WorkGraphOsObject["source"] = "workspace"
+): WorkGraphOsObject {
+  const rawId = objectString(payload, "id", fallbackId);
+  return {
+    id: `${type}:${rawId || fallbackId}`,
+    type,
+    title: title || rawId || fallbackId,
+    summary,
+    source,
+    updatedAt,
+    payload
+  };
+}
+
+function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
+  if (!workspace) return { counts: {}, objects: [] as WorkGraphOsObject[] };
+  const updatedAt = workspace.updatedAt || now();
+  const objects: WorkGraphOsObject[] = [
+    workGraphObject("goal", "active", "Active Goal", workspace.prompt || "No goal prompt", { id: "active", rawInput: workspace.prompt, activeBrandId: workspace.activeBrandId, activeModelId: workspace.activeModelId }, updatedAt, "derived"),
+    workGraphObject("brand", workspace.activeBrandId || "active", `Brand ${workspace.activeBrandId || "active"}`, `Active brand context: ${workspace.activeBrandId || "unset"}`, { id: workspace.activeBrandId || "active" }, updatedAt, "derived"),
+    workGraphObject("model", workspace.activeModelId || "active", `Model ${workspace.activeModelId || "active"}`, `Active model strategy: ${workspace.activeModelId || "unset"}`, { id: workspace.activeModelId || "active" }, updatedAt, "derived"),
+    workGraphObject("workflow", "active", "Active Workflow", `${workspace.jobs.length || 1} workflow run(s), ${workspace.selectedIds.length} selected asset(s)`, { id: "active", prompt: workspace.prompt, selectedIds: workspace.selectedIds, jobs: workspace.jobs }, updatedAt, "derived")
+  ];
+  workspace.materials.forEach((item, index) => {
+    objects.push(workGraphObject("asset", `asset-${index}`, objectString(item, "title", `Asset ${index + 1}`), objectString(item, "token", objectString(item, "fileName", "")), item, objectString(item, "createdAt", updatedAt)));
+  });
+  workspace.skills.forEach((item, index) => {
+    objects.push(workGraphObject("skill", `skill-${index}`, objectString(item, "title", `Skill ${index + 1}`), objectString(item, "command", objectString(item, "description", "")), item, updatedAt));
+  });
+  workspace.jobs.forEach((item, index) => {
+    objects.push(workGraphObject("result", `result-${index}`, objectString(item, "title", `Result ${index + 1}`), `${objectString(item, "status", "unknown")} -> ${objectString(item, "output", "")}`, item, objectString(item, "createdAt", updatedAt)));
+  });
+  workspace.feedback.forEach((item, index) => {
+    objects.push(workGraphObject("feedback", `feedback-${index}`, objectString(item, "rating", `Feedback ${index + 1}`), objectString(item, "note", ""), item, objectString(item, "createdAt", updatedAt)));
+  });
+  workspace.memories.forEach((item, index) => {
+    objects.push(workGraphObject("memory", `memory-${index}`, objectString(item, "title", `Memory ${index + 1}`), objectString(item, "body", ""), item, objectString(item, "createdAt", updatedAt)));
+  });
+  const counts = objects.reduce<Record<string, number>>((acc, object) => {
+    acc[object.type] = (acc[object.type] ?? 0) + 1;
+    return acc;
+  }, {});
+  return { counts, objects };
 }
 
 function pdfArtifactHasEmbeddedImage(fileUrl?: string) {
@@ -5862,13 +5936,15 @@ app.get("/workspace/export", (req, res) => {
 
 app.get("/workgraph-os/workspace", async (_req, res) => {
   const workspace = await readWorkGraphOsWorkspace();
+  const objectIndex = buildWorkGraphOsObjectIndex(workspace);
   res.json({
     storage: {
       mode: "filesystem-json",
       file: workGraphOsDataFile,
       exists: Boolean(workspace)
     },
-    workspace
+    workspace,
+    objectIndex
   });
 });
 
@@ -5879,14 +5955,46 @@ app.put("/workgraph-os/workspace", async (req, res) => {
   });
   if (!parsed.success) return res.status(400).json({ message: "Invalid WorkGraph OS workspace payload" });
   await writeWorkGraphOsWorkspace(parsed.data);
+  const objectIndex = buildWorkGraphOsObjectIndex(parsed.data);
   res.json({
     storage: {
       mode: "filesystem-json",
       file: workGraphOsDataFile,
       exists: true
     },
-    workspace: parsed.data
+    workspace: parsed.data,
+    objectIndex
   });
+});
+
+app.get("/workgraph-os/objects", async (req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  const { counts, objects } = buildWorkGraphOsObjectIndex(workspace);
+  const type = typeof req.query.type === "string" ? req.query.type : "";
+  const query = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+  const filtered = objects.filter((object) => {
+    if (type && object.type !== type) return false;
+    if (!query) return true;
+    return [object.id, object.type, object.title, object.summary].join(" ").toLowerCase().includes(query);
+  });
+  res.json({
+    storage: {
+      mode: "filesystem-json-index",
+      file: workGraphOsDataFile,
+      exists: Boolean(workspace)
+    },
+    counts,
+    objects: filtered
+  });
+});
+
+app.get("/workgraph-os/objects/:type/:id", async (req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  const { objects } = buildWorkGraphOsObjectIndex(workspace);
+  const id = `${req.params.type}:${req.params.id}`;
+  const object = objects.find((item) => item.id === id);
+  if (!object) return res.status(404).json({ message: "WorkGraph OS object not found" });
+  res.json(object);
 });
 
 app.get("/brands", (_req, res) => {

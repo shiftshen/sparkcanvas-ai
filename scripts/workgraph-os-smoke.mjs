@@ -24,6 +24,8 @@ assert(source.includes("type WorkGraphWorkspace"), "workgraph-os should define a
 assert(source.includes("workspaceStorageKey"), "workgraph-os should define workspace persistence");
 assert(source.includes("recordFeedback"), "workgraph-os should record feedback objects");
 assert(source.includes("对象图谱"), "workgraph-os should expose an object graph surface");
+assert(source.includes("WorkGraphObjectIndex"), "workgraph-os should consume the backend object index");
+assert(source.includes("/workgraph-os/objects"), "workgraph-os should request the object index API");
 
 console.log(JSON.stringify({
   ok: true,
@@ -33,6 +35,7 @@ console.log(JSON.stringify({
     "workgraph-os-public-brand-assets",
     "workgraph-os-object-model",
     "workgraph-os-object-persistence-ready",
-    "workgraph-os-feedback-memory-ready"
+    "workgraph-os-feedback-memory-ready",
+    "workgraph-os-backend-object-index-ready"
   ]
 }));

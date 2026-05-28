@@ -462,6 +462,42 @@ dd {
   font-size: 18px;
 }
 
+.pm-object-index {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pm-object-index button {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 2px 8px;
+  padding: 8px;
+  border: 1px solid #1c2534;
+  border-radius: 8px;
+  text-align: left;
+  background: #0b1018;
+}
+
+.pm-object-index button > strong {
+  color: #38bdf8;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.pm-object-index span,
+.pm-object-index small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-object-index small {
+  grid-column: 2;
+  color: #93a4b8;
+}
+
 .pm-evolution > div {
   display: grid;
   gap: 4px;

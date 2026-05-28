@@ -67,7 +67,13 @@ Implemented in `apps/workgraph-os`:
   - `GET /workgraph-os/workspace`
   - `PUT /workgraph-os/workspace`
   - filesystem JSON file controlled by `WORKGRAPH_OS_DATA_FILE`
+- Derives a queryable object index from the filesystem workspace:
+  - `GET /workgraph-os/objects`
+  - `GET /workgraph-os/objects?type=memory`
+  - `GET /workgraph-os/objects/:type/:id`
+  - current index types: Goal, Asset, Brand, Skill, Model, Workflow, Result, Feedback, Memory
 - The UI now prefers backend filesystem JSON storage and falls back to browser-local or memory-only modes when the backend is unavailable.
+- The object graph panel consumes the backend index when available, so counts and recent objects are no longer UI-only state.
 - Shows an object graph counter for Goal, Asset, Brand, Skill, Model, Workflow, Result, Feedback, and Memory objects.
 - Records user feedback on the active node and converts it into Memory Objects for later skill/workflow evolution.
 - Displays task queue and simulated completion.
