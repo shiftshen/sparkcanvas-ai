@@ -238,6 +238,11 @@ type WorkGraphHistoryEntry = {
   objectIds: string[];
 };
 
+type WorkGraphRunResponse = {
+  workspace?: Partial<WorkGraphWorkspace>;
+  objectIndex?: WorkGraphObjectIndex;
+};
+
 type StorageState = "browser-local" | "memory-only";
 type StorageMode = StorageState | "filesystem-json";
 
@@ -781,6 +786,15 @@ async function loadBackendHistory() {
   return data.entries ?? [];
 }
 
+async function runBackendWorkflow(nodeId: string, mode: "workflow" | "node") {
+  const response = await backendRequest("/workgraph-os/run", {
+    method: "POST",
+    body: JSON.stringify({ nodeId, mode })
+  });
+  if (!response.ok) throw new Error("backend workflow run failed");
+  return response.json() as Promise<WorkGraphRunResponse>;
+}
+
 function formatBytes(bytes: number) {
   if (!bytes) return "0 B";
   if (bytes > 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -1260,7 +1274,7 @@ function App() {
     if (lower.includes("视频") || lower.includes("mp4")) applySkill(skills.find((item) => item.id === "story") ?? skills[0]);
   }
 
-  function runWorkflow() {
+  function runLocalWorkflow() {
     const activeSkill = matchingSkill;
     const createdAt = now();
     const job: Job = {
@@ -1312,6 +1326,42 @@ function App() {
         results: current.results.map((item) => item.sourceJobId === job.id ? { ...item, status: "preview", updatedAt: now() } : item)
       }));
     }, 900);
+  }
+
+  function runWorkflow() {
+    if (storageMode === "filesystem-json") {
+      void runBackendWorkflow(activeNode.id, activeNode.type === "goal" ? "workflow" : "node")
+        .then((data) => {
+          if (data.workspace) {
+            const loaded = data.workspace;
+            const goal = loaded.goal ?? interpretGoal(loaded.prompt ?? defaultPrompt, loaded.activeBrandId ?? "dapot");
+            const skills = loaded.skills?.length ? loaded.skills.map(normalizeSkillObject) : skillTemplates;
+            const nodes = loaded.nodes?.length ? loaded.nodes : [];
+            const jobs = loaded.jobs ?? [];
+            const results = loaded.results ?? jobs.map((job) => buildResultObject(job, loaded.workflow?.id ?? "workflow-active"));
+            const feedback = loaded.feedback?.length ? loaded.feedback.map((item) => normalizeFeedbackObject({ ...item, id: item.id })) : [];
+            const memories = loaded.memories?.length ? loaded.memories.map((item) => normalizeMemoryObject({ ...item, id: item.id })) : defaultWorkspace().memories;
+            setWorkspace({
+              ...defaultWorkspace(),
+              ...loaded,
+              version: 1,
+              goal,
+              materials: loaded.materials?.length ? loaded.materials : seedMaterials,
+              skills,
+              nodes,
+              jobs,
+              results,
+              feedback,
+              memories
+            } satisfies WorkGraphWorkspace);
+          }
+          if (data.objectIndex) setObjectIndex(data.objectIndex);
+          void loadBackendHistory().then(setHistoryEntries).catch(() => undefined);
+        })
+        .catch(() => runLocalWorkflow());
+      return;
+    }
+    runLocalWorkflow();
   }
 
   function saveResultAsMaterial(result: ResultObject) {

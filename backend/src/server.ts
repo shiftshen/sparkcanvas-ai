@@ -512,6 +512,21 @@ type WorkGraphOsEdge = {
   payload: unknown;
 };
 
+type WorkGraphOsExecution = {
+  id: string;
+  mode: "workflow" | "node";
+  nodeId: string;
+  nodeTitle: string;
+  workflowId: string;
+  modelId: string;
+  skillId: string;
+  jobId: string;
+  resultId: string;
+  status: "done";
+  executor: "workgraph-os-backend";
+  createdAt: string;
+};
+
 type WorkGraphOsSqliteTable = {
   name: string;
   createSql: string;
@@ -730,6 +745,12 @@ const workGraphOsWorkspaceSchema = z.object({
   feedback: z.array(z.unknown()).default([]),
   memories: z.array(z.unknown()).default([]),
   updatedAt: z.string().default(now)
+});
+
+const workGraphOsRunSchema = z.object({
+  nodeId: z.string().optional(),
+  mode: z.enum(["workflow", "node"]).default("node"),
+  note: z.string().optional()
 });
 
 let db: Db = undefined as unknown as Db;
@@ -2092,6 +2113,135 @@ function objectField(input: unknown, key: string) {
 function objectString(input: unknown, key: string, fallback = "") {
   const value = objectField(input, key);
   return typeof value === "string" ? value : fallback;
+}
+
+function objectStringArray(input: unknown, key: string) {
+  const value = objectField(input, key);
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function workGraphResultKind(output: string) {
+  const normalized = output.toLowerCase();
+  if (normalized.includes("mp4") || normalized.includes("video")) return "video";
+  if (normalized.includes("zip") || normalized.includes("archive")) return "archive";
+  if (normalized.includes("pdf") || normalized.includes("doc")) return "document";
+  return "image";
+}
+
+function workGraphDefaultOutput(workspace: WorkGraphOsWorkspace, node: unknown) {
+  const nodeType = objectString(node, "type", "");
+  if (nodeType === "video") return "MP4";
+  if (nodeType === "file") return "ZIP";
+  const workflowOutput = objectString(workspace.workflow, "outputTarget", "");
+  return workflowOutput ? workflowOutput.toUpperCase() : "PNG";
+}
+
+function workGraphFindSkillForNode(workspace: WorkGraphOsWorkspace, node: unknown) {
+  const nodeTitle = objectString(node, "title", "").toLowerCase();
+  const nodeBody = objectString(node, "body", "").toLowerCase();
+  return workspace.skills.find((skill) => {
+    const id = objectString(skill, "id", "").toLowerCase();
+    const command = objectString(skill, "command", "").replace(/^\//, "").toLowerCase();
+    const title = objectString(skill, "title", "").toLowerCase();
+    return Boolean(id && nodeTitle.includes(id))
+      || Boolean(command && (nodeTitle.includes(command) || nodeBody.includes(command)))
+      || Boolean(title && (nodeTitle.includes(title) || nodeBody.includes(title)));
+  }) ?? workspace.skills[0];
+}
+
+function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.infer<typeof workGraphOsRunSchema>) {
+  const createdAt = now();
+  const node = workspace.nodes.find((item) => objectString(item, "id", "") === input.nodeId)
+    ?? workspace.nodes.find((item) => objectString(item, "type", "") === "output")
+    ?? workspace.nodes[0]
+    ?? { id: "workflow", title: "Workflow", type: "workflow", body: workspace.prompt, status: "ready" };
+  const nodeId = objectString(node, "id", "workflow");
+  const nodeTitle = objectString(node, "title", "Workflow");
+  const workflowId = objectString(workspace.workflow, "id", "workflow-active");
+  const skill = workGraphFindSkillForNode(workspace, node);
+  const skillId = objectString(skill, "id", "skill-auto");
+  const output = workGraphDefaultOutput(workspace, node);
+  const materialIds = objectStringArray(node, "materialIds").length ? objectStringArray(node, "materialIds") : workspace.selectedIds;
+  const jobId = `job-${Date.now().toString(36)}-${nanoid(6)}`;
+  const resultId = `result-${Date.now().toString(36)}-${nanoid(6)}`;
+  const job = {
+    id: jobId,
+    title: input.mode === "workflow" ? "Backend workflow run" : `Run ${nodeTitle}`,
+    status: "done",
+    output,
+    materials: materialIds,
+    nodeId,
+    workflowId,
+    skillId,
+    modelId: workspace.activeModelId,
+    executor: "workgraph-os-backend",
+    note: input.note ?? "",
+    createdAt,
+    completedAt: createdAt
+  };
+  const result = {
+    id: resultId,
+    title: `${nodeTitle} result`,
+    workflowId,
+    nodeId,
+    kind: workGraphResultKind(output),
+    status: "preview",
+    version: workspace.results.filter((item) => objectString(item, "nodeId", "") === nodeId).length + 1,
+    output,
+    previewUrl: workGraphResultKind(output) === "image" ? "/brand-assets/generated/xmanx-product.png" : "",
+    sourceJobId: jobId,
+    materialIds,
+    canSaveAsMaterial: true,
+    executor: "workgraph-os-backend",
+    createdAt,
+    updatedAt: createdAt
+  };
+  const memory = {
+    id: `mem-${Date.now().toString(36)}-${nanoid(6)}`,
+    title: `Executed ${nodeTitle}`,
+    source: "run",
+    sourceType: "workflow",
+    sourceId: workflowId,
+    targetType: "result",
+    targetId: resultId,
+    confidence: 0.6,
+    reusable: false,
+    body: `${job.title} -> ${output} via ${skillId} and ${workspace.activeModelId}`,
+    createdAt
+  };
+  const workflow = workspace.workflow && typeof workspace.workflow === "object"
+    ? {
+        ...(workspace.workflow as Record<string, unknown>),
+        status: "completed",
+        runCount: Number(objectField(workspace.workflow, "runCount") ?? 0) + 1,
+        lastRunAt: createdAt,
+        resultIds: [resultId, ...objectStringArray(workspace.workflow, "resultIds")]
+      }
+    : workspace.workflow;
+  const nextWorkspace: WorkGraphOsWorkspace = {
+    ...workspace,
+    workflow,
+    nodes: workspace.nodes.map((item) => objectString(item, "id", "") === nodeId ? { ...(item as Record<string, unknown>), status: "done" } : item),
+    jobs: [job, ...workspace.jobs],
+    results: [result, ...workspace.results],
+    memories: [memory, ...workspace.memories],
+    updatedAt: createdAt
+  };
+  const execution: WorkGraphOsExecution = {
+    id: `wgos-run-${Date.now().toString(36)}-${nanoid(6)}`,
+    mode: input.mode,
+    nodeId,
+    nodeTitle,
+    workflowId,
+    modelId: workspace.activeModelId,
+    skillId,
+    jobId,
+    resultId,
+    status: "done",
+    executor: "workgraph-os-backend",
+    createdAt
+  };
+  return { execution, workspace: nextWorkspace, job, result, memory };
 }
 
 function workGraphObject(
@@ -6247,6 +6397,26 @@ app.put("/workgraph-os/workspace", async (req, res) => {
       exists: true
     },
     workspace: parsed.data,
+    objectIndex,
+    historyEntry
+  });
+});
+
+app.post("/workgraph-os/run", async (req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  if (!workspace) return res.status(409).json({ message: "WorkGraph OS workspace is empty; save a workspace before running nodes" });
+  const parsed = workGraphOsRunSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ message: "Invalid WorkGraph OS run payload" });
+  const run = buildWorkGraphOsExecution(workspace, parsed.data);
+  await writeWorkGraphOsWorkspace(run.workspace);
+  const objectIndex = buildWorkGraphOsObjectIndex(run.workspace);
+  const historyEntry = await appendWorkGraphOsHistory(run.workspace, "manual");
+  res.json({
+    execution: run.execution,
+    workspace: run.workspace,
+    job: run.job,
+    result: run.result,
+    memory: run.memory,
     objectIndex,
     historyEntry
   });

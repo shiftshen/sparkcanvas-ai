@@ -319,13 +319,19 @@ try {
   assert(memoryObjects.objects.length === 1 && memoryObjects.objects[0].id === "memory:mem-smoke", "WorkGraph OS object index should support type filtering");
   const smokeAssetObject = await request("/workgraph-os/objects/asset/mat-smoke");
   assert(smokeAssetObject.title === "Smoke asset", "WorkGraph OS object detail should return the requested object");
+  const workGraphRun = await request("/workgraph-os/run", { method: "POST", body: JSON.stringify({ nodeId: "node-smoke", mode: "node" }) });
+  assert(workGraphRun.execution?.executor === "workgraph-os-backend", "WorkGraph OS should run nodes through the backend executor");
+  assert(workGraphRun.workspace?.jobs?.[0]?.executor === "workgraph-os-backend", "WorkGraph OS backend executor should persist job objects");
+  assert(workGraphRun.workspace?.results?.[0]?.sourceJobId === workGraphRun.execution?.jobId, "WorkGraph OS backend executor should persist linked result objects");
+  assert(workGraphRun.workspace?.memories?.[0]?.sourceId === "workflow-smoke", "WorkGraph OS backend executor should persist run memory objects");
+  assert(workGraphRun.objectIndex?.counts?.result === 2, "WorkGraph OS backend executor should update the result object index");
   const workGraphHistory = await request("/workgraph-os/history");
-  assert(workGraphHistory.entries?.length === 1, "WorkGraph OS history should include the saved workspace snapshot");
-  assert(workGraphHistory.entries[0].counts?.asset === 1, "WorkGraph OS history should retain object counts");
+  assert(workGraphHistory.entries?.length === 2, "WorkGraph OS history should include save and run snapshots");
+  assert(workGraphHistory.entries[0].counts?.result === 2, "WorkGraph OS run history should retain updated result counts");
   const workGraphHistoryByType = await request("/workgraph-os/history?type=memory");
-  assert(workGraphHistoryByType.entries?.length === 1, "WorkGraph OS history should support type filtering");
+  assert(workGraphHistoryByType.entries?.length === 2, "WorkGraph OS history should support type filtering");
   const workGraphHistoryDetail = await request(`/workgraph-os/history/${workGraphHistory.entries[0].id}`);
-  assert(workGraphHistoryDetail.objects?.some((item) => item.id === "memory:mem-smoke"), "WorkGraph OS history detail should retain indexed objects");
+  assert(workGraphHistoryDetail.objects?.some((item) => item.id === `result:${workGraphRun.execution.resultId}`), "WorkGraph OS history detail should retain backend executor result objects");
   const workGraphSqliteSchema = await request("/workgraph-os/sqlite/schema");
   assert(workGraphSqliteSchema.ready === true && workGraphSqliteSchema.dialect === "sqlite", "WorkGraph OS SQLite schema should report export readiness");
   assert(workGraphSqliteSchema.tables.includes("wgos_objects") && workGraphSqliteSchema.tables.includes("wgos_edges") && workGraphSqliteSchema.tables.includes("wgos_history"), "WorkGraph OS SQLite schema should expose object, edge and history tables");
@@ -341,11 +347,13 @@ try {
   assert(sqliteObjects?.rows?.some((row) => row.id === "result:result-smoke" && String(row.payload_json).includes("canSaveAsMaterial")), "WorkGraph OS SQLite export should include structured result payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "feedback:fb-smoke" && String(row.payload_json).includes("memoryId")), "WorkGraph OS SQLite export should include linked feedback payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "memory:mem-smoke" && String(row.payload_json).includes("sourceType")), "WorkGraph OS SQLite export should include structured memory payload rows");
+  assert(sqliteObjects?.rows?.some((row) => row.id === `result:${workGraphRun.execution.resultId}` && String(row.payload_json).includes("workgraph-os-backend")), "WorkGraph OS SQLite export should include backend executor result rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "node:node-smoke"), "WorkGraph OS SQLite export should include persisted node rows");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:workflow-smoke" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include workflow-to-asset graph edges");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "node:node-smoke" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include node-to-asset graph edges");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "feedback:fb-smoke" && row.to_object_id === "result:result-smoke" && row.relation === "comments_on"), "WorkGraph OS SQLite export should include feedback-to-result graph edges");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "memory:mem-smoke" && row.to_object_id === "feedback:fb-smoke" && row.relation === "remembers"), "WorkGraph OS SQLite export should include memory-to-feedback graph edges");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:workflow-smoke" && row.to_object_id === `result:${workGraphRun.execution.resultId}` && row.relation === "produces_result"), "WorkGraph OS SQLite export should include backend executor workflow-to-result edges");
   assert(sqliteHistory?.rows?.some((row) => row.id === workGraphHistory.entries[0].id), "WorkGraph OS SQLite export should include history rows");
 
   const initial = await request("/workspace");

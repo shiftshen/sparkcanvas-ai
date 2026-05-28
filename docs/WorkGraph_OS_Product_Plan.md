@@ -74,6 +74,10 @@ Implemented in `apps/workgraph-os`:
   - `GET /workgraph-os/workspace`
   - `PUT /workgraph-os/workspace`
   - filesystem JSON file controlled by `WORKGRAPH_OS_DATA_FILE`
+- Runs nodes through a backend Workflow Runner / Node Executor foundation:
+  - `POST /workgraph-os/run`
+  - persists Job, Result, and Memory Objects with `executor: workgraph-os-backend`
+  - returns an updated object index and history snapshot after execution
 - Derives a queryable object index from the filesystem workspace:
   - `GET /workgraph-os/objects`
   - `GET /workgraph-os/objects?type=memory`
