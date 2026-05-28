@@ -1,0 +1,102 @@
+# WorkGraph OS Product Plan
+
+Internal codename: WGOS.
+
+Chinese name: 工作图谱操作系统.
+
+## Goal
+
+Build a local-first visual AI work operating system on top of the pi-web operating model.
+
+The target user problem is that pi + skills can execute one-sentence tasks, but the browser chat surface is weak for file-heavy creative work:
+
+- Image/file parameters are not ergonomic.
+- Uploaded materials are hard to preview.
+- Outputs are hard to inspect, reuse, compare, and save back as materials.
+- Multi-step material, skill, model, brand, result, and composition workflows need a visible canvas.
+
+The long-term target is not merely "canvas image/video generation". It is a visual agent work OS where files, skills, workflows, models, brand memory, outputs, and revisions are all editable nodes.
+
+## Product Shape
+
+WorkGraph OS is the first local WGOS app under `apps/workgraph-os`.
+
+It should not replace the existing marketing site. It is a new local product surface that can later connect to `pi.dev` / `@agegr/pi-web` sessions.
+
+Core surfaces:
+
+- Material library: local image/video/audio/document registry.
+- Material preview: inspect image files before sending them into a skill.
+- Tokenized parameters: every material gets a stable variable such as `$xmanx.logo` or `$local.product-shot`.
+- Skill workflow canvas: one sentence becomes input material nodes, skill node, composition node, and output node.
+- Brand canvas: brand memory and rules are visible and selectable.
+- Model canvas: image/video/text/local model options are visible and replaceable.
+- Goal canvas: one sentence is represented as an editable goal node.
+- Result canvas: output nodes remain visible and can become new materials.
+- Job queue: records skill/composition/archive tasks and status.
+- Pi bridge: future bridge to send prompt + file references into pi-web/pi agent.
+
+## Current Implementation
+
+Implemented in `apps/workgraph-os`:
+
+- Vite React app on port `3200`.
+- Uses existing `@sparkcanvas/ai-design-language` CAL parser.
+- Uploads local files through browser file input.
+- Generates object URL previews for local image/video/audio files.
+- Maintains material tokens and selected material parameters.
+- Provides brand memory nodes for DAPOT and XMANX.
+- Provides model nodes for cloud image, @imgen, video, and local model candidates.
+- Provides skill templates:
+  - poster generation
+  - material composition
+  - image-to-video planning
+  - material kit archive
+- Supports one-sentence skill search.
+- Supports no-match skill creation from the search phrase.
+- Builds a visible workflow graph from CAL prompt resources, brand memory, model, skill, output, and review nodes.
+- Supports active node editing and natural-language modification routing.
+- Displays task queue and simulated completion.
+
+## pi-web Findings
+
+`@agegr/pi-web@latest` is currently `0.6.12`.
+
+It is not a project scaffold. Running:
+
+```bash
+npx @agegr/pi-web@latest
+```
+
+starts a prebuilt Next.js app on port `30141`.
+
+Relevant package facts:
+
+- CLI bin: `pi-web`
+- Next app APIs include:
+  - `/api/sessions`
+  - `/api/agent`
+  - `/api/files`
+  - `/api/skills`
+  - `/api/models`
+- Default session directory is `~/.pi/agent/sessions`.
+- `PI_CODING_AGENT_DIR` can point to another pi agent data directory.
+
+## Next Integration Steps
+
+1. Add a local bridge service or Next/Vite proxy that can talk to pi-web/pi agent APIs.
+2. Persist material metadata to local disk instead of browser memory.
+3. Convert uploaded files into real pi-readable paths and include them in prompts.
+4. Add output watcher for generated files in the active working directory.
+5. Replace simulated job completion with real pi session events.
+6. Add side-by-side file preview for generated output variants.
+7. Add visual skill editor that can save a generated skill to disk as `SKILL.md` + scripts.
+8. Add automatic skill improvement: successful runs become templates; failed runs become repair tasks.
+9. Add model capability probing and per-node fallback policy.
+10. Add version history for material, skill, workflow, and result nodes.
+
+## Non-goals For This Slice
+
+- Do not change production `marketing.xmanx.com`.
+- Do not hardcode API keys.
+- Do not claim pi execution is complete until a real pi session receives file references and returns outputs.
