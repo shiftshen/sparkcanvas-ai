@@ -498,6 +498,49 @@ dd {
   color: #93a4b8;
 }
 
+.pm-history-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #1d2432;
+}
+
+.pm-history-list > strong {
+  font-size: 13px;
+}
+
+.pm-history-list button {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 2px 8px;
+  padding: 8px;
+  border: 1px solid #1c2534;
+  border-radius: 8px;
+  text-align: left;
+  background: #080c13;
+}
+
+.pm-history-list span {
+  color: #f8fafc;
+  font-size: 12px;
+}
+
+.pm-history-list small,
+.pm-history-list em {
+  min-width: 0;
+  overflow: hidden;
+  color: #93a4b8;
+  font-size: 12px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-history-list em {
+  grid-column: 2;
+}
+
 .pm-evolution > div {
   display: grid;
   gap: 4px;

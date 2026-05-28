@@ -138,6 +138,15 @@ type WorkGraphObjectIndex = {
   objects: WorkGraphObject[];
 };
 
+type WorkGraphHistoryEntry = {
+  id: string;
+  createdAt: string;
+  reason: "workspace-save" | "manual";
+  prompt: string;
+  counts: Record<string, number>;
+  objectIds: string[];
+};
+
 type StorageState = "browser-local" | "memory-only";
 type StorageMode = StorageState | "filesystem-json";
 
@@ -376,6 +385,13 @@ async function saveBackendWorkspace(workspace: WorkGraphWorkspace) {
   if (!response.ok) throw new Error("backend workspace save failed");
 }
 
+async function loadBackendHistory() {
+  const response = await backendRequest("/workgraph-os/history?limit=5");
+  if (!response.ok) throw new Error("backend history unavailable");
+  const data = await response.json() as { entries?: WorkGraphHistoryEntry[] };
+  return data.entries ?? [];
+}
+
 function formatBytes(bytes: number) {
   if (!bytes) return "0 B";
   if (bytes > 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -512,6 +528,7 @@ function App() {
   const [storageMode, setStorageMode] = useState<StorageMode>(detectStorageState);
   const [backendLoaded, setBackendLoaded] = useState(false);
   const [objectIndex, setObjectIndex] = useState<WorkGraphObjectIndex | null>(null);
+  const [historyEntries, setHistoryEntries] = useState<WorkGraphHistoryEntry[]>([]);
   const [skillSearch, setSkillSearch] = useState("");
   const [newSkillName, setNewSkillName] = useState("");
   const [newSkillCommand, setNewSkillCommand] = useState("");
@@ -564,6 +581,7 @@ function App() {
           setWorkspace(loaded.workspace);
           if (loaded.objectIndex) setObjectIndex(loaded.objectIndex);
         }
+        void loadBackendHistory().then(setHistoryEntries).catch(() => undefined);
         setStorageMode("filesystem-json");
       })
       .catch(() => {
@@ -586,7 +604,9 @@ function App() {
       .then((response) => response.ok ? response.json() : null)
       .then((data: WorkGraphObjectIndex | null) => {
         if (data?.objects) setObjectIndex(data);
+        return loadBackendHistory();
       })
+      .then(setHistoryEntries)
       .catch(() => setStorageMode(detectStorageState()));
   }, [backendLoaded, storageMode, workspace]);
 
@@ -850,6 +870,17 @@ function App() {
               </button>
             ))}
             {!indexedObjects.length ? <p className="pm-muted">后端对象索引会在连接 filesystem JSON 后显示。</p> : null}
+          </div>
+          <div className="pm-history-list">
+            <strong>版本历史</strong>
+            {historyEntries.slice(0, 4).map((entry) => (
+              <button key={entry.id} type="button">
+                <span>{new Date(entry.createdAt).toLocaleTimeString()}</span>
+                <small>{entry.reason} · {entry.objectIds.length} objects</small>
+                <em>{entry.prompt || "No prompt"}</em>
+              </button>
+            ))}
+            {!historyEntries.length ? <p className="pm-muted">保存到后端后会记录对象索引快照。</p> : null}
           </div>
         </section>
 

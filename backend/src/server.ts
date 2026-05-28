@@ -489,6 +489,16 @@ type WorkGraphOsObject = {
   payload: unknown;
 };
 
+type WorkGraphOsHistoryEntry = {
+  id: string;
+  createdAt: string;
+  reason: "workspace-save" | "manual";
+  prompt: string;
+  counts: Record<string, number>;
+  objectIds: string[];
+  objects: WorkGraphOsObject[];
+};
+
 declare global {
   namespace Express {
     interface Request {
@@ -503,6 +513,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(__dirname, "../data");
 const dataFile = process.env.SPARKCANVAS_DATA_FILE ?? path.join(dataDir, "sparkcanvas.json");
 const workGraphOsDataFile = process.env.WORKGRAPH_OS_DATA_FILE ?? path.join(dataDir, "workgraph-os.json");
+const workGraphOsHistoryFile = process.env.WORKGRAPH_OS_HISTORY_FILE ?? path.join(dataDir, "workgraph-os-history.json");
 const projectRoot = path.resolve(__dirname, "../..");
 const frontendPublicDir = path.join(projectRoot, "frontend", "public");
 const generatedDir = process.env.SPARKCANVAS_GENERATED_DIR ?? path.join(frontendPublicDir, "generated");
@@ -2025,6 +2036,24 @@ async function writeWorkGraphOsWorkspace(workspace: WorkGraphOsWorkspace) {
   renameSync(tmpFile, workGraphOsDataFile);
 }
 
+async function readWorkGraphOsHistory() {
+  try {
+    const entries = JSON.parse(await readFile(workGraphOsHistoryFile, "utf8")) as WorkGraphOsHistoryEntry[];
+    return Array.isArray(entries) ? entries : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeWorkGraphOsHistory(entries: WorkGraphOsHistoryEntry[]) {
+  await mkdir(path.dirname(workGraphOsHistoryFile), { recursive: true });
+  const payload = JSON.stringify(entries.slice(0, 100), null, 2);
+  const tmpFile = `${workGraphOsHistoryFile}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tmpFile, payload);
+  if (existsSync(workGraphOsHistoryFile)) renameSync(workGraphOsHistoryFile, `${workGraphOsHistoryFile}.bak`);
+  renameSync(tmpFile, workGraphOsHistoryFile);
+}
+
 function objectField(input: unknown, key: string) {
   if (!input || typeof input !== "object") return undefined;
   return (input as Record<string, unknown>)[key];
@@ -2085,6 +2114,23 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
     return acc;
   }, {});
   return { counts, objects };
+}
+
+async function appendWorkGraphOsHistory(workspace: WorkGraphOsWorkspace, reason: WorkGraphOsHistoryEntry["reason"] = "workspace-save") {
+  const { counts, objects } = buildWorkGraphOsObjectIndex(workspace);
+  const createdAt = now();
+  const entry: WorkGraphOsHistoryEntry = {
+    id: `wgos-history-${Date.now().toString(36)}-${nanoid(6)}`,
+    createdAt,
+    reason,
+    prompt: workspace.prompt,
+    counts,
+    objectIds: objects.map((object) => object.id),
+    objects
+  };
+  const history = await readWorkGraphOsHistory();
+  await writeWorkGraphOsHistory([entry, ...history]);
+  return entry;
 }
 
 function pdfArtifactHasEmbeddedImage(fileUrl?: string) {
@@ -5956,6 +6002,7 @@ app.put("/workgraph-os/workspace", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ message: "Invalid WorkGraph OS workspace payload" });
   await writeWorkGraphOsWorkspace(parsed.data);
   const objectIndex = buildWorkGraphOsObjectIndex(parsed.data);
+  const historyEntry = await appendWorkGraphOsHistory(parsed.data);
   res.json({
     storage: {
       mode: "filesystem-json",
@@ -5963,7 +6010,8 @@ app.put("/workgraph-os/workspace", async (req, res) => {
       exists: true
     },
     workspace: parsed.data,
-    objectIndex
+    objectIndex,
+    historyEntry
   });
 });
 
@@ -5995,6 +6043,38 @@ app.get("/workgraph-os/objects/:type/:id", async (req, res) => {
   const object = objects.find((item) => item.id === id);
   if (!object) return res.status(404).json({ message: "WorkGraph OS object not found" });
   res.json(object);
+});
+
+app.get("/workgraph-os/history", async (req, res) => {
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit ?? 20) || 20));
+  const type = typeof req.query.type === "string" ? req.query.type : "";
+  const history = await readWorkGraphOsHistory();
+  const entries = history
+    .filter((entry) => !type || entry.counts[type] || entry.objects.some((object) => object.type === type))
+    .slice(0, limit)
+    .map((entry) => ({
+      id: entry.id,
+      createdAt: entry.createdAt,
+      reason: entry.reason,
+      prompt: entry.prompt,
+      counts: entry.counts,
+      objectIds: entry.objectIds
+    }));
+  res.json({
+    storage: {
+      mode: "filesystem-json-history",
+      file: workGraphOsHistoryFile,
+      exists: history.length > 0
+    },
+    entries
+  });
+});
+
+app.get("/workgraph-os/history/:id", async (req, res) => {
+  const history = await readWorkGraphOsHistory();
+  const entry = history.find((item) => item.id === req.params.id);
+  if (!entry) return res.status(404).json({ message: "WorkGraph OS history entry not found" });
+  res.json(entry);
 });
 
 app.get("/brands", (_req, res) => {

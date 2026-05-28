@@ -9,6 +9,7 @@ const baseUrl = `http://localhost:${port}`;
 const tempDir = await mkdtemp(path.join(tmpdir(), "sparkcanvas-smoke-"));
 const dataFile = path.join(tempDir, "sparkcanvas.json");
 const workGraphOsDataFile = path.join(tempDir, "workgraph-os.json");
+const workGraphOsHistoryFile = path.join(tempDir, "workgraph-os-history.json");
 const generatedDir = path.join(tempDir, "generated");
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 let token = "";
@@ -21,6 +22,7 @@ const server = spawn("node", ["dist/server.js"], {
     PORT: String(port),
     SPARKCANVAS_DATA_FILE: dataFile,
     WORKGRAPH_OS_DATA_FILE: workGraphOsDataFile,
+    WORKGRAPH_OS_HISTORY_FILE: workGraphOsHistoryFile,
     SPARKCANVAS_GENERATED_DIR: generatedDir,
     SPARKCANVAS_DISABLE_IMAGE_GEN: "1",
     SPARKCANVAS_PUBLIC_BASE_URL: "http://127.0.0.1:1234"
@@ -204,6 +206,7 @@ try {
   assert(savedWorkGraph.workspace?.prompt === workGraphPayload.prompt, "WorkGraph OS workspace should persist the prompt");
   assert(savedWorkGraph.workspace?.feedback?.length === 1, "WorkGraph OS workspace should persist feedback objects");
   assert(savedWorkGraph.objectIndex?.counts?.asset === 1, "WorkGraph OS workspace save should return an asset object index");
+  assert(savedWorkGraph.historyEntry?.objectIds?.includes("asset:mat-smoke"), "WorkGraph OS workspace save should record a history snapshot");
   const reloadedWorkGraph = await request("/workgraph-os/workspace");
   assert(reloadedWorkGraph.workspace?.materials?.[0]?.id === "mat-smoke", "WorkGraph OS workspace should reload from filesystem JSON");
   assert(reloadedWorkGraph.workspace?.memories?.[0]?.id === "mem-smoke", "WorkGraph OS workspace should reload memory objects");
@@ -216,6 +219,13 @@ try {
   assert(memoryObjects.objects.length === 1 && memoryObjects.objects[0].id === "memory:mem-smoke", "WorkGraph OS object index should support type filtering");
   const smokeAssetObject = await request("/workgraph-os/objects/asset/mat-smoke");
   assert(smokeAssetObject.title === "Smoke asset", "WorkGraph OS object detail should return the requested object");
+  const workGraphHistory = await request("/workgraph-os/history");
+  assert(workGraphHistory.entries?.length === 1, "WorkGraph OS history should include the saved workspace snapshot");
+  assert(workGraphHistory.entries[0].counts?.asset === 1, "WorkGraph OS history should retain object counts");
+  const workGraphHistoryByType = await request("/workgraph-os/history?type=memory");
+  assert(workGraphHistoryByType.entries?.length === 1, "WorkGraph OS history should support type filtering");
+  const workGraphHistoryDetail = await request(`/workgraph-os/history/${workGraphHistory.entries[0].id}`);
+  assert(workGraphHistoryDetail.objects?.some((item) => item.id === "memory:mem-smoke"), "WorkGraph OS history detail should retain indexed objects");
 
   const initial = await request("/workspace");
   assert(initial.brands.some((brand) => brand.id === "brand_xmanx" && brand.active), "XMANX should be the active default brand");
