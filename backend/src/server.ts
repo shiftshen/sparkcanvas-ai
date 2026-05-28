@@ -766,6 +766,13 @@ const workGraphOsRunSchema = z.object({
   note: z.string().optional()
 });
 
+const workGraphOsPlanSchema = z.object({
+  prompt: z.string().optional(),
+  brandId: z.string().optional(),
+  activeModelId: z.string().optional(),
+  selectedIds: z.array(z.string()).optional()
+});
+
 const workGraphOsSkillInputSchema = z.object({
   title: z.string().min(1),
   command: z.string().min(1),
@@ -2255,6 +2262,245 @@ function buildWorkGraphModelRoutingDecision(workspace: WorkGraphOsWorkspace, nod
       ? `active model ${workspace.activeModelId} matches ${nodeType}/${requiredCapability}`
       : `selected ${selected.id} for ${nodeType}/${requiredCapability}; active ${workspace.activeModelId} did not fully match capability, status, or node affinity`,
     createdAt
+  };
+}
+
+function workGraphOutputForPrompt(prompt: string) {
+  if (/视频|video|mp4|短片|reel/i.test(prompt)) return "MP4";
+  if (/pdf|文档|deck|slides|ppt/i.test(prompt)) return "PDF";
+  if (/zip|archive|打包/i.test(prompt)) return "ZIP";
+  return "PNG";
+}
+
+function workGraphPromptTokens(prompt: string) {
+  return prompt
+    .toLowerCase()
+    .split(/[^a-z0-9\u4e00-\u9fa5]+/i)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 1);
+}
+
+function workGraphSkillScore(skill: unknown, prompt: string) {
+  const haystack = [
+    objectString(skill, "title", ""),
+    objectString(skill, "command", ""),
+    objectString(skill, "description", ""),
+    objectString(skill, "capabilityType", ""),
+    objectStringArray(skill, "keywords").join(" ")
+  ].join(" ").toLowerCase();
+  return workGraphPromptTokens(prompt).reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0);
+}
+
+function workGraphPlannerNode(input: {
+  id: string;
+  title: string;
+  type: string;
+  body: string;
+  x: number;
+  y: number;
+  materialIds?: string[];
+  status?: string;
+}) {
+  return {
+    id: input.id,
+    title: input.title,
+    type: input.type,
+    body: input.body,
+    x: input.x,
+    y: input.y,
+    materialIds: input.materialIds ?? [],
+    status: input.status ?? "ready"
+  };
+}
+
+function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<typeof workGraphOsPlanSchema>) {
+  const createdAt = now();
+  const prompt = (input.prompt ?? workspace.prompt).trim() || workspace.prompt || "Generate a reusable brand workflow";
+  const activeBrandId = input.brandId ?? workspace.activeBrandId;
+  const activeModelId = input.activeModelId ?? workspace.activeModelId;
+  const selectedBrand = findBrand(activeBrandId);
+  const brandPayload = workGraphBrandPayload(selectedBrand, activeBrandId);
+  const brandAssetIds = db.assets
+    .filter((asset) => asset.brandId === brandPayload.id && !asset.type.startsWith("generated_"))
+    .slice(0, 6)
+    .map((asset) => asset.id);
+  const selectedIds = input.selectedIds?.length
+    ? input.selectedIds
+    : workspace.selectedIds.length
+      ? workspace.selectedIds
+      : brandAssetIds;
+  const output = workGraphOutputForPrompt(prompt);
+  const skillCatalog = workGraphSkillCatalog(workspace);
+  const matchedSkill = skillCatalog
+    .map((skill) => ({ skill, score: workGraphSkillScore(skill, prompt) }))
+    .sort((left, right) => right.score - left.score)[0];
+  const usableSkill = matchedSkill && matchedSkill.score > 0 ? matchedSkill.skill : skillCatalog[0];
+  const skillId = usableSkill ? objectString(usableSkill, "id", "") : "";
+  const skillCommand = usableSkill ? objectString(usableSkill, "command", "") : "";
+  const skillTitle = usableSkill ? objectString(usableSkill, "title", "Reusable Skill") : "Create reusable skill";
+  const plannerWorkspace: WorkGraphOsWorkspace = { ...workspace, prompt, activeBrandId: brandPayload.id, activeModelId, selectedIds };
+  const outputType = workGraphResultKind(output) === "video" ? "video" : workGraphResultKind(output) === "document" || workGraphResultKind(output) === "archive" ? "file" : "output";
+  const outputNode = workGraphPlannerNode({
+    id: "output",
+    title: `Result Preview · ${output}`,
+    type: outputType,
+    body: `生成 ${output}，保留 Result Object、预览地址、版本和可回写素材库状态。`,
+    x: 1010,
+    y: 198,
+    materialIds: selectedIds
+  });
+  const routingDecision = buildWorkGraphModelRoutingDecision(plannerWorkspace, outputNode, output);
+  const nodes = [
+    workGraphPlannerNode({
+      id: "goal",
+      title: "Goal Object",
+      type: "goal",
+      body: prompt,
+      x: 70,
+      y: 72
+    }),
+    workGraphPlannerNode({
+      id: "brand-context",
+      title: `Brand Context · ${brandPayload.name}`,
+      type: "brand",
+      body: `${brandPayload.positioning}\n${brandPayload.rules.slice(0, 3).join("\n")}`.trim(),
+      x: 355,
+      y: 52
+    }),
+    workGraphPlannerNode({
+      id: "asset-retriever",
+      title: "Asset Retriever",
+      type: "material",
+      body: selectedIds.length
+        ? `读取 ${selectedIds.length} 个 Asset Object：${selectedIds.slice(0, 4).join(", ")}`
+        : "未选择素材；运行前需要上传或从品牌库选择 Asset Object。",
+      x: 88,
+      y: 252,
+      materialIds: selectedIds,
+      status: selectedIds.length ? "ready" : "queued"
+    }),
+    workGraphPlannerNode({
+      id: "skill-search",
+      title: "Skill Search",
+      type: "skill",
+      body: usableSkill
+        ? `匹配 ${skillTitle} ${skillCommand}，优先复用已有 SKILL.md 能力。`
+        : "没有可复用 Skill；进入 Skill Creator 生成候选技能。",
+      x: 410,
+      y: 210,
+      status: usableSkill ? "ready" : "queued"
+    }),
+    workGraphPlannerNode({
+      id: "skill-create",
+      title: "Skill Creator",
+      type: "skill",
+      body: usableSkill
+        ? "已有 Skill 可覆盖当前目标；如失败再沉淀新的 SKILL.md、测试样例和回退模型。"
+        : `为目标创建 Skill：输入品牌上下文、Asset Object、输出 ${output}。`,
+      x: 410,
+      y: 380,
+      status: usableSkill ? "done" : "queued"
+    }),
+    workGraphPlannerNode({
+      id: "model-router",
+      title: `Model Router · ${routingDecision.selectedModelId}`,
+      type: "model",
+      body: routingDecision.reason,
+      x: 690,
+      y: 72
+    }),
+    workGraphPlannerNode({
+      id: "workflow-runner",
+      title: "Workflow Runner",
+      type: outputType === "video" ? "video" : "compose",
+      body: `执行 ${skillCommand || "候选 skill"}，通过 ${routingDecision.route} 生成 ${output}。`,
+      x: 690,
+      y: 270,
+      materialIds: selectedIds
+    }),
+    outputNode,
+    workGraphPlannerNode({
+      id: "review-memory",
+      title: "Feedback Memory",
+      type: "review",
+      body: "记录接受/修改原因，生成 Feedback Object 与 Memory Object，反哺下一次规划。",
+      x: 1010,
+      y: 392
+    })
+  ];
+  const goal = {
+    ...workGraphGoalPayload(plannerWorkspace),
+    rawInput: prompt,
+    normalizedIntent: prompt,
+    brandId: brandPayload.id,
+    activeBrandId: brandPayload.id,
+    activeModelId,
+    outputTarget: output.toLowerCase(),
+    successCriteria: [
+      "workflow graph is persisted as Node Objects",
+      "brand and asset references are explicit",
+      "model routing decision is auditable",
+      "result can be reviewed and saved as reusable material"
+    ]
+  };
+  const workflow = {
+    ...workGraphWorkflowPayload(plannerWorkspace),
+    id: objectString(workspace.workflow, "id", "workflow-active"),
+    title: "Planned WorkGraph workflow",
+    goalId: objectString(goal, "id", "active"),
+    status: "ready",
+    prompt,
+    nodeIds: nodes.map((node) => node.id),
+    edgeIds: nodes.slice(1).map((node, index) => `${nodes[index].id}->${node.id}`),
+    selectedMaterialIds: selectedIds,
+    skillIds: skillId ? [skillId] : [],
+    modelIds: [routingDecision.selectedModelId],
+    outputTarget: output,
+    runCount: objectField(workspace.workflow, "runCount") ?? workspace.jobs.length,
+    updatedAt: createdAt
+  };
+  const memory = {
+    id: `mem-plan-${Date.now().toString(36)}-${nanoid(6)}`,
+    title: "Planned workflow graph",
+    source: "planner",
+    sourceType: "workflow",
+    sourceId: objectString(workflow, "id", "workflow-active"),
+    targetType: "workflow",
+    targetId: objectString(workflow, "id", "workflow-active"),
+    confidence: 0.72,
+    reusable: true,
+    body: `Planned ${nodes.length} nodes for ${output} via ${routingDecision.selectedModelId}.`,
+    createdAt
+  };
+  const nextWorkspace: WorkGraphOsWorkspace = {
+    ...workspace,
+    prompt,
+    activeBrandId: brandPayload.id,
+    activeModelId,
+    selectedIds,
+    activeMaterialId: workspace.activeMaterialId || selectedIds[0] || "",
+    goal,
+    workflow,
+    nodes,
+    memories: [memory, ...workspace.memories],
+    updatedAt: createdAt
+  };
+  return {
+    plan: {
+      id: `plan-${Date.now().toString(36)}-${nanoid(6)}`,
+      source: "workgraph-workflow-planner",
+      prompt,
+      brandId: brandPayload.id,
+      output,
+      nodeIds: nodes.map((node) => node.id),
+      selectedMaterialIds: selectedIds,
+      skillId,
+      routingDecision,
+      createdAt
+    },
+    workspace: nextWorkspace,
+    routingDecision,
+    memory
   };
 }
 
@@ -6695,6 +6941,26 @@ app.post("/workgraph-os/skills", async (req, res) => {
     source: "workgraph-skill-store",
     skill,
     workspace: nextWorkspace,
+    objectIndex,
+    historyEntry
+  });
+});
+
+app.post("/workgraph-os/plan", async (req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  if (!workspace) return res.status(409).json({ message: "WorkGraph OS workspace is empty; save a workspace before planning workflows" });
+  const parsed = workGraphOsPlanSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ message: "Invalid WorkGraph OS planner payload" });
+  const planned = buildWorkGraphOsPlan(workspace, parsed.data);
+  await writeWorkGraphOsWorkspace(planned.workspace);
+  const objectIndex = buildWorkGraphOsObjectIndex(planned.workspace);
+  const historyEntry = await appendWorkGraphOsHistory(planned.workspace, "manual");
+  res.json({
+    source: "workgraph-workflow-planner",
+    plan: planned.plan,
+    workspace: planned.workspace,
+    routingDecision: planned.routingDecision,
+    memory: planned.memory,
     objectIndex,
     historyEntry
   });

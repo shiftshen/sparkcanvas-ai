@@ -261,6 +261,16 @@ type WorkGraphSkillResponse = {
   objectIndex?: WorkGraphObjectIndex;
 };
 
+type WorkGraphPlanResponse = WorkGraphRunResponse & {
+  source?: "workgraph-workflow-planner";
+  plan?: {
+    id: string;
+    output: string;
+    nodeIds: string[];
+    selectedMaterialIds: string[];
+  };
+};
+
 type StorageState = "browser-local" | "memory-only";
 type StorageMode = StorageState | "filesystem-json";
 
@@ -798,6 +808,20 @@ async function runBackendWorkflow(nodeId: string, mode: "workflow" | "node") {
   });
   if (!response.ok) throw new Error("backend workflow run failed");
   return response.json() as Promise<WorkGraphRunResponse>;
+}
+
+async function planBackendWorkflow(workspace: WorkGraphWorkspace) {
+  const response = await backendRequest("/workgraph-os/plan", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: workspace.prompt,
+      brandId: workspace.activeBrandId,
+      activeModelId: workspace.activeModelId,
+      selectedIds: workspace.selectedIds
+    })
+  });
+  if (!response.ok) throw new Error("backend workflow planner failed");
+  return response.json() as Promise<WorkGraphPlanResponse>;
 }
 
 async function createBackendSkill(input: Pick<SkillTemplate, "title" | "command" | "output" | "description" | "keywords" | "capabilityType" | "runtime" | "skillMdPath">) {
@@ -1441,6 +1465,25 @@ function App() {
     runLocalWorkflow();
   }
 
+  function planWorkflow() {
+    if (storageMode === "filesystem-json") {
+      void planBackendWorkflow(workspace)
+        .then((data) => {
+          if (data.workspace) setWorkspace(normalizeWorkspacePayload(data.workspace));
+          if (data.objectIndex) setObjectIndex(data.objectIndex);
+          if (data.routingDecision) setLastRoutingDecision(data.routingDecision);
+          void loadBackendHistory().then(setHistoryEntries).catch(() => undefined);
+        })
+        .catch(() => {
+          const plannedNodes = buildNodes(prompt, materials, skills, activeBrand, activeModel);
+          updateWorkspace((current) => ({ ...current, nodes: plannedNodes }));
+        });
+      return;
+    }
+    const plannedNodes = buildNodes(prompt, materials, skills, activeBrand, activeModel);
+    updateWorkspace((current) => ({ ...current, nodes: plannedNodes }));
+  }
+
   function saveResultAsMaterial(result: ResultObject) {
     if (!result.canSaveAsMaterial) return;
     const materialId = result.savedMaterialId ?? `mat-result-${Date.now().toString(36)}`;
@@ -1784,6 +1827,7 @@ function App() {
         <textarea value={prompt} onChange={(event) => updateWorkspace((current) => ({ ...current, prompt: event.target.value }))} />
         <div className="pm-composer-side">
           <span>{ast.warnings.length ? ast.warnings.join(" / ") : `匹配 ${matchingSkill.title}`}</span>
+          <button type="button" onClick={planWorkflow}><Wand2 /> 规划</button>
           <button type="button" onClick={runWorkflow}><Play /> 运行</button>
           <button type="button"><Send /> 发送到 pi</button>
         </div>

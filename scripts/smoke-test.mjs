@@ -387,6 +387,19 @@ try {
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "memory:mem-smoke" && row.to_object_id === "feedback:fb-smoke" && row.relation === "remembers"), "WorkGraph OS SQLite export should include memory-to-feedback graph edges");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:workflow-smoke" && row.to_object_id === `result:${workGraphRun.execution.resultId}` && row.relation === "produces_result"), "WorkGraph OS SQLite export should include backend executor workflow-to-result edges");
   assert(sqliteHistory?.rows?.some((row) => row.id === workGraphHistory.entries[0].id), "WorkGraph OS SQLite export should include history rows");
+  const workGraphPlan = await request("/workgraph-os/plan", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "用 XMANX 品牌素材规划一张新品发布海报 -> PNG",
+      brandId: "brand_xmanx",
+      activeModelId: "imgen"
+    })
+  });
+  assert(workGraphPlan.source === "workgraph-workflow-planner", "WorkGraph OS should expose a backend workflow planner");
+  assert(workGraphPlan.plan?.nodeIds?.includes("model-router") && workGraphPlan.plan?.nodeIds?.includes("review-memory"), "WorkGraph OS planner should generate auditable workflow node ids");
+  assert(workGraphPlan.routingDecision?.selectedModelId === "imgen", "WorkGraph OS planner should include model routing decisions");
+  assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "skill-search"), "WorkGraph OS planner should persist skill search nodes into the workspace");
+  assert(workGraphPlan.objectIndex?.counts?.node >= 8, "WorkGraph OS planner should update the persisted node object index");
 
   const initial = await request("/workspace");
   assert(initial.brands.some((brand) => brand.id === "brand_xmanx" && brand.active), "XMANX should be the active default brand");
