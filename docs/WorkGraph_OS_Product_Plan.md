@@ -74,6 +74,9 @@ Implemented in `apps/workgraph-os`:
   - `GET /workgraph-os/workspace`
   - `PUT /workgraph-os/workspace`
   - filesystem JSON file controlled by `WORKGRAPH_OS_DATA_FILE`
+- Reads local brand memory from the SparkCanvas brand database:
+  - `GET /workgraph-os/brands`
+  - Brand Objects include compiled brand context, asset roles, linked assets, source marker, rules, colors, and audience.
 - Runs nodes through a backend Workflow Runner / Node Executor foundation:
   - `POST /workgraph-os/run`
   - persists Job, Result, and Memory Objects with `executor: workgraph-os-backend`

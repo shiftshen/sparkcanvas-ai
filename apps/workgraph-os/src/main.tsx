@@ -114,6 +114,8 @@ type BrandMemory = {
   colors: string;
   audience: string;
   rules: string[];
+  context?: string;
+  source?: string;
 };
 
 type ModelOption = {
@@ -752,7 +754,7 @@ async function loadBackendWorkspace() {
   };
 }
 
-async function saveBackendWorkspace(workspace: WorkGraphWorkspace) {
+async function saveBackendWorkspace(workspace: WorkGraphWorkspace, brands: BrandMemory[] = brandMemories) {
   const goal = workspace.goal.rawInput === workspace.prompt && workspace.goal.brandId === workspace.activeBrandId
     ? workspace.goal
     : interpretGoal(workspace.prompt, workspace.activeBrandId, workspace.goal);
@@ -760,7 +762,7 @@ async function saveBackendWorkspace(workspace: WorkGraphWorkspace) {
     workspace.prompt,
     workspace.materials,
     workspace.skills,
-    brandMemories.find((item) => item.id === workspace.activeBrandId) ?? brandMemories[0],
+    brands.find((item) => item.id === workspace.activeBrandId) ?? brands[0] ?? brandMemories[0],
     modelOptions.find((item) => item.id === workspace.activeModelId) ?? modelOptions[1]
   );
   const workflow = buildWorkflowObject({
@@ -790,6 +792,24 @@ async function loadBackendHistory() {
   if (!response.ok) throw new Error("backend history unavailable");
   const data = await response.json() as { entries?: WorkGraphHistoryEntry[] };
   return data.entries ?? [];
+}
+
+async function loadBackendBrands() {
+  const response = await backendRequest("/workgraph-os/brands");
+  if (!response.ok) throw new Error("backend brands unavailable");
+  const data = await response.json() as { brands?: Partial<BrandMemory>[] };
+  return (data.brands ?? [])
+    .filter((brand): brand is Partial<BrandMemory> & Pick<BrandMemory, "id" | "name"> => Boolean(brand.id && brand.name))
+    .map((brand) => ({
+      id: brand.id,
+      name: brand.name,
+      positioning: brand.positioning ?? "",
+      colors: brand.colors ?? "",
+      audience: brand.audience ?? "",
+      rules: brand.rules?.length ? brand.rules : [],
+      context: brand.context,
+      source: brand.source
+    } satisfies BrandMemory));
 }
 
 async function runBackendWorkflow(nodeId: string, mode: "workflow" | "node") {
@@ -1061,13 +1081,14 @@ function App() {
   const [backendLoaded, setBackendLoaded] = useState(false);
   const [objectIndex, setObjectIndex] = useState<WorkGraphObjectIndex | null>(null);
   const [historyEntries, setHistoryEntries] = useState<WorkGraphHistoryEntry[]>([]);
+  const [brandCatalog, setBrandCatalog] = useState<BrandMemory[]>(brandMemories);
   const [skillSearch, setSkillSearch] = useState("");
   const [newSkillName, setNewSkillName] = useState("");
   const [newSkillCommand, setNewSkillCommand] = useState("");
   const [query, setQuery] = useState("");
   const [feedbackNote, setFeedbackNote] = useState("");
   const [lastRoutingDecision, setLastRoutingDecision] = useState<WorkGraphRunResponse["routingDecision"] | null>(null);
-  const activeBrand = brandMemories.find((item) => item.id === activeBrandId) ?? brandMemories[0];
+  const activeBrand = brandCatalog.find((item) => item.id === activeBrandId) ?? brandCatalog[0] ?? brandMemories[0];
   const activeModel = modelOptions.find((item) => item.id === activeModelId) ?? modelOptions[1];
   const nodes = useMemo(() => buildNodes(prompt, materials, skills, activeBrand, activeModel), [materials, prompt, skills, activeBrand, activeModel]);
   const activeMaterial = materials.find((item) => item.id === activeMaterialId) ?? materials[0];
@@ -1091,7 +1112,7 @@ function App() {
   const objectCounts = {
     goals: 1,
     assets: materials.length,
-    brands: brandMemories.length,
+    brands: brandCatalog.length,
     skills: skills.length,
     models: modelOptions.length,
     workflows: jobs.length ? jobs.length : 1,
@@ -1114,6 +1135,9 @@ function App() {
           setWorkspace(loaded.workspace);
           if (loaded.objectIndex) setObjectIndex(loaded.objectIndex);
         }
+        void loadBackendBrands().then((brands) => {
+          if (!cancelled && brands.length) setBrandCatalog(brands);
+        }).catch(() => undefined);
         void loadBackendHistory().then(setHistoryEntries).catch(() => undefined);
         setStorageMode("filesystem-json");
       })
@@ -1132,7 +1156,7 @@ function App() {
     saveWorkspace(workspace);
     if (!backendLoaded) return;
     if (storageMode !== "filesystem-json") return;
-    void saveBackendWorkspace(workspace)
+    void saveBackendWorkspace(workspace, brandCatalog)
       .then(() => backendRequest("/workgraph-os/objects"))
       .then((response) => response.ok ? response.json() : null)
       .then((data: WorkGraphObjectIndex | null) => {
@@ -1141,7 +1165,7 @@ function App() {
       })
       .then(setHistoryEntries)
       .catch(() => setStorageMode(detectStorageState()));
-  }, [backendLoaded, storageMode, workspace]);
+  }, [backendLoaded, brandCatalog, storageMode, workspace]);
 
   function updateWorkspace(updater: (current: WorkGraphWorkspace) => WorkGraphWorkspace) {
     setWorkspace((current) => {
@@ -1535,10 +1559,10 @@ function App() {
 
         <section className="pm-panel compact">
           <div className="pm-panel-head"><strong>品牌画布</strong><FolderOpen /></div>
-          {brandMemories.map((brand) => (
+          {brandCatalog.map((brand) => (
             <button key={brand.id} className={`pm-skill ${activeBrandId === brand.id ? "selected" : ""}`} onClick={() => updateWorkspace((current) => ({ ...current, activeBrandId: brand.id }))}>
               <Library />
-              <span><strong>{brand.name}</strong><small>{brand.colors} · {brand.rules.length} rules</small></span>
+              <span><strong>{brand.name}</strong><small>{brand.colors} · {brand.source ?? "local"} · {brand.rules.length} rules</small></span>
             </button>
           ))}
         </section>

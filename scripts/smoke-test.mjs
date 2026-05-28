@@ -189,6 +189,9 @@ try {
   const initialWorkGraph = await request("/workgraph-os/workspace");
   assert(initialWorkGraph.storage?.mode === "filesystem-json", "WorkGraph OS should use filesystem JSON storage through the backend");
   assert(initialWorkGraph.workspace === null, "new WorkGraph OS storage should start empty in isolated smoke data dir");
+  const workGraphBrands = await request("/workgraph-os/brands");
+  assert(workGraphBrands.source === "sparkcanvas-brand-db", "WorkGraph OS should read brands from the SparkCanvas brand database");
+  assert(workGraphBrands.brands?.some((brand) => brand.id === "brand_xmanx" && String(brand.context).includes("$copy.brand_name")), "WorkGraph OS brand API should expose compiled brand context");
   const workGraphPayload = {
     version: 1,
     goal: {
@@ -285,6 +288,8 @@ try {
   assert(savedWorkGraph.workspace?.skills?.[0]?.skillMdPath === "skills/generated/smoke/SKILL.md", "WorkGraph OS workspace should persist standardized skill object metadata");
   assert(savedWorkGraph.workspace?.feedback?.[0]?.memoryId === "mem-smoke", "WorkGraph OS workspace should persist linked feedback objects");
   assert(savedWorkGraph.objectIndex?.counts?.asset === 1, "WorkGraph OS workspace save should return an asset object index");
+  const savedBrandObject = savedWorkGraph.objectIndex?.objects?.find((item) => item.type === "brand");
+  assert(savedBrandObject?.payload?.source === "sparkcanvas-brand-db", "WorkGraph OS workspace save should index brand database payloads");
   assert(savedWorkGraph.objectIndex?.counts?.node === 1, "WorkGraph OS workspace save should return persisted node objects");
   assert(savedWorkGraph.historyEntry?.objectIds?.includes("asset:mat-smoke"), "WorkGraph OS workspace save should record a history snapshot");
   const reloadedWorkGraph = await request("/workgraph-os/workspace");

@@ -2412,9 +2412,10 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
   const updatedAt = workspace.updatedAt || now();
   const goalPayload = workGraphGoalPayload(workspace);
   const workflowPayload = workGraphWorkflowPayload(workspace);
+  const brandPayload = workGraphBrandPayload(findBrand(workspace.activeBrandId), workspace.activeBrandId);
   const objects: WorkGraphOsObject[] = [
     workGraphObject("goal", "active", goalPayload.title, goalPayload.normalizedIntent || goalPayload.rawInput || "No goal prompt", goalPayload, updatedAt, workspace.goal ? "workspace" : "derived"),
-    workGraphObject("brand", workspace.activeBrandId || "active", `Brand ${workspace.activeBrandId || "active"}`, `Active brand context: ${workspace.activeBrandId || "unset"}`, { id: workspace.activeBrandId || "active" }, updatedAt, "derived"),
+    workGraphObject("brand", workspace.activeBrandId || "active", brandPayload.name, `${brandPayload.source} · ${brandPayload.positioning}`, brandPayload, updatedAt, "derived"),
     workGraphObject("model", workspace.activeModelId || "active", `Model ${workspace.activeModelId || "active"}`, `Active model strategy: ${workspace.activeModelId || "unset"}`, {
       id: workspace.activeModelId || "active",
       activeModelId: workspace.activeModelId,
@@ -2783,6 +2784,48 @@ function buildBrandContext(brand: Brand) {
     roleLines ? `$asset_roles\n${roleLines}` : "",
     materialLines ? `$assets\n${materialLines}` : ""
   ].filter(Boolean).join("\n");
+}
+
+function workGraphBrandPayload(brand: Brand | undefined, activeBrandId: string) {
+  const selected = brand ?? activeBrand();
+  if (!selected) {
+    return {
+      id: activeBrandId || "active",
+      name: "Unknown Brand",
+      positioning: "No brand database record found.",
+      colors: "",
+      audience: "",
+      rules: [] as string[],
+      context: "",
+      source: "missing"
+    };
+  }
+  return {
+    id: selected.id,
+    name: selected.name,
+    positioning: selected.brandStory || selected.slogan || selected.market,
+    colors: `${selected.primaryColor} / ${selected.accentColor}`,
+    audience: selected.targetAudience,
+    rules: [
+      selected.logoUsage,
+      selected.visualStyle,
+      selected.tone,
+      ...selected.forbiddenWords.map((item) => `avoid: ${item}`)
+    ].filter(Boolean),
+    context: buildBrandContext(selected),
+    assetRoles: selected.assetRoles,
+    assets: db.assets
+      .filter((asset) => asset.brandId === selected.id && !asset.type.startsWith("generated_"))
+      .slice(0, 12)
+      .map((asset) => ({
+        id: asset.id,
+        title: asset.title,
+        type: asset.type,
+        imageUrl: asset.imageUrl,
+        referencePath: assetReferencePath(asset)
+      })),
+    source: "sparkcanvas-brand-db"
+  };
 }
 
 function orientationFromRatio(ratio?: string): WorkflowOrientation {
@@ -6486,6 +6529,15 @@ app.get("/workgraph-os/workspace", async (_req, res) => {
     },
     workspace,
     objectIndex
+  });
+});
+
+app.get("/workgraph-os/brands", async (_req, res) => {
+  res.json({
+    source: "sparkcanvas-brand-db",
+    brands: db.brands
+      .filter((brand) => !brand.archived)
+      .map((brand) => workGraphBrandPayload(brand, brand.id))
   });
 });
 
