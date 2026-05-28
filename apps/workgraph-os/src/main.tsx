@@ -1030,6 +1030,32 @@ function buildMemoryFromFeedback(feedback: FeedbackObject, nodeTitle: string): M
   };
 }
 
+function evolveSkillFromFeedback(skill: SkillTemplate, feedback: FeedbackObject): SkillTemplate {
+  const accepted = feedback.rating === "accepted";
+  const failed = feedback.rating === "failed";
+  const successCount = skill.evolution.successCount + (accepted ? 1 : 0);
+  const failureCount = skill.evolution.failureCount + (accepted ? 0 : 1);
+  return {
+    ...skill,
+    evolution: {
+      ...skill.evolution,
+      status: accepted
+        ? "validated"
+        : skill.evolution.status === "seed"
+          ? "candidate"
+          : skill.evolution.status,
+      runCount: skill.evolution.runCount + 1,
+      successCount,
+      failureCount,
+      lastRunAt: feedback.createdAt,
+      testPlan: [
+        ...skill.evolution.testPlan,
+        failed ? `avoid pattern: ${feedback.note}` : accepted ? `reuse pattern: ${feedback.note}` : `revise pattern: ${feedback.note}`
+      ].slice(-6)
+    }
+  };
+}
+
 function skillIcon(icon: SkillTemplate["icon"]) {
   if (icon === "compose") return <Scissors />;
   if (icon === "video") return <Film />;
@@ -1545,6 +1571,13 @@ function App() {
     const memoryObject = buildMemoryFromFeedback(feedbackObject, activeNode.title);
     updateWorkspace((current) => ({
       ...current,
+      workflow: {
+        ...current.workflow,
+        reusable: rating === "accepted" ? true : current.workflow.reusable,
+        status: rating === "accepted" ? "completed" : current.workflow.status,
+        updatedAt: feedbackObject.createdAt
+      },
+      skills: current.skills.map((skill) => skill.id === matchingSkill.id ? evolveSkillFromFeedback(skill, feedbackObject) : skill),
       feedback: [feedbackObject, ...current.feedback],
       memories: [memoryObject, ...current.memories]
     }));

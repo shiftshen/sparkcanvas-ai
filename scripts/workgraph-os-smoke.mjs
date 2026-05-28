@@ -58,6 +58,8 @@ assert(source.includes("saveResultAsMaterial"), "workgraph-os should allow accep
 assert(source.includes("normalizeFeedbackObject"), "workgraph-os should normalize linked Feedback Objects");
 assert(source.includes("normalizeMemoryObject"), "workgraph-os should normalize structured Memory Objects");
 assert(source.includes("buildMemoryFromFeedback"), "workgraph-os should turn feedback into linked reusable memory");
+assert(source.includes("evolveSkillFromFeedback"), "workgraph-os should evolve Skill Objects from human feedback");
+assert(source.includes("reuse pattern") && source.includes("avoid pattern"), "workgraph-os should preserve feedback learning patterns in Skill evolution");
 assert(source.includes("memoryId") && source.includes("sourceType"), "workgraph-os should link feedback and memory object ids");
 assert(source.includes("confidence") && source.includes("reusable"), "workgraph-os should track memory confidence and reusability");
 
@@ -86,6 +88,7 @@ console.log(JSON.stringify({
     "workgraph-os-model-routing-decision-ready",
     "workgraph-os-workflow-object-ready",
     "workgraph-os-result-object-ready",
-    "workgraph-os-feedback-memory-link-ready"
+    "workgraph-os-feedback-memory-link-ready",
+    "workgraph-os-feedback-skill-evolution-ready"
   ]
 }));
