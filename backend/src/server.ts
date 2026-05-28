@@ -7146,6 +7146,44 @@ app.get("/workgraph-os/objects", async (req, res) => {
   });
 });
 
+app.get("/workgraph-os/memories", async (req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  const query = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+  const targetType = typeof req.query.targetType === "string" ? req.query.targetType.trim().toLowerCase() : "";
+  const reusableOnly = req.query.reusable === "true";
+  const limit = Math.min(Number.parseInt(typeof req.query.limit === "string" ? req.query.limit : "10", 10) || 10, 50);
+  const memories = (workspace?.memories ?? [])
+    .filter((memory) => !reusableOnly || objectField(memory, "reusable") === true)
+    .filter((memory) => !targetType || objectString(memory, "targetType", "").toLowerCase() === targetType)
+    .map((memory, index) => {
+      const searchable = [
+        objectString(memory, "id", ""),
+        objectString(memory, "title", ""),
+        objectString(memory, "body", ""),
+        objectString(memory, "source", ""),
+        objectString(memory, "sourceType", ""),
+        objectString(memory, "targetType", ""),
+        objectString(memory, "targetId", "")
+      ].join(" ").toLowerCase();
+      const score = query
+        ? query.split(/\s+/).filter(Boolean).reduce((total, token) => total + (searchable.includes(token) ? 1 : 0), 0)
+        : 1;
+      return { memory, index, score };
+    })
+    .filter((item) => !query || item.score > 0)
+    .sort((left, right) => {
+      const confidenceDelta = Number(objectField(right.memory, "confidence") ?? 0) - Number(objectField(left.memory, "confidence") ?? 0);
+      return right.score - left.score || confidenceDelta || left.index - right.index;
+    })
+    .slice(0, limit)
+    .map((item) => item.memory);
+  res.json({
+    source: "workgraph-memory-store",
+    memories,
+    count: memories.length
+  });
+});
+
 app.get("/workgraph-os/objects/:type/:id", async (req, res) => {
   const workspace = await readWorkGraphOsWorkspace();
   const { objects } = buildWorkGraphOsObjectIndex(workspace);

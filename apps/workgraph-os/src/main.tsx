@@ -773,6 +773,20 @@ async function loadBackendHistory() {
   return data.entries ?? [];
 }
 
+async function searchBackendMemories(query: string, limit = 5) {
+  const params = new URLSearchParams({
+    q: query,
+    reusable: "true",
+    limit: String(limit)
+  });
+  const response = await backendRequest(`/workgraph-os/memories?${params.toString()}`);
+  if (!response.ok) throw new Error("backend memories unavailable");
+  const data = await response.json() as { memories?: Partial<MemoryObject>[] };
+  return (data.memories ?? [])
+    .filter((memory): memory is Partial<MemoryObject> & Pick<MemoryObject, "id"> => Boolean(memory.id))
+    .map((memory) => normalizeMemoryObject({ ...memory, id: memory.id }));
+}
+
 async function loadBackendBrands() {
   const response = await backendRequest("/workgraph-os/brands");
   if (!response.ok) throw new Error("backend brands unavailable");
@@ -1169,6 +1183,7 @@ function App() {
   const [backendLoaded, setBackendLoaded] = useState(false);
   const [objectIndex, setObjectIndex] = useState<WorkGraphObjectIndex | null>(null);
   const [historyEntries, setHistoryEntries] = useState<WorkGraphHistoryEntry[]>([]);
+  const [relatedMemories, setRelatedMemories] = useState<MemoryObject[]>([]);
   const [brandCatalog, setBrandCatalog] = useState<BrandMemory[]>(brandMemories);
   const [skillSearch, setSkillSearch] = useState("");
   const [newSkillName, setNewSkillName] = useState("");
@@ -1189,6 +1204,7 @@ function App() {
   const ast = useMemo(() => parseCalPrompt(prompt), [prompt]);
   const selectedMaterials = materials.filter((item) => selectedIds.includes(item.id));
   const matchingSkill = useMemo(() => findMatchingSkill(prompt, skills), [prompt, skills]);
+  const visibleMemories = relatedMemories.length ? relatedMemories : memories.slice(0, 3);
   const filteredSkills = skills.filter((skill) => {
     const needle = skillSearch.trim().toLowerCase();
     if (!needle) return true;
@@ -1236,6 +1252,7 @@ function App() {
           }
         }).catch(() => undefined);
         void loadBackendHistory().then(setHistoryEntries).catch(() => undefined);
+        void searchBackendMemories(loaded?.workspace.prompt ?? prompt).then(setRelatedMemories).catch(() => undefined);
         setStorageMode("filesystem-json");
       })
       .catch(() => {
@@ -1261,6 +1278,7 @@ function App() {
         return loadBackendHistory();
       })
       .then(setHistoryEntries)
+      .then(() => searchBackendMemories(workspace.prompt).then(setRelatedMemories).catch(() => undefined))
       .catch(() => setStorageMode(detectStorageState()));
   }, [backendLoaded, brandCatalog, storageMode, workspace]);
 
@@ -1841,7 +1859,7 @@ function App() {
               <button type="button" onClick={() => recordFeedback("accepted")}><CheckCircle2 /> 接受</button>
               <button type="button" onClick={() => recordFeedback("needs_revision")}><Pencil /> 需修改</button>
             </div>
-            {memories.slice(0, 3).map((memory) => (
+            {visibleMemories.map((memory) => (
               <div key={memory.id} className="pm-memory">
                 <strong>{memory.title}</strong>
                 <small>{memory.source} · {new Date(memory.createdAt).toLocaleString()}</small>

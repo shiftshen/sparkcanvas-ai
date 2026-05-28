@@ -327,6 +327,8 @@ try {
   assert(workGraphObjects.objects.some((item) => item.id === "node:node-smoke"), "WorkGraph OS object index should include the saved canvas node");
   const memoryObjects = await request("/workgraph-os/objects?type=memory");
   assert(memoryObjects.objects.length === 1 && memoryObjects.objects[0].id === "memory:mem-smoke", "WorkGraph OS object index should support type filtering");
+  const reusableMemories = await request("/workgraph-os/memories?q=reuse&reusable=true");
+  assert(reusableMemories.source === "workgraph-memory-store" && reusableMemories.memories?.some((memory) => memory.id === "mem-smoke"), "WorkGraph OS memory store should retrieve reusable memories by query");
   const smokeAssetObject = await request("/workgraph-os/objects/asset/mat-smoke");
   assert(smokeAssetObject.title === "Smoke asset", "WorkGraph OS object detail should return the requested object");
   const workGraphSkills = await request("/workgraph-os/skills");

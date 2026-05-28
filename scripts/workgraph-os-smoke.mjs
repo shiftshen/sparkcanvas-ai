@@ -26,6 +26,7 @@ assert(source.includes("recordFeedback"), "workgraph-os should record feedback o
 assert(source.includes("对象图谱"), "workgraph-os should expose an object graph surface");
 assert(source.includes("WorkGraphObjectIndex"), "workgraph-os should consume the backend object index");
 assert(source.includes("/workgraph-os/objects"), "workgraph-os should request the object index API");
+assert(source.includes("/workgraph-os/memories"), "workgraph-os should request the backend memory store API");
 assert(source.includes("/workgraph-os/brands"), "workgraph-os should request backend brand memory objects");
 assert(source.includes("/workgraph-os/assets"), "workgraph-os should request backend asset material objects");
 assert(source.includes("/workgraph-os/skills"), "workgraph-os should request backend skill store objects");
@@ -60,6 +61,8 @@ assert(source.includes("saveResultAsMaterial"), "workgraph-os should allow accep
 assert(source.includes("normalizeFeedbackObject"), "workgraph-os should normalize linked Feedback Objects");
 assert(source.includes("normalizeMemoryObject"), "workgraph-os should normalize structured Memory Objects");
 assert(source.includes("buildMemoryFromFeedback"), "workgraph-os should turn feedback into linked reusable memory");
+assert(source.includes("searchBackendMemories"), "workgraph-os should search reusable backend memories");
+assert(source.includes("relatedMemories"), "workgraph-os should surface related memories in the UI");
 assert(source.includes("evolveSkillFromFeedback"), "workgraph-os should evolve Skill Objects from human feedback");
 assert(source.includes("reuse pattern") && source.includes("avoid pattern"), "workgraph-os should preserve feedback learning patterns in Skill evolution");
 assert(source.includes("memoryId") && source.includes("sourceType"), "workgraph-os should link feedback and memory object ids");
@@ -75,6 +78,7 @@ console.log(JSON.stringify({
     "workgraph-os-object-persistence-ready",
     "workgraph-os-feedback-memory-ready",
     "workgraph-os-backend-object-index-ready",
+    "workgraph-os-backend-memory-store-ready",
     "workgraph-os-backend-brand-memory-ready",
     "workgraph-os-backend-asset-retriever-ready",
     "workgraph-os-backend-skill-store-ready",
