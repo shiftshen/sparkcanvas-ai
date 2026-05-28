@@ -30,6 +30,9 @@ assert(source.includes("WorkGraphHistoryEntry"), "workgraph-os should model obje
 assert(source.includes("/workgraph-os/history"), "workgraph-os should request the history API");
 assert(source.includes("nodes: WorkflowNode[]"), "workgraph-os should persist canvas nodes as workspace objects");
 assert(source.includes("nodes: workspace.nodes.length ? workspace.nodes : buildNodes"), "workgraph-os should save generated canvas nodes to the backend");
+assert(source.includes("type GoalObject"), "workgraph-os should define a structured Goal Object");
+assert(source.includes("interpretGoal"), "workgraph-os should interpret natural language input into a Goal Object");
+assert(source.includes("successCriteria"), "workgraph-os should carry goal success criteria");
 
 console.log(JSON.stringify({
   ok: true,
@@ -42,6 +45,7 @@ console.log(JSON.stringify({
     "workgraph-os-feedback-memory-ready",
     "workgraph-os-backend-object-index-ready",
     "workgraph-os-history-ready",
-    "workgraph-os-node-object-ready"
+    "workgraph-os-node-object-ready",
+    "workgraph-os-goal-object-ready"
   ]
 }));

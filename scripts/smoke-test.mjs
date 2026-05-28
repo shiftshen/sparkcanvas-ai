@@ -191,6 +191,17 @@ try {
   assert(initialWorkGraph.workspace === null, "new WorkGraph OS storage should start empty in isolated smoke data dir");
   const workGraphPayload = {
     version: 1,
+    goal: {
+      id: "goal-smoke",
+      title: "DAPOT opening TikTok video",
+      rawInput: "给 DAPOT 做一条开业短视频",
+      normalizedIntent: "video_generation -> mp4 using brand:dapot",
+      goalType: "video_generation",
+      brandId: "dapot",
+      outputTarget: "mp4",
+      constraints: ["language: Thai-first", "audience: young users"],
+      successCriteria: ["visible work graph", "reviewable mp4 result"]
+    },
     materials: [{ id: "mat-smoke", title: "Smoke asset", kind: "image", token: "$smoke.asset" }],
     skills: [{ id: "skill-smoke", title: "Smoke skill", command: "/smoke" }],
     nodes: [{ id: "node-smoke", title: "Smoke node", type: "skill", body: "Use smoke asset", status: "ready", materialIds: ["mat-smoke"] }],
@@ -205,6 +216,7 @@ try {
   };
   const savedWorkGraph = await request("/workgraph-os/workspace", { method: "PUT", body: JSON.stringify(workGraphPayload) });
   assert(savedWorkGraph.workspace?.prompt === workGraphPayload.prompt, "WorkGraph OS workspace should persist the prompt");
+  assert(savedWorkGraph.workspace?.goal?.goalType === "video_generation", "WorkGraph OS workspace should persist structured goal objects");
   assert(savedWorkGraph.workspace?.feedback?.length === 1, "WorkGraph OS workspace should persist feedback objects");
   assert(savedWorkGraph.objectIndex?.counts?.asset === 1, "WorkGraph OS workspace save should return an asset object index");
   assert(savedWorkGraph.objectIndex?.counts?.node === 1, "WorkGraph OS workspace save should return persisted node objects");
@@ -218,6 +230,8 @@ try {
   assert(workGraphObjects.counts?.asset === 1, "WorkGraph OS object index should include asset objects");
   assert(workGraphObjects.counts?.node === 1, "WorkGraph OS object index should include node objects");
   assert(workGraphObjects.counts?.memory === 1, "WorkGraph OS object index should include memory objects");
+  const goalObject = workGraphObjects.objects.find((item) => item.id === "goal:goal-smoke");
+  assert(goalObject?.source === "workspace" && goalObject?.summary === "video_generation -> mp4 using brand:dapot", "WorkGraph OS object index should include the saved structured goal");
   assert(workGraphObjects.objects.some((item) => item.id === "asset:mat-smoke"), "WorkGraph OS object index should include the saved asset");
   assert(workGraphObjects.objects.some((item) => item.id === "node:node-smoke"), "WorkGraph OS object index should include the saved canvas node");
   const memoryObjects = await request("/workgraph-os/objects?type=memory");
@@ -239,6 +253,7 @@ try {
   const sqliteEdges = workGraphSqliteExport.tables.find((table) => table.name === "wgos_edges");
   const sqliteHistory = workGraphSqliteExport.tables.find((table) => table.name === "wgos_history");
   assert(sqliteObjects?.rows?.some((row) => row.id === "asset:mat-smoke"), "WorkGraph OS SQLite export should include indexed asset rows");
+  assert(sqliteObjects?.rows?.some((row) => row.id === "goal:goal-smoke" && String(row.payload_json).includes("successCriteria")), "WorkGraph OS SQLite export should include structured goal payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "node:node-smoke"), "WorkGraph OS SQLite export should include persisted node rows");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:active" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include workflow-to-asset graph edges");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "node:node-smoke" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include node-to-asset graph edges");

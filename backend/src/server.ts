@@ -464,6 +464,7 @@ type Db = {
 
 type WorkGraphOsWorkspace = {
   version: 1;
+  goal?: unknown;
   materials: unknown[];
   skills: unknown[];
   nodes: unknown[];
@@ -712,6 +713,7 @@ const outputSchema = z.object({
 
 const workGraphOsWorkspaceSchema = z.object({
   version: z.literal(1),
+  goal: z.unknown().optional(),
   materials: z.array(z.unknown()).default([]),
   skills: z.array(z.unknown()).default([]),
   nodes: z.array(z.unknown()).default([]),
@@ -2109,11 +2111,29 @@ function workGraphObject(
   };
 }
 
+function workGraphGoalPayload(workspace: WorkGraphOsWorkspace) {
+  const existing = workspace.goal && typeof workspace.goal === "object" ? workspace.goal : undefined;
+  return {
+    id: objectString(existing, "id", "active"),
+    title: objectString(existing, "title", "Active Goal"),
+    rawInput: objectString(existing, "rawInput", workspace.prompt),
+    normalizedIntent: objectString(existing, "normalizedIntent", workspace.prompt || "No goal prompt"),
+    goalType: objectString(existing, "goalType", "workflow_automation"),
+    brandId: objectString(existing, "brandId", workspace.activeBrandId),
+    outputTarget: objectString(existing, "outputTarget", "png"),
+    constraints: objectField(existing, "constraints") ?? [],
+    successCriteria: objectField(existing, "successCriteria") ?? [],
+    activeBrandId: workspace.activeBrandId,
+    activeModelId: workspace.activeModelId
+  };
+}
+
 function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
   if (!workspace) return { counts: {}, objects: [] as WorkGraphOsObject[] };
   const updatedAt = workspace.updatedAt || now();
+  const goalPayload = workGraphGoalPayload(workspace);
   const objects: WorkGraphOsObject[] = [
-    workGraphObject("goal", "active", "Active Goal", workspace.prompt || "No goal prompt", { id: "active", rawInput: workspace.prompt, activeBrandId: workspace.activeBrandId, activeModelId: workspace.activeModelId }, updatedAt, "derived"),
+    workGraphObject("goal", "active", goalPayload.title, goalPayload.normalizedIntent || goalPayload.rawInput || "No goal prompt", goalPayload, updatedAt, workspace.goal ? "workspace" : "derived"),
     workGraphObject("brand", workspace.activeBrandId || "active", `Brand ${workspace.activeBrandId || "active"}`, `Active brand context: ${workspace.activeBrandId || "unset"}`, { id: workspace.activeBrandId || "active" }, updatedAt, "derived"),
     workGraphObject("model", workspace.activeModelId || "active", `Model ${workspace.activeModelId || "active"}`, `Active model strategy: ${workspace.activeModelId || "unset"}`, { id: workspace.activeModelId || "active" }, updatedAt, "derived"),
     workGraphObject("workflow", "active", "Active Workflow", `${workspace.jobs.length || 1} workflow run(s), ${workspace.selectedIds.length} selected asset(s)`, { id: "active", prompt: workspace.prompt, selectedIds: workspace.selectedIds, jobs: workspace.jobs }, updatedAt, "derived")

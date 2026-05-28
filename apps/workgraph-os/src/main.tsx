@@ -110,8 +110,25 @@ type MemoryObject = {
   createdAt: string;
 };
 
+type GoalType = "brand_design" | "image_generation" | "video_generation" | "skill_creation" | "asset_archive" | "workflow_automation";
+
+type GoalObject = {
+  id: string;
+  title: string;
+  rawInput: string;
+  normalizedIntent: string;
+  goalType: GoalType;
+  brandId: string;
+  outputTarget: string;
+  constraints: string[];
+  successCriteria: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 type WorkGraphWorkspace = {
   version: 1;
+  goal: GoalObject;
   materials: Material[];
   skills: SkillTemplate[];
   nodes: WorkflowNode[];
@@ -265,8 +282,60 @@ const defaultPrompt = "@imgen /compose 使用 $xmanx.logo $xmanx.product，生�
 const workspaceStorageKey = "workgraph-os.workspace.v1";
 const authStorageKey = "workgraph-os.auth-token";
 
+function interpretGoal(rawInput: string, brandId = "dapot", previous?: GoalObject): GoalObject {
+  const text = rawInput.trim() || defaultPrompt;
+  const lower = text.toLowerCase();
+  const goalType: GoalType = /视频|mp4|tiktok|reel|short/i.test(text)
+    ? "video_generation"
+    : /skill|能力|沉淀|创建/i.test(text)
+      ? "skill_creation"
+      : /归档|zip|素材包|archive/i.test(text)
+        ? "asset_archive"
+        : /流程|自动|workflow|执行/i.test(text)
+          ? "workflow_automation"
+          : /海报|图片|png|jpg|封面|image|poster/i.test(text)
+            ? "image_generation"
+            : "brand_design";
+  const outputTarget = /mp4|视频|tiktok|reel|short/i.test(text)
+    ? "mp4"
+    : /pdf|教材|文档/i.test(text)
+      ? "pdf"
+      : /zip|素材包|archive/i.test(text)
+        ? "zip"
+        : /jpg|jpeg/i.test(text)
+          ? "jpg"
+          : "png";
+  const constraints = [
+    lower.includes("thai") || text.includes("泰") ? "language: Thai-first" : "",
+    text.includes("年轻") || lower.includes("young") ? "audience: young users" : "",
+    text.includes("女性") || lower.includes("female") ? "audience: female users" : "",
+    text.includes("品牌") || lower.includes("brand") ? "preserve brand memory" : "",
+    text.includes("开业") || lower.includes("launch") ? "campaign: opening launch" : ""
+  ].filter(Boolean);
+  const title = text.replace(/^@[\w.-]+\s+/, "").replace(/\s+/g, " ").slice(0, 48) || "Untitled goal";
+  const timestamp = now();
+  return {
+    id: previous?.id ?? `goal-${Date.now().toString(36)}`,
+    title,
+    rawInput: text,
+    normalizedIntent: `${goalType} -> ${outputTarget} using brand:${brandId}`,
+    goalType,
+    brandId,
+    outputTarget,
+    constraints: constraints.length ? constraints : ["preserve selected materials", "keep result reusable"],
+    successCriteria: [
+      "Work graph shows goal, brand, material, skill, model, output and review nodes.",
+      `Result can be reviewed as ${outputTarget.toUpperCase()} and saved back as reusable material.`,
+      "Feedback can be recorded into Memory Objects for future runs."
+    ],
+    createdAt: previous?.createdAt ?? timestamp,
+    updatedAt: timestamp
+  };
+}
+
 const defaultWorkspace = (): WorkGraphWorkspace => ({
   version: 1,
+  goal: interpretGoal(defaultPrompt, "dapot"),
   materials: seedMaterials,
   skills: skillTemplates,
   nodes: [],
@@ -318,6 +387,7 @@ function loadWorkspace(): WorkGraphWorkspace {
       ...defaultWorkspace(),
       ...parsed,
       version: 1,
+      goal: parsed.goal ?? interpretGoal(parsed.prompt ?? defaultPrompt, parsed.activeBrandId ?? "dapot"),
       materials: parsed.materials?.length ? parsed.materials : seedMaterials,
       skills: parsed.skills?.length ? parsed.skills : skillTemplates,
       nodes: parsed.nodes?.length ? parsed.nodes : []
@@ -373,6 +443,7 @@ async function loadBackendWorkspace() {
       ...defaultWorkspace(),
       ...data.workspace,
       version: 1,
+      goal: data.workspace.goal ?? interpretGoal(data.workspace.prompt ?? defaultPrompt, data.workspace.activeBrandId ?? "dapot"),
       materials: data.workspace.materials?.length ? data.workspace.materials : seedMaterials,
       skills: data.workspace.skills?.length ? data.workspace.skills : skillTemplates,
       nodes: data.workspace.nodes?.length ? data.workspace.nodes : []
@@ -382,10 +453,14 @@ async function loadBackendWorkspace() {
 }
 
 async function saveBackendWorkspace(workspace: WorkGraphWorkspace) {
+  const goal = workspace.goal.rawInput === workspace.prompt && workspace.goal.brandId === workspace.activeBrandId
+    ? workspace.goal
+    : interpretGoal(workspace.prompt, workspace.activeBrandId, workspace.goal);
   const response = await backendRequest("/workgraph-os/workspace", {
     method: "PUT",
     body: JSON.stringify({
       ...workspace,
+      goal,
       nodes: workspace.nodes.length ? workspace.nodes : buildNodes(
         workspace.prompt,
         workspace.materials,
@@ -536,7 +611,7 @@ function buildNodes(prompt: string, materials: Material[], skills: SkillTemplate
 
 function App() {
   const [workspace, setWorkspace] = useState(loadWorkspace);
-  const { materials, skills, activeBrandId, activeModelId, selectedIds, prompt, activeMaterialId, jobs, feedback, memories } = workspace;
+  const { goal, materials, skills, activeBrandId, activeModelId, selectedIds, prompt, activeMaterialId, jobs, feedback, memories } = workspace;
   const [activeNodeId, setActiveNodeId] = useState("skill");
   const [storageMode, setStorageMode] = useState<StorageMode>(detectStorageState);
   const [backendLoaded, setBackendLoaded] = useState(false);
@@ -624,7 +699,13 @@ function App() {
   }, [backendLoaded, storageMode, workspace]);
 
   function updateWorkspace(updater: (current: WorkGraphWorkspace) => WorkGraphWorkspace) {
-    setWorkspace((current) => updater(current));
+    setWorkspace((current) => {
+      const next = updater(current);
+      if (next.prompt !== next.goal.rawInput || next.activeBrandId !== next.goal.brandId) {
+        return { ...next, goal: interpretGoal(next.prompt, next.activeBrandId, next.goal) };
+      }
+      return next;
+    });
   }
 
   function toggleMaterial(id: string) {
@@ -863,6 +944,11 @@ function App() {
 
         <section className="pm-panel compact">
           <div className="pm-panel-head"><strong>对象图谱</strong><Layers3 /></div>
+          <div className="pm-goal-card">
+            <strong>{goal.title}</strong>
+            <small>{goal.goalType} · {goal.outputTarget.toUpperCase()} · {goal.normalizedIntent}</small>
+            <p>{goal.successCriteria[0]}</p>
+          </div>
           <div className="pm-object-grid">
             <span>Goal <strong>{objectCount("goal", "goals")}</strong></span>
             <span>Asset <strong>{objectCount("asset", "assets")}</strong></span>
