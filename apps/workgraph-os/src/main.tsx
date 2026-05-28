@@ -241,6 +241,12 @@ type WorkGraphHistoryEntry = {
 type WorkGraphRunResponse = {
   workspace?: Partial<WorkGraphWorkspace>;
   objectIndex?: WorkGraphObjectIndex;
+  routingDecision?: {
+    selectedModelId: string;
+    selectedCapability: string;
+    route: string;
+    reason: string;
+  };
 };
 
 type StorageState = "browser-local" | "memory-only";
@@ -1060,6 +1066,7 @@ function App() {
   const [newSkillCommand, setNewSkillCommand] = useState("");
   const [query, setQuery] = useState("");
   const [feedbackNote, setFeedbackNote] = useState("");
+  const [lastRoutingDecision, setLastRoutingDecision] = useState<WorkGraphRunResponse["routingDecision"] | null>(null);
   const activeBrand = brandMemories.find((item) => item.id === activeBrandId) ?? brandMemories[0];
   const activeModel = modelOptions.find((item) => item.id === activeModelId) ?? modelOptions[1];
   const nodes = useMemo(() => buildNodes(prompt, materials, skills, activeBrand, activeModel), [materials, prompt, skills, activeBrand, activeModel]);
@@ -1356,6 +1363,7 @@ function App() {
             } satisfies WorkGraphWorkspace);
           }
           if (data.objectIndex) setObjectIndex(data.objectIndex);
+          if (data.routingDecision) setLastRoutingDecision(data.routingDecision);
           void loadBackendHistory().then(setHistoryEntries).catch(() => undefined);
         })
         .catch(() => runLocalWorkflow());
@@ -1537,6 +1545,12 @@ function App() {
 
         <section className="pm-panel compact">
           <div className="pm-panel-head"><strong>模型画布</strong><Bot /></div>
+          {lastRoutingDecision ? (
+            <div className="pm-status-pill">
+              <span>{lastRoutingDecision.selectedModelId}</span>
+              <small>{lastRoutingDecision.selectedCapability} · {lastRoutingDecision.route}</small>
+            </div>
+          ) : null}
           {modelOptions.map((model) => (
             <button key={model.id} className={`pm-skill ${activeModelId === model.id ? "selected" : ""}`} onClick={() => updateWorkspace((current) => ({ ...current, activeModelId: model.id }))}>
               <Bot />

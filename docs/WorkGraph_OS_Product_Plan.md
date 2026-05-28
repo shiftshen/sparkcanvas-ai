@@ -77,6 +77,7 @@ Implemented in `apps/workgraph-os`:
 - Runs nodes through a backend Workflow Runner / Node Executor foundation:
   - `POST /workgraph-os/run`
   - persists Job, Result, and Memory Objects with `executor: workgraph-os-backend`
+  - records a node-level `routingDecision` with selected model, capability, route, fallback list, and reason.
   - returns an updated object index and history snapshot after execution
 - Derives a queryable object index from the filesystem workspace:
   - `GET /workgraph-os/objects`
@@ -86,6 +87,7 @@ Implemented in `apps/workgraph-os`:
   - structured Goal Objects are indexed from workspace data when available, with legacy prompt-only workspaces migrated into derived goals.
   - Skill Objects include evolution metadata and future `SKILL.md` export paths, so high-frequency workflows can become reusable Agent Skills.
   - Model Objects expose routing policy metadata so nodes can later choose models by capability, fallback, latency, cost, and local/cloud constraints.
+  - Model Objects now include the backend routing catalog and last routing decision, making model strategy auditable instead of UI-only.
   - Workflow Objects are indexed from workspace data when available, with legacy workspaces migrated into derived active workflows.
   - Result Objects are indexed from workspace results when available, with legacy jobs migrated into derived results.
   - persisted canvas nodes are indexed as Node Objects and connected to workflow/assets in the SQLite export graph.

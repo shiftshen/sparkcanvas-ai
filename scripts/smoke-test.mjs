@@ -305,6 +305,7 @@ try {
   assert(skillObject?.summary?.includes("/smoke") && skillObject?.summary?.includes("skills/generated/smoke/SKILL.md"), "WorkGraph OS object index should include standardized skill metadata");
   const modelObject = workGraphObjects.objects.find((item) => item.id === "model:imgen");
   assert(String(modelObject?.payload?.routingPolicy).includes("fallback"), "WorkGraph OS object index should include model routing policy metadata");
+  assert(Array.isArray(modelObject?.payload?.modelCatalog) && modelObject.payload.modelCatalog.length > 0, "WorkGraph OS object index should include model routing catalog metadata");
   const workflowObject = workGraphObjects.objects.find((item) => item.id === "workflow:workflow-smoke");
   assert(workflowObject?.source === "workspace" && String(workflowObject?.payload?.runCount) === "3", "WorkGraph OS object index should include reusable workflow object metadata");
   const resultObject = workGraphObjects.objects.find((item) => item.id === "result:result-smoke");
@@ -321,8 +322,12 @@ try {
   assert(smokeAssetObject.title === "Smoke asset", "WorkGraph OS object detail should return the requested object");
   const workGraphRun = await request("/workgraph-os/run", { method: "POST", body: JSON.stringify({ nodeId: "node-smoke", mode: "node" }) });
   assert(workGraphRun.execution?.executor === "workgraph-os-backend", "WorkGraph OS should run nodes through the backend executor");
+  assert(workGraphRun.routingDecision?.selectedModelId === "imgen", "WorkGraph OS backend executor should return a model routing decision");
+  assert(String(workGraphRun.routingDecision?.reason).includes("skill") || String(workGraphRun.routingDecision?.reason).includes("node"), "WorkGraph OS routing decision should explain node/model selection");
   assert(workGraphRun.workspace?.jobs?.[0]?.executor === "workgraph-os-backend", "WorkGraph OS backend executor should persist job objects");
+  assert(workGraphRun.workspace?.jobs?.[0]?.routingDecision?.selectedModelId === "imgen", "WorkGraph OS backend executor should persist job routing decisions");
   assert(workGraphRun.workspace?.results?.[0]?.sourceJobId === workGraphRun.execution?.jobId, "WorkGraph OS backend executor should persist linked result objects");
+  assert(workGraphRun.workspace?.results?.[0]?.routingDecision?.route === "/v1/responses image_generation", "WorkGraph OS backend executor should persist result routing decisions");
   assert(workGraphRun.workspace?.memories?.[0]?.sourceId === "workflow-smoke", "WorkGraph OS backend executor should persist run memory objects");
   assert(workGraphRun.objectIndex?.counts?.result === 2, "WorkGraph OS backend executor should update the result object index");
   const workGraphHistory = await request("/workgraph-os/history");
@@ -348,6 +353,7 @@ try {
   assert(sqliteObjects?.rows?.some((row) => row.id === "feedback:fb-smoke" && String(row.payload_json).includes("memoryId")), "WorkGraph OS SQLite export should include linked feedback payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "memory:mem-smoke" && String(row.payload_json).includes("sourceType")), "WorkGraph OS SQLite export should include structured memory payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === `result:${workGraphRun.execution.resultId}` && String(row.payload_json).includes("workgraph-os-backend")), "WorkGraph OS SQLite export should include backend executor result rows");
+  assert(sqliteObjects?.rows?.some((row) => row.id === `result:${workGraphRun.execution.resultId}` && String(row.payload_json).includes("routingDecision")), "WorkGraph OS SQLite export should include result routing decision payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "node:node-smoke"), "WorkGraph OS SQLite export should include persisted node rows");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:workflow-smoke" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include workflow-to-asset graph edges");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "node:node-smoke" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include node-to-asset graph edges");

@@ -527,6 +527,19 @@ type WorkGraphOsExecution = {
   createdAt: string;
 };
 
+type WorkGraphOsRoutingDecision = {
+  id: string;
+  nodeId: string;
+  nodeType: string;
+  requestedModelId: string;
+  selectedModelId: string;
+  selectedCapability: "image" | "video" | "text" | "local";
+  fallbackModelIds: string[];
+  route: string;
+  reason: string;
+  createdAt: string;
+};
+
 type WorkGraphOsSqliteTable = {
   name: string;
   createSql: string;
@@ -2149,6 +2162,91 @@ function workGraphFindSkillForNode(workspace: WorkGraphOsWorkspace, node: unknow
   }) ?? workspace.skills[0];
 }
 
+function workGraphModelCatalog(workspace: WorkGraphOsWorkspace) {
+  const activeModel = workspace.activeModelId || "imgen";
+  return [
+    {
+      id: "gpt-image",
+      kind: "image",
+      status: activeModel === "gpt-image" ? "fallback" : "fallback",
+      capabilities: ["image", "reference_image"],
+      fallbackModelIds: ["imgen"],
+      nodeAffinity: ["output", "compose"],
+      route: "/v1/images/generations"
+    },
+    {
+      id: "imgen",
+      kind: "image",
+      status: "ready",
+      capabilities: ["image", "reference_image", "composition"],
+      fallbackModelIds: ["gpt-image", "local-flux"],
+      nodeAffinity: ["skill", "compose", "output"],
+      route: "/v1/responses image_generation"
+    },
+    {
+      id: "kling",
+      kind: "video",
+      status: "fallback",
+      capabilities: ["video", "reference_image"],
+      fallbackModelIds: ["imgen"],
+      nodeAffinity: ["video"],
+      route: "/v1/videos"
+    },
+    {
+      id: "local-flux",
+      kind: "local",
+      status: "offline",
+      capabilities: ["image", "local"],
+      fallbackModelIds: ["imgen"],
+      nodeAffinity: ["compose", "output"],
+      route: "ollama/local-image"
+    },
+    {
+      id: activeModel,
+      kind: workGraphResultKind(workGraphDefaultOutput(workspace, {})) === "video" ? "video" : "image",
+      status: "ready",
+      capabilities: ["image", "reference_image", "composition"],
+      fallbackModelIds: ["imgen"],
+      nodeAffinity: ["skill", "compose", "output", "video"],
+      route: "workspace-active-model"
+    }
+  ].filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index);
+}
+
+function buildWorkGraphModelRoutingDecision(workspace: WorkGraphOsWorkspace, node: unknown, output: string): WorkGraphOsRoutingDecision {
+  const createdAt = now();
+  const nodeId = objectString(node, "id", "workflow");
+  const nodeType = objectString(node, "type", "workflow");
+  const outputKind = workGraphResultKind(output);
+  const requiredCapability = outputKind === "video" ? "video" : outputKind === "document" || outputKind === "archive" ? "text" : "image";
+  const models = workGraphModelCatalog(workspace);
+  const requested = models.find((item) => item.id === workspace.activeModelId);
+  const activeMatches = requested
+    && requested.status === "ready"
+    && requested.capabilities.includes(requiredCapability)
+    && requested.nodeAffinity.includes(nodeType);
+  const selected = activeMatches
+    ? requested
+    : models.find((item) => item.status === "ready" && item.capabilities.includes(requiredCapability) && item.nodeAffinity.includes(nodeType))
+      ?? models.find((item) => item.status === "ready" && item.capabilities.includes(requiredCapability))
+      ?? requested
+      ?? models[0];
+  return {
+    id: `route-${Date.now().toString(36)}-${nanoid(6)}`,
+    nodeId,
+    nodeType,
+    requestedModelId: workspace.activeModelId,
+    selectedModelId: selected.id,
+    selectedCapability: requiredCapability === "text" ? "text" : selected.kind === "local" ? "local" : requiredCapability,
+    fallbackModelIds: selected.fallbackModelIds,
+    route: selected.route,
+    reason: activeMatches
+      ? `active model ${workspace.activeModelId} matches ${nodeType}/${requiredCapability}`
+      : `selected ${selected.id} for ${nodeType}/${requiredCapability}; active ${workspace.activeModelId} did not fully match capability, status, or node affinity`,
+    createdAt
+  };
+}
+
 function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.infer<typeof workGraphOsRunSchema>) {
   const createdAt = now();
   const node = workspace.nodes.find((item) => objectString(item, "id", "") === input.nodeId)
@@ -2161,6 +2259,7 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
   const skill = workGraphFindSkillForNode(workspace, node);
   const skillId = objectString(skill, "id", "skill-auto");
   const output = workGraphDefaultOutput(workspace, node);
+  const routingDecision = buildWorkGraphModelRoutingDecision(workspace, node, output);
   const materialIds = objectStringArray(node, "materialIds").length ? objectStringArray(node, "materialIds") : workspace.selectedIds;
   const jobId = `job-${Date.now().toString(36)}-${nanoid(6)}`;
   const resultId = `result-${Date.now().toString(36)}-${nanoid(6)}`;
@@ -2173,7 +2272,8 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
     nodeId,
     workflowId,
     skillId,
-    modelId: workspace.activeModelId,
+    modelId: routingDecision.selectedModelId,
+    routingDecision,
     executor: "workgraph-os-backend",
     note: input.note ?? "",
     createdAt,
@@ -2193,6 +2293,7 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
     materialIds,
     canSaveAsMaterial: true,
     executor: "workgraph-os-backend",
+    routingDecision,
     createdAt,
     updatedAt: createdAt
   };
@@ -2206,7 +2307,7 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
     targetId: resultId,
     confidence: 0.6,
     reusable: false,
-    body: `${job.title} -> ${output} via ${skillId} and ${workspace.activeModelId}`,
+    body: `${job.title} -> ${output} via ${skillId} and ${routingDecision.selectedModelId}: ${routingDecision.reason}`,
     createdAt
   };
   const workflow = workspace.workflow && typeof workspace.workflow === "object"
@@ -2233,7 +2334,7 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
     nodeId,
     nodeTitle,
     workflowId,
-    modelId: workspace.activeModelId,
+    modelId: routingDecision.selectedModelId,
     skillId,
     jobId,
     resultId,
@@ -2241,7 +2342,7 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
     executor: "workgraph-os-backend",
     createdAt
   };
-  return { execution, workspace: nextWorkspace, job, result, memory };
+  return { execution, workspace: nextWorkspace, job, result, memory, routingDecision };
 }
 
 function workGraphObject(
@@ -2318,8 +2419,15 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
       id: workspace.activeModelId || "active",
       activeModelId: workspace.activeModelId,
       routingPolicy: "match node capability first, then fallback by availability and cost",
-      fallbackModelIds: [],
-      nodeAffinity: ["skill", "compose", "output", "video"]
+      modelCatalog: workGraphModelCatalog(workspace).map((item) => ({
+        id: item.id,
+        status: item.status,
+        capabilities: item.capabilities,
+        fallbackModelIds: item.fallbackModelIds,
+        nodeAffinity: item.nodeAffinity,
+        route: item.route
+      })),
+      lastRoutingDecision: objectField(workspace.jobs[0], "routingDecision") ?? objectField(workspace.results[0], "routingDecision") ?? null
     }, updatedAt, "derived"),
     workGraphObject("workflow", "active", workflowPayload.title, `${workflowPayload.status} · ${workflowPayload.runCount} run(s) · ${workspace.selectedIds.length} selected asset(s)`, workflowPayload, updatedAt, workspace.workflow ? "workspace" : "derived")
   ];
@@ -6417,6 +6525,7 @@ app.post("/workgraph-os/run", async (req, res) => {
     job: run.job,
     result: run.result,
     memory: run.memory,
+    routingDecision: run.routingDecision,
     objectIndex,
     historyEntry
   });

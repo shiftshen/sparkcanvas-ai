@@ -256,6 +256,28 @@ svg { width: 17px; height: 17px; }
   margin-bottom: 8px;
 }
 
+.pm-status-pill {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 8px;
+  padding: 9px 10px;
+  border: 1px solid #1f3445;
+  border-radius: 8px;
+  background: #0b1722;
+}
+
+.pm-status-pill span,
+.pm-status-pill small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-status-pill span {
+  color: #dff6ff;
+  font-weight: 700;
+}
+
 .pm-skill > svg:last-child {
   margin-left: auto;
   color: #65758b;
