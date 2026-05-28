@@ -29,7 +29,7 @@ assert(source.includes("/workgraph-os/objects"), "workgraph-os should request th
 assert(source.includes("WorkGraphHistoryEntry"), "workgraph-os should model object history entries");
 assert(source.includes("/workgraph-os/history"), "workgraph-os should request the history API");
 assert(source.includes("nodes: WorkflowNode[]"), "workgraph-os should persist canvas nodes as workspace objects");
-assert(source.includes("nodes: workspace.nodes.length ? workspace.nodes : buildNodes"), "workgraph-os should save generated canvas nodes to the backend");
+assert(source.includes("const nodes = workspace.nodes.length ? workspace.nodes : buildNodes"), "workgraph-os should save generated canvas nodes to the backend");
 assert(source.includes("type GoalObject"), "workgraph-os should define a structured Goal Object");
 assert(source.includes("interpretGoal"), "workgraph-os should interpret natural language input into a Goal Object");
 assert(source.includes("successCriteria"), "workgraph-os should carry goal success criteria");
@@ -39,6 +39,9 @@ assert(source.includes("runCount") && source.includes("successCount"), "workgrap
 assert(source.includes("fallbackModelIds"), "workgraph-os should define model fallback routing metadata");
 assert(source.includes("nodeAffinity"), "workgraph-os should define node-level model affinity");
 assert(source.includes("routingRules"), "workgraph-os should define model routing rules");
+assert(source.includes("type WorkflowObject"), "workgraph-os should define a structured Workflow Object");
+assert(source.includes("buildWorkflowObject"), "workgraph-os should build reusable workflow objects from graph state");
+assert(source.includes("edgeIds") && source.includes("runCount"), "workgraph-os should track workflow edges and run counts");
 
 console.log(JSON.stringify({
   ok: true,
@@ -54,6 +57,7 @@ console.log(JSON.stringify({
     "workgraph-os-node-object-ready",
     "workgraph-os-goal-object-ready",
     "workgraph-os-skill-object-ready",
-    "workgraph-os-model-object-ready"
+    "workgraph-os-model-object-ready",
+    "workgraph-os-workflow-object-ready"
   ]
 }));

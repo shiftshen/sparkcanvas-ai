@@ -148,9 +148,30 @@ type GoalObject = {
   updatedAt: string;
 };
 
+type WorkflowObject = {
+  id: string;
+  title: string;
+  goalId: string;
+  version: string;
+  status: "draft" | "ready" | "running" | "completed";
+  reusable: boolean;
+  prompt: string;
+  nodeIds: string[];
+  edgeIds: string[];
+  selectedMaterialIds: string[];
+  skillIds: string[];
+  modelIds: string[];
+  resultIds: string[];
+  runCount: number;
+  lastRunAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type WorkGraphWorkspace = {
   version: 1;
   goal: GoalObject;
+  workflow: WorkflowObject;
   materials: Material[];
   skills: SkillTemplate[];
   nodes: WorkflowNode[];
@@ -447,29 +468,77 @@ function interpretGoal(rawInput: string, brandId = "dapot", previous?: GoalObjec
   };
 }
 
-const defaultWorkspace = (): WorkGraphWorkspace => ({
-  version: 1,
-  goal: interpretGoal(defaultPrompt, "dapot"),
-  materials: seedMaterials,
-  skills: skillTemplates,
-  nodes: [],
-  activeBrandId: "dapot",
-  activeModelId: "imgen",
-  selectedIds: ["mat-x-logo", "mat-product"],
-  prompt: defaultPrompt,
-  activeMaterialId: seedMaterials[0].id,
-  jobs: [],
-  feedback: [],
-  memories: [
-    {
-      id: "mem-wgos-principle",
-      title: "WGOS product rule",
-      source: "manual",
-      body: "用户定义目标，系统组织工作图谱，用户判断结果，系统沉淀能力。",
-      createdAt: now()
-    }
-  ]
-});
+function buildWorkflowObject(input: {
+  prompt: string;
+  goal: GoalObject;
+  nodes: WorkflowNode[];
+  selectedIds: string[];
+  skills: SkillTemplate[];
+  activeModelId: string;
+  jobs: Job[];
+  previous?: WorkflowObject;
+}): WorkflowObject {
+  const timestamp = now();
+  const nodeIds = input.nodes.map((node) => node.id);
+  const edgeIds = input.nodes.slice(1).map((node, index) => `${input.nodes[index].id}->${node.id}`);
+  return {
+    id: input.previous?.id ?? "workflow-active",
+    title: input.goal.title || "Active workflow",
+    goalId: input.goal.id,
+    version: input.previous?.version ?? "0.1.0",
+    status: input.jobs.some((job) => job.status === "running") ? "running" : input.jobs.some((job) => job.status === "done") ? "completed" : "ready",
+    reusable: input.skills.some((skill) => skill.evolution.runCount > 0 || skill.evolution.status !== "seed"),
+    prompt: input.prompt,
+    nodeIds,
+    edgeIds,
+    selectedMaterialIds: input.selectedIds,
+    skillIds: input.skills.map((skill) => skill.id),
+    modelIds: [input.activeModelId],
+    resultIds: input.jobs.map((job) => job.id),
+    runCount: input.previous?.runCount ?? input.jobs.length,
+    lastRunAt: input.jobs[0]?.createdAt ?? input.previous?.lastRunAt,
+    createdAt: input.previous?.createdAt ?? timestamp,
+    updatedAt: timestamp
+  };
+}
+
+const defaultWorkspace = (): WorkGraphWorkspace => {
+  const goal = interpretGoal(defaultPrompt, "dapot");
+  const nodes: WorkflowNode[] = [];
+  const jobs: Job[] = [];
+  return {
+    version: 1,
+    goal,
+    workflow: buildWorkflowObject({
+      prompt: defaultPrompt,
+      goal,
+      nodes,
+      selectedIds: ["mat-x-logo", "mat-product"],
+      skills: skillTemplates,
+      activeModelId: "imgen",
+      jobs
+    }),
+    materials: seedMaterials,
+    skills: skillTemplates,
+    nodes,
+    activeBrandId: "dapot",
+    activeModelId: "imgen",
+    selectedIds: ["mat-x-logo", "mat-product"],
+    prompt: defaultPrompt,
+    activeMaterialId: seedMaterials[0].id,
+    jobs,
+    feedback: [],
+    memories: [
+      {
+        id: "mem-wgos-principle",
+        title: "WGOS product rule",
+        source: "manual",
+        body: "用户定义目标，系统组织工作图谱，用户判断结果，系统沉淀能力。",
+        createdAt: now()
+      }
+    ]
+  };
+};
 
 function readStoredWorkspace(): string | null {
   if (typeof window === "undefined") return null;
@@ -497,14 +566,28 @@ function loadWorkspace(): WorkGraphWorkspace {
     const raw = readStoredWorkspace();
     if (!raw) return defaultWorkspace();
     const parsed = JSON.parse(raw) as Partial<WorkGraphWorkspace>;
+    const goal = parsed.goal ?? interpretGoal(parsed.prompt ?? defaultPrompt, parsed.activeBrandId ?? "dapot");
+    const skills = parsed.skills?.length ? parsed.skills.map(normalizeSkillObject) : skillTemplates;
+    const nodes = parsed.nodes?.length ? parsed.nodes : [];
+    const jobs = parsed.jobs ?? [];
     return {
       ...defaultWorkspace(),
       ...parsed,
       version: 1,
-      goal: parsed.goal ?? interpretGoal(parsed.prompt ?? defaultPrompt, parsed.activeBrandId ?? "dapot"),
+      goal,
+      workflow: parsed.workflow ?? buildWorkflowObject({
+        prompt: parsed.prompt ?? defaultPrompt,
+        goal,
+        nodes,
+        selectedIds: parsed.selectedIds ?? ["mat-x-logo", "mat-product"],
+        skills,
+        activeModelId: parsed.activeModelId ?? "imgen",
+        jobs
+      }),
       materials: parsed.materials?.length ? parsed.materials : seedMaterials,
-      skills: parsed.skills?.length ? parsed.skills.map(normalizeSkillObject) : skillTemplates,
-      nodes: parsed.nodes?.length ? parsed.nodes : []
+      skills,
+      nodes,
+      jobs
     };
   } catch {
     return defaultWorkspace();
@@ -552,15 +635,29 @@ async function loadBackendWorkspace() {
   if (!response.ok) throw new Error("backend workspace unavailable");
   const data = await response.json() as { workspace?: Partial<WorkGraphWorkspace> | null; objectIndex?: WorkGraphObjectIndex };
   if (!data.workspace) return null;
+  const goal = data.workspace.goal ?? interpretGoal(data.workspace.prompt ?? defaultPrompt, data.workspace.activeBrandId ?? "dapot");
+  const skills = data.workspace.skills?.length ? data.workspace.skills.map(normalizeSkillObject) : skillTemplates;
+  const nodes = data.workspace.nodes?.length ? data.workspace.nodes : [];
+  const jobs = data.workspace.jobs ?? [];
   return {
     workspace: {
       ...defaultWorkspace(),
       ...data.workspace,
       version: 1,
-      goal: data.workspace.goal ?? interpretGoal(data.workspace.prompt ?? defaultPrompt, data.workspace.activeBrandId ?? "dapot"),
+      goal,
+      workflow: data.workspace.workflow ?? buildWorkflowObject({
+        prompt: data.workspace.prompt ?? defaultPrompt,
+        goal,
+        nodes,
+        selectedIds: data.workspace.selectedIds ?? ["mat-x-logo", "mat-product"],
+        skills,
+        activeModelId: data.workspace.activeModelId ?? "imgen",
+        jobs
+      }),
       materials: data.workspace.materials?.length ? data.workspace.materials : seedMaterials,
-      skills: data.workspace.skills?.length ? data.workspace.skills.map(normalizeSkillObject) : skillTemplates,
-      nodes: data.workspace.nodes?.length ? data.workspace.nodes : []
+      skills,
+      nodes,
+      jobs
     } satisfies WorkGraphWorkspace,
     objectIndex: data.objectIndex
   };
@@ -570,18 +667,30 @@ async function saveBackendWorkspace(workspace: WorkGraphWorkspace) {
   const goal = workspace.goal.rawInput === workspace.prompt && workspace.goal.brandId === workspace.activeBrandId
     ? workspace.goal
     : interpretGoal(workspace.prompt, workspace.activeBrandId, workspace.goal);
+  const nodes = workspace.nodes.length ? workspace.nodes : buildNodes(
+    workspace.prompt,
+    workspace.materials,
+    workspace.skills,
+    brandMemories.find((item) => item.id === workspace.activeBrandId) ?? brandMemories[0],
+    modelOptions.find((item) => item.id === workspace.activeModelId) ?? modelOptions[1]
+  );
+  const workflow = buildWorkflowObject({
+    prompt: workspace.prompt,
+    goal,
+    nodes,
+    selectedIds: workspace.selectedIds,
+    skills: workspace.skills,
+    activeModelId: workspace.activeModelId,
+    jobs: workspace.jobs,
+    previous: workspace.workflow
+  });
   const response = await backendRequest("/workgraph-os/workspace", {
     method: "PUT",
     body: JSON.stringify({
       ...workspace,
       goal,
-      nodes: workspace.nodes.length ? workspace.nodes : buildNodes(
-        workspace.prompt,
-        workspace.materials,
-        workspace.skills,
-        brandMemories.find((item) => item.id === workspace.activeBrandId) ?? brandMemories[0],
-        modelOptions.find((item) => item.id === workspace.activeModelId) ?? modelOptions[1]
-      )
+      workflow,
+      nodes
     })
   });
   if (!response.ok) throw new Error("backend workspace save failed");
@@ -870,10 +979,20 @@ function App() {
   function updateWorkspace(updater: (current: WorkGraphWorkspace) => WorkGraphWorkspace) {
     setWorkspace((current) => {
       const next = updater(current);
-      if (next.prompt !== next.goal.rawInput || next.activeBrandId !== next.goal.brandId) {
-        return { ...next, goal: interpretGoal(next.prompt, next.activeBrandId, next.goal) };
-      }
-      return next;
+      const goal = next.prompt !== next.goal.rawInput || next.activeBrandId !== next.goal.brandId
+        ? interpretGoal(next.prompt, next.activeBrandId, next.goal)
+        : next.goal;
+      const workflow = buildWorkflowObject({
+        prompt: next.prompt,
+        goal,
+        nodes: next.nodes,
+        selectedIds: next.selectedIds,
+        skills: next.skills,
+        activeModelId: next.activeModelId,
+        jobs: next.jobs,
+        previous: next.workflow
+      });
+      return { ...next, goal, workflow };
     });
   }
 
@@ -1131,6 +1250,11 @@ function App() {
             <strong>{goal.title}</strong>
             <small>{goal.goalType} · {goal.outputTarget.toUpperCase()} · {goal.normalizedIntent}</small>
             <p>{goal.successCriteria[0]}</p>
+          </div>
+          <div className="pm-goal-card">
+            <strong>{workspace.workflow.title}</strong>
+            <small>{workspace.workflow.status} · v{workspace.workflow.version} · {workspace.workflow.nodeIds.length} nodes · {workspace.workflow.edgeIds.length} edges</small>
+            <p>{workspace.workflow.reusable ? "可复用工作图谱，已具备能力沉淀基础。" : "运行并反馈后可沉淀为可复用工作图谱。"}</p>
           </div>
           <div className="pm-object-grid">
             <span>Goal <strong>{objectCount("goal", "goals")}</strong></span>

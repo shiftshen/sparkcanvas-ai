@@ -465,6 +465,7 @@ type Db = {
 type WorkGraphOsWorkspace = {
   version: 1;
   goal?: unknown;
+  workflow?: unknown;
   materials: unknown[];
   skills: unknown[];
   nodes: unknown[];
@@ -714,6 +715,7 @@ const outputSchema = z.object({
 const workGraphOsWorkspaceSchema = z.object({
   version: z.literal(1),
   goal: z.unknown().optional(),
+  workflow: z.unknown().optional(),
   materials: z.array(z.unknown()).default([]),
   skills: z.array(z.unknown()).default([]),
   nodes: z.array(z.unknown()).default([]),
@@ -2128,10 +2130,35 @@ function workGraphGoalPayload(workspace: WorkGraphOsWorkspace) {
   };
 }
 
+function workGraphWorkflowPayload(workspace: WorkGraphOsWorkspace) {
+  const existing = workspace.workflow && typeof workspace.workflow === "object" ? workspace.workflow : undefined;
+  const nodeIds = objectField(existing, "nodeIds") ?? workspace.nodes.map((item, index) => `node:${objectString(item, "id", `node-${index}`)}`);
+  const resultIds = objectField(existing, "resultIds") ?? workspace.jobs.map((item, index) => objectString(item, "id", `result-${index}`));
+  return {
+    id: objectString(existing, "id", "active"),
+    title: objectString(existing, "title", "Active Workflow"),
+    goalId: objectString(existing, "goalId", "active"),
+    version: objectString(existing, "version", "0.1.0"),
+    status: objectString(existing, "status", workspace.jobs.length ? "running" : "ready"),
+    reusable: Boolean(objectField(existing, "reusable")),
+    prompt: objectString(existing, "prompt", workspace.prompt),
+    nodeIds,
+    edgeIds: objectField(existing, "edgeIds") ?? [],
+    selectedMaterialIds: objectField(existing, "selectedMaterialIds") ?? workspace.selectedIds,
+    skillIds: objectField(existing, "skillIds") ?? workspace.skills.map((item, index) => objectString(item, "id", `skill-${index}`)),
+    modelIds: objectField(existing, "modelIds") ?? [workspace.activeModelId],
+    resultIds,
+    runCount: objectField(existing, "runCount") ?? workspace.jobs.length,
+    lastRunAt: objectString(existing, "lastRunAt", ""),
+    jobs: workspace.jobs
+  };
+}
+
 function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
   if (!workspace) return { counts: {}, objects: [] as WorkGraphOsObject[] };
   const updatedAt = workspace.updatedAt || now();
   const goalPayload = workGraphGoalPayload(workspace);
+  const workflowPayload = workGraphWorkflowPayload(workspace);
   const objects: WorkGraphOsObject[] = [
     workGraphObject("goal", "active", goalPayload.title, goalPayload.normalizedIntent || goalPayload.rawInput || "No goal prompt", goalPayload, updatedAt, workspace.goal ? "workspace" : "derived"),
     workGraphObject("brand", workspace.activeBrandId || "active", `Brand ${workspace.activeBrandId || "active"}`, `Active brand context: ${workspace.activeBrandId || "unset"}`, { id: workspace.activeBrandId || "active" }, updatedAt, "derived"),
@@ -2142,7 +2169,7 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
       fallbackModelIds: [],
       nodeAffinity: ["skill", "compose", "output", "video"]
     }, updatedAt, "derived"),
-    workGraphObject("workflow", "active", "Active Workflow", `${workspace.jobs.length || 1} workflow run(s), ${workspace.selectedIds.length} selected asset(s)`, { id: "active", prompt: workspace.prompt, selectedIds: workspace.selectedIds, jobs: workspace.jobs }, updatedAt, "derived")
+    workGraphObject("workflow", "active", workflowPayload.title, `${workflowPayload.status} · ${workflowPayload.runCount} run(s) · ${workspace.selectedIds.length} selected asset(s)`, workflowPayload, updatedAt, workspace.workflow ? "workspace" : "derived")
   ];
   workspace.materials.forEach((item, index) => {
     objects.push(workGraphObject("asset", `asset-${index}`, objectString(item, "title", `Asset ${index + 1}`), objectString(item, "token", objectString(item, "fileName", "")), item, objectString(item, "createdAt", updatedAt)));
@@ -2179,6 +2206,8 @@ function buildWorkGraphOsEdges(workspace: WorkGraphOsWorkspace | null, objects: 
   if (!workspace) return [] as WorkGraphOsEdge[];
   const updatedAt = workspace.updatedAt || now();
   const objectIds = new Set(objects.map((object) => object.id));
+  const goalObjectId = `goal:${workGraphGoalPayload(workspace).id}`;
+  const workflowObjectId = `workflow:${workGraphWorkflowPayload(workspace).id}`;
   const edges: WorkGraphOsEdge[] = [];
   const pushEdge = (fromObjectId: string, toObjectId: string, relation: WorkGraphOsEdge["relation"], payload: unknown = {}) => {
     if (!objectIds.has(fromObjectId) || !objectIds.has(toObjectId)) return;
@@ -2192,14 +2221,14 @@ function buildWorkGraphOsEdges(workspace: WorkGraphOsWorkspace | null, objects: 
     });
   };
 
-  pushEdge("goal:active", `brand:${workspace.activeBrandId || "active"}`, "uses_brand", { activeBrandId: workspace.activeBrandId });
-  pushEdge("goal:active", `model:${workspace.activeModelId || "active"}`, "uses_model", { activeModelId: workspace.activeModelId });
+  pushEdge(goalObjectId, `brand:${workspace.activeBrandId || "active"}`, "uses_brand", { activeBrandId: workspace.activeBrandId });
+  pushEdge(goalObjectId, `model:${workspace.activeModelId || "active"}`, "uses_model", { activeModelId: workspace.activeModelId });
   workspace.selectedIds.forEach((id) => {
-    pushEdge("workflow:active", `asset:${id}`, "uses_asset", { selectedId: id });
+    pushEdge(workflowObjectId, `asset:${id}`, "uses_asset", { selectedId: id });
   });
   workspace.nodes.forEach((item, index) => {
     const id = objectString(item, "id", `node-${index}`);
-    pushEdge("workflow:active", `node:${id}`, "produces_result", item);
+    pushEdge(workflowObjectId, `node:${id}`, "produces_result", item);
     const materialIds = objectField(item, "materialIds");
     if (Array.isArray(materialIds)) {
       materialIds.forEach((materialId) => {
@@ -2209,7 +2238,7 @@ function buildWorkGraphOsEdges(workspace: WorkGraphOsWorkspace | null, objects: 
   });
   workspace.jobs.forEach((item, index) => {
     const id = objectString(item, "id", `result-${index}`);
-    pushEdge("workflow:active", `result:${id}`, "produces_result", item);
+    pushEdge(workflowObjectId, `result:${id}`, "produces_result", item);
   });
   workspace.feedback.forEach((item, index) => {
     const id = objectString(item, "id", `feedback-${index}`);
