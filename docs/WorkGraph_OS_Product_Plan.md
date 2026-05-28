@@ -56,6 +56,15 @@ Implemented in `apps/workgraph-os`:
 - Supports no-match skill creation from the search phrase.
 - Builds a visible workflow graph from CAL prompt resources, brand memory, model, skill, output, and review nodes.
 - Supports active node editing and natural-language modification routing.
+- Persists the active workspace snapshot in local browser storage as typed WGOS objects:
+  - Asset Object
+  - Skill Object
+  - Workflow Object
+  - Result Object
+  - Feedback Object
+  - Memory Object
+- Shows an object graph counter for Goal, Asset, Brand, Skill, Model, Workflow, Result, Feedback, and Memory objects.
+- Records user feedback on the active node and converts it into Memory Objects for later skill/workflow evolution.
 - Displays task queue and simulated completion.
 
 ## pi-web Findings
@@ -85,7 +94,7 @@ Relevant package facts:
 ## Next Integration Steps
 
 1. Add a local bridge service or Next/Vite proxy that can talk to pi-web/pi agent APIs.
-2. Persist material metadata to local disk instead of browser memory.
+2. Move browser-local workspace persistence to a local disk/SQLite store.
 3. Convert uploaded files into real pi-readable paths and include them in prompts.
 4. Add output watcher for generated files in the active working directory.
 5. Replace simulated job completion with real pi session events.

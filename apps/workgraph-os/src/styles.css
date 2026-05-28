@@ -439,6 +439,29 @@ dd {
   gap: 8px;
 }
 
+.pm-object-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pm-object-grid span {
+  min-height: 52px;
+  display: grid;
+  gap: 2px;
+  align-content: center;
+  padding: 8px;
+  border: 1px solid #253044;
+  border-radius: 8px;
+  color: #93a4b8;
+  background: #080c13;
+}
+
+.pm-object-grid strong {
+  color: #f8fafc;
+  font-size: 18px;
+}
+
 .pm-evolution > div {
   display: grid;
   gap: 4px;
@@ -454,7 +477,8 @@ dd {
 }
 
 .pm-evolution button,
-.pm-wide-action {
+.pm-wide-action,
+.pm-feedback-actions button {
   min-height: 38px;
   display: inline-flex;
   align-items: center;
@@ -462,6 +486,42 @@ dd {
   gap: 8px;
   border-radius: 8px;
   background: #223047;
+}
+
+.pm-feedback {
+  display: grid;
+  gap: 8px;
+}
+
+.pm-feedback textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid #253044;
+  border-radius: 8px;
+  padding: 10px;
+  color: #eef2f7;
+  outline: 0;
+  background: #080c13;
+}
+
+.pm-feedback-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pm-memory {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #1c2534;
+  border-radius: 8px;
+  background: #0b1018;
+}
+
+.pm-memory p {
+  margin: 0;
 }
 
 .pm-node-editor textarea {

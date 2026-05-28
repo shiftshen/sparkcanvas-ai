@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseCalPrompt, summarizeCal } from "@sparkcanvas/ai-design-language";
 import {
@@ -71,6 +71,7 @@ type Job = {
   status: WorkflowStatus;
   output: string;
   materials: string[];
+  createdAt: string;
 };
 
 type BrandMemory = {
@@ -91,6 +92,39 @@ type ModelOption = {
   quality: string;
   status: "ready" | "fallback" | "offline";
 };
+
+type FeedbackObject = {
+  id: string;
+  targetId: string;
+  targetType: "workflow" | "skill" | "result" | "model" | "brand";
+  rating: "accepted" | "needs_revision" | "failed";
+  note: string;
+  createdAt: string;
+};
+
+type MemoryObject = {
+  id: string;
+  title: string;
+  source: "feedback" | "run" | "manual";
+  body: string;
+  createdAt: string;
+};
+
+type WorkGraphWorkspace = {
+  version: 1;
+  materials: Material[];
+  skills: SkillTemplate[];
+  activeBrandId: string;
+  activeModelId: string;
+  selectedIds: string[];
+  prompt: string;
+  activeMaterialId: string;
+  jobs: Job[];
+  feedback: FeedbackObject[];
+  memories: MemoryObject[];
+};
+
+type StorageState = "browser-local" | "memory-only";
 
 const now = () => new Date().toISOString();
 
@@ -203,6 +237,76 @@ const modelOptions: ModelOption[] = [
 ];
 
 const defaultPrompt = "@imgen /compose 使用 $xmanx.logo $xmanx.product，生成黑橙品牌首图 -> PNG";
+const workspaceStorageKey = "workgraph-os.workspace.v1";
+
+const defaultWorkspace = (): WorkGraphWorkspace => ({
+  version: 1,
+  materials: seedMaterials,
+  skills: skillTemplates,
+  activeBrandId: "dapot",
+  activeModelId: "imgen",
+  selectedIds: ["mat-x-logo", "mat-product"],
+  prompt: defaultPrompt,
+  activeMaterialId: seedMaterials[0].id,
+  jobs: [],
+  feedback: [],
+  memories: [
+    {
+      id: "mem-wgos-principle",
+      title: "WGOS product rule",
+      source: "manual",
+      body: "用户定义目标，系统组织工作图谱，用户判断结果，系统沉淀能力。",
+      createdAt: now()
+    }
+  ]
+});
+
+function readStoredWorkspace(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage?.getItem(workspaceStorageKey) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function detectStorageState(): StorageState {
+  if (typeof window === "undefined") return "memory-only";
+  try {
+    const key = `${workspaceStorageKey}.probe`;
+    window.localStorage?.setItem(key, "1");
+    window.localStorage?.removeItem(key);
+    return "browser-local";
+  } catch {
+    return "memory-only";
+  }
+}
+
+function loadWorkspace(): WorkGraphWorkspace {
+  try {
+    const raw = readStoredWorkspace();
+    if (!raw) return defaultWorkspace();
+    const parsed = JSON.parse(raw) as Partial<WorkGraphWorkspace>;
+    return {
+      ...defaultWorkspace(),
+      ...parsed,
+      version: 1,
+      materials: parsed.materials?.length ? parsed.materials : seedMaterials,
+      skills: parsed.skills?.length ? parsed.skills : skillTemplates
+    };
+  } catch {
+    return defaultWorkspace();
+  }
+}
+
+function saveWorkspace(workspace: WorkGraphWorkspace) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage?.setItem(workspaceStorageKey, JSON.stringify(workspace));
+  } catch {
+    // Storage can be unavailable in restricted browser contexts. WGOS must keep running in memory.
+  }
+}
 
 function formatBytes(bytes: number) {
   if (!bytes) return "0 B";
@@ -334,19 +438,15 @@ function buildNodes(prompt: string, materials: Material[], skills: SkillTemplate
 }
 
 function App() {
-  const [materials, setMaterials] = useState(seedMaterials);
-  const [skills, setSkills] = useState(skillTemplates);
-  const [activeBrandId, setActiveBrandId] = useState("dapot");
-  const [activeModelId, setActiveModelId] = useState("imgen");
-  const [selectedIds, setSelectedIds] = useState<string[]>(["mat-x-logo", "mat-product"]);
-  const [prompt, setPrompt] = useState(defaultPrompt);
-  const [activeMaterialId, setActiveMaterialId] = useState(seedMaterials[0].id);
+  const [workspace, setWorkspace] = useState(loadWorkspace);
+  const { materials, skills, activeBrandId, activeModelId, selectedIds, prompt, activeMaterialId, jobs, feedback, memories } = workspace;
   const [activeNodeId, setActiveNodeId] = useState("skill");
+  const [storageState] = useState(detectStorageState);
   const [skillSearch, setSkillSearch] = useState("");
   const [newSkillName, setNewSkillName] = useState("");
   const [newSkillCommand, setNewSkillCommand] = useState("");
-  const [jobs, setJobs] = useState<Job[]>([]);
   const [query, setQuery] = useState("");
+  const [feedbackNote, setFeedbackNote] = useState("");
   const activeBrand = brandMemories.find((item) => item.id === activeBrandId) ?? brandMemories[0];
   const activeModel = modelOptions.find((item) => item.id === activeModelId) ?? modelOptions[1];
   const nodes = useMemo(() => buildNodes(prompt, materials, skills, activeBrand, activeModel), [materials, prompt, skills, activeBrand, activeModel]);
@@ -368,10 +468,32 @@ function App() {
       .toLowerCase()
       .includes(needle);
   });
+  const objectCounts = {
+    goals: 1,
+    assets: materials.length,
+    brands: brandMemories.length,
+    skills: skills.length,
+    models: modelOptions.length,
+    workflows: jobs.length ? jobs.length : 1,
+    results: jobs.filter((job) => job.status === "done").length,
+    feedback: feedback.length,
+    memories: memories.length
+  };
+
+  useEffect(() => {
+    saveWorkspace(workspace);
+  }, [workspace]);
+
+  function updateWorkspace(updater: (current: WorkGraphWorkspace) => WorkGraphWorkspace) {
+    setWorkspace((current) => updater(current));
+  }
 
   function toggleMaterial(id: string) {
-    setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
-    setActiveMaterialId(id);
+    updateWorkspace((current) => ({
+      ...current,
+      activeMaterialId: id,
+      selectedIds: current.selectedIds.includes(id) ? current.selectedIds.filter((item) => item !== id) : [...current.selectedIds, id]
+    }));
   }
 
   async function handleFiles(files: FileList | null) {
@@ -394,16 +516,22 @@ function App() {
         note: "本地上传素材，可作为 skill 参数传入。"
       } satisfies Material;
     }));
-    setMaterials((current) => [...incoming, ...current]);
-    setSelectedIds((current) => [...incoming.map((item) => item.id), ...current]);
-    setActiveMaterialId(incoming[0].id);
     const refs = incoming.map((item) => item.token).join(" ");
-    setPrompt((current) => current.includes(refs) ? current : `${current.replace(/\s*->\s*\w+$/i, "")} ${refs} -> PNG`);
+    updateWorkspace((current) => ({
+      ...current,
+      materials: [...incoming, ...current.materials],
+      selectedIds: [...incoming.map((item) => item.id), ...current.selectedIds],
+      activeMaterialId: incoming[0].id,
+      prompt: current.prompt.includes(refs) ? current.prompt : `${current.prompt.replace(/\s*->\s*\w+$/i, "")} ${refs} -> PNG`
+    }));
   }
 
   function applySkill(template: SkillTemplate) {
     const refs = selectedMaterials.map((item) => item.token).join(" ") || "$local.asset";
-    setPrompt(`@imgen ${template.command} 使用 ${refs}，生成可预览素材结果 -> ${template.output}`);
+    updateWorkspace((current) => ({
+      ...current,
+      prompt: `@imgen ${template.command} 使用 ${refs}，生成可预览素材结果 -> ${template.output}`
+    }));
   }
 
   function createSkillFromSearch() {
@@ -419,8 +547,22 @@ function App() {
       keywords: title.split(/\s+/).filter(Boolean),
       nodeType: /video|视频|mp4/i.test(`${title} ${command}`) ? "video" : "output"
     };
-    setSkills((current) => [skill, ...current]);
-    applySkill(skill);
+    const refs = selectedMaterials.map((item) => item.token).join(" ") || "$local.asset";
+    updateWorkspace((current) => ({
+      ...current,
+      skills: [skill, ...current.skills],
+      prompt: `@imgen ${skill.command} 使用 ${refs}，生成可预览素材结果 -> ${skill.output}`,
+      memories: [
+        {
+          id: `mem-${Date.now().toString(36)}`,
+          title: `Created skill ${skill.command}`,
+          source: "manual",
+          body: `${skill.title}: ${skill.description}`,
+          createdAt: now()
+        },
+        ...current.memories
+      ]
+    }));
     setSkillSearch("");
     setNewSkillName("");
     setNewSkillCommand("");
@@ -429,21 +571,32 @@ function App() {
   function updateActiveNodeBody(body: string) {
     if (!activeNode) return;
     if (activeNode.id === "skill") {
-      setPrompt((current) => current.includes(activeNode.body) ? current.replace(activeNode.body, body) : `${current}\n${body}`);
+      updateWorkspace((current) => ({
+        ...current,
+        prompt: current.prompt.includes(activeNode.body) ? current.prompt.replace(activeNode.body, body) : `${current.prompt}\n${body}`
+      }));
       return;
     }
-    setPrompt((current) => `${current}\n节点 ${activeNode.title}: ${body}`.trim());
+    updateWorkspace((current) => ({
+      ...current,
+      prompt: `${current.prompt}\n节点 ${activeNode.title}: ${body}`.trim()
+    }));
   }
 
   function applyNaturalLanguageChange(change: string) {
     const lower = change.toLowerCase();
     if (!change.trim()) return;
-    if (lower.includes("本地") || lower.includes("local")) setActiveModelId("local-flux");
-    if (lower.includes("最贵") || lower.includes("最好") || lower.includes("高质量")) setActiveModelId("gpt-image");
+    updateWorkspace((current) => ({
+      ...current,
+      activeModelId: lower.includes("本地") || lower.includes("local")
+        ? "local-flux"
+        : lower.includes("最贵") || lower.includes("最好") || lower.includes("高质量")
+          ? "gpt-image"
+          : current.activeModelId,
+      activeBrandId: lower.includes("dapot") ? "dapot" : lower.includes("xmanx") ? "xmanx" : current.activeBrandId,
+      prompt: `${current.prompt}\n修改要求: ${change}`
+    }));
     if (lower.includes("视频") || lower.includes("mp4")) applySkill(skills.find((item) => item.id === "story") ?? skills[0]);
-    if (lower.includes("dapot")) setActiveBrandId("dapot");
-    if (lower.includes("xmanx")) setActiveBrandId("xmanx");
-    setPrompt((current) => `${current}\n修改要求: ${change}`);
   }
 
   function runWorkflow() {
@@ -452,12 +605,56 @@ function App() {
       title: ast.commands[0] ? `/${ast.commands[0]}` : "素材工作流",
       status: "running",
       output: ast.outputs[0]?.toUpperCase() || "PNG",
-      materials: selectedMaterials.map((item) => item.token)
+      materials: selectedMaterials.map((item) => item.token),
+      createdAt: now()
     };
-    setJobs((current) => [job, ...current]);
+    updateWorkspace((current) => ({
+      ...current,
+      jobs: [job, ...current.jobs],
+      memories: [
+        {
+          id: `mem-${Date.now().toString(36)}`,
+          title: `Ran ${job.title}`,
+          source: "run",
+          body: `${job.title} -> ${job.output} with ${job.materials.join(" ") || "no material refs"}`,
+          createdAt: now()
+        },
+        ...current.memories
+      ]
+    }));
     window.setTimeout(() => {
-      setJobs((current) => current.map((item) => item.id === job.id ? { ...item, status: "done" } : item));
+      setWorkspace((current) => ({
+        ...current,
+        jobs: current.jobs.map((item) => item.id === job.id ? { ...item, status: "done" } : item)
+      }));
     }, 900);
+  }
+
+  function recordFeedback(rating: FeedbackObject["rating"]) {
+    const note = feedbackNote.trim() || (rating === "accepted" ? "结果可复用，沉淀为正向样例。" : "需要继续调整。");
+    const feedbackObject: FeedbackObject = {
+      id: `fb-${Date.now().toString(36)}`,
+      targetId: activeNode.id,
+      targetType: activeNode.type === "skill" ? "skill" : activeNode.type === "model" ? "model" : activeNode.type === "brand" ? "brand" : "workflow",
+      rating,
+      note,
+      createdAt: now()
+    };
+    updateWorkspace((current) => ({
+      ...current,
+      feedback: [feedbackObject, ...current.feedback],
+      memories: [
+        {
+          id: `mem-${Date.now().toString(36)}`,
+          title: `Feedback on ${activeNode.title}`,
+          source: "feedback",
+          body: `${rating}: ${note}`,
+          createdAt: feedbackObject.createdAt
+        },
+        ...current.memories
+      ]
+    }));
+    setFeedbackNote("");
   }
 
   return (
@@ -472,7 +669,10 @@ function App() {
         </div>
         <div className="pm-status">
           <span><Bot /> pi-web compatible</span>
-          <span><Library /> {materials.length} materials</span>
+          <span><Library /> {objectCounts.assets} assets</span>
+          <span><Sparkles /> {objectCounts.skills} skills</span>
+          <span><RefreshCcw /> {objectCounts.memories} memories</span>
+          <span><Archive /> {storageState === "browser-local" ? "browser local store" : "memory only"}</span>
           <span><CheckCircle2 /> WGOS local first</span>
         </div>
       </header>
@@ -523,9 +723,24 @@ function App() {
         </section>
 
         <section className="pm-panel compact">
+          <div className="pm-panel-head"><strong>对象图谱</strong><Layers3 /></div>
+          <div className="pm-object-grid">
+            <span>Goal <strong>{objectCounts.goals}</strong></span>
+            <span>Asset <strong>{objectCounts.assets}</strong></span>
+            <span>Brand <strong>{objectCounts.brands}</strong></span>
+            <span>Skill <strong>{objectCounts.skills}</strong></span>
+            <span>Model <strong>{objectCounts.models}</strong></span>
+            <span>Workflow <strong>{objectCounts.workflows}</strong></span>
+            <span>Result <strong>{objectCounts.results}</strong></span>
+            <span>Feedback <strong>{objectCounts.feedback}</strong></span>
+            <span>Memory <strong>{objectCounts.memories}</strong></span>
+          </div>
+        </section>
+
+        <section className="pm-panel compact">
           <div className="pm-panel-head"><strong>品牌画布</strong><FolderOpen /></div>
           {brandMemories.map((brand) => (
-            <button key={brand.id} className={`pm-skill ${activeBrandId === brand.id ? "selected" : ""}`} onClick={() => setActiveBrandId(brand.id)}>
+            <button key={brand.id} className={`pm-skill ${activeBrandId === brand.id ? "selected" : ""}`} onClick={() => updateWorkspace((current) => ({ ...current, activeBrandId: brand.id }))}>
               <Library />
               <span><strong>{brand.name}</strong><small>{brand.colors} · {brand.rules.length} rules</small></span>
             </button>
@@ -535,7 +750,7 @@ function App() {
         <section className="pm-panel compact">
           <div className="pm-panel-head"><strong>模型画布</strong><Bot /></div>
           {modelOptions.map((model) => (
-            <button key={model.id} className={`pm-skill ${activeModelId === model.id ? "selected" : ""}`} onClick={() => setActiveModelId(model.id)}>
+            <button key={model.id} className={`pm-skill ${activeModelId === model.id ? "selected" : ""}`} onClick={() => updateWorkspace((current) => ({ ...current, activeModelId: model.id }))}>
               <Bot />
               <span><strong>{model.name}</strong><small>{model.kind} · {model.cost} · {model.status}</small></span>
             </button>
@@ -608,7 +823,7 @@ function App() {
               <small>{activeNode.type} · {activeNode.status}</small>
               <textarea value={activeNode.body} onChange={(event) => updateActiveNodeBody(event.target.value)} />
               <div className="pm-node-actions">
-                <button type="button" onClick={() => setPrompt(`${prompt}\n修改 ${activeNode.title}: ${activeNode.body}`)}><Pencil /> 写入提示词</button>
+                <button type="button" onClick={() => updateWorkspace((current) => ({ ...current, prompt: `${current.prompt}\n修改 ${activeNode.title}: ${activeNode.body}` }))}><Pencil /> 写入提示词</button>
                 <button type="button" onClick={runWorkflow}><Play /> 跑此节点</button>
               </div>
             </div>
@@ -632,12 +847,33 @@ function App() {
               <Search /> 查找相似 Skill
             </button>
             <button type="button" onClick={() => {
-              setPrompt(`${prompt}\n进化要求: 将 ${matchingSkill.command} 沉淀为可复用 SKILL.md，保留输入素材、模型、失败重试和输出检查。`);
+              updateWorkspace((current) => ({
+                ...current,
+                prompt: `${current.prompt}\n进化要求: 将 ${matchingSkill.command} 沉淀为可复用 SKILL.md，保留输入素材、模型、失败重试和输出检查。`
+              }));
               runWorkflow();
             }}>
               <Wand2 /> 生成进化任务
             </button>
             <p className="pm-muted">后续接入 pi 后，这里会把高频流程保存成 SKILL.md、测试脚本和回归样例。</p>
+          </div>
+        </section>
+
+        <section className="pm-panel">
+          <div className="pm-panel-head"><strong>反馈记忆</strong><CheckCircle2 /></div>
+          <div className="pm-feedback">
+            <textarea value={feedbackNote} onChange={(event) => setFeedbackNote(event.target.value)} placeholder="记录你对当前节点或结果的判断，系统会沉淀为 Memory Object。" />
+            <div className="pm-feedback-actions">
+              <button type="button" onClick={() => recordFeedback("accepted")}><CheckCircle2 /> 接受</button>
+              <button type="button" onClick={() => recordFeedback("needs_revision")}><Pencil /> 需修改</button>
+            </div>
+            {memories.slice(0, 3).map((memory) => (
+              <div key={memory.id} className="pm-memory">
+                <strong>{memory.title}</strong>
+                <small>{memory.source} · {new Date(memory.createdAt).toLocaleString()}</small>
+                <p>{memory.body}</p>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -654,7 +890,7 @@ function App() {
 
       <footer className="pm-composer">
         <button type="button" className="pm-new"><Plus /> 新素材</button>
-        <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+        <textarea value={prompt} onChange={(event) => updateWorkspace((current) => ({ ...current, prompt: event.target.value }))} />
         <div className="pm-composer-side">
           <span>{ast.warnings.length ? ast.warnings.join(" / ") : `匹配 ${matchingSkill.title}`}</span>
           <button type="button" onClick={runWorkflow}><Play /> 运行</button>
