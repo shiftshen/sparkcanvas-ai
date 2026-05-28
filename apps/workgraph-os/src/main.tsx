@@ -1584,6 +1584,10 @@ function App() {
     setFeedbackNote("");
   }
 
+  const visibleExecutionLog = workspace.executionLog
+    .filter((entry) => !activeNode || entry.nodeId === activeNode.id || entry.workflowId === workspace.workflow.id)
+    .slice(0, 8);
+
   return (
     <main className="pm-shell">
       <header className="pm-topbar">
@@ -1855,6 +1859,23 @@ function App() {
               <div><strong>{job.title} {"->"} {job.output}</strong><small>{job.materials.join(" ") || "no material refs"}</small></div>
             </div>
           )) : <p className="pm-muted">运行后会显示 skill / 合成 / 归档任务。</p>}
+        </section>
+
+        <section className="pm-panel">
+          <div className="pm-panel-head"><strong>执行日志</strong><PanelRight /></div>
+          {visibleExecutionLog.length ? (
+            <div className="pm-execution-log">
+              {visibleExecutionLog.map((entry) => (
+                <div key={entry.id} className="pm-log-entry">
+                  <span>{entry.step}</span>
+                  <div>
+                    <strong>{entry.message}</strong>
+                    <small>{entry.status} · {entry.nodeId} · {new Date(entry.createdAt).toLocaleTimeString()}</small>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <p className="pm-muted">运行节点后会显示 plan / route / execute / result 执行轨迹。</p>}
         </section>
 
         <section className="pm-panel">
