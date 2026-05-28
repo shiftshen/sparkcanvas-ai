@@ -397,8 +397,11 @@ try {
   });
   assert(workGraphPlan.source === "workgraph-workflow-planner", "WorkGraph OS should expose a backend workflow planner");
   assert(workGraphPlan.plan?.nodeIds?.includes("model-router") && workGraphPlan.plan?.nodeIds?.includes("review-memory"), "WorkGraph OS planner should generate auditable workflow node ids");
+  assert(typeof workGraphPlan.plan?.createdSkillId === "string" && workGraphPlan.plan.createdSkillId.startsWith("skill-candidate-"), "WorkGraph OS planner should create candidate Skill Objects when no existing skill matches");
   assert(workGraphPlan.routingDecision?.selectedModelId === "imgen", "WorkGraph OS planner should include model routing decisions");
   assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "skill-search"), "WorkGraph OS planner should persist skill search nodes into the workspace");
+  assert(workGraphPlan.workspace?.skills?.some((skill) => skill.id === workGraphPlan.plan.createdSkillId && skill.evolution?.status === "candidate"), "WorkGraph OS planner should persist candidate skills into the Skill Store");
+  assert(workGraphPlan.objectIndex?.objects?.some((item) => item.id === `skill:${workGraphPlan.plan.createdSkillId}` && item.payload?.source === "workgraph-workflow-planner"), "WorkGraph OS planner should index planner-created Skill Objects");
   assert(workGraphPlan.objectIndex?.counts?.node >= 8, "WorkGraph OS planner should update the persisted node object index");
 
   const initial = await request("/workspace");

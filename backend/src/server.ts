@@ -2313,6 +2313,49 @@ function workGraphPlannerNode(input: {
   };
 }
 
+function workGraphPlanSkillTitle(prompt: string, output: string) {
+  const normalized = prompt
+    .replace(/@\w+/g, "")
+    .replace(/\$[\w.-]+/g, "")
+    .replace(/->\s*\w+/g, "")
+    .replace(/[^\p{L}\p{N}\u4e00-\u9fa5]+/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 6)
+    .join(" ");
+  return `${normalized || "自动规划"} Skill -> ${output}`;
+}
+
+function buildWorkGraphCandidateSkill(prompt: string, output: string, createdAt: string) {
+  const isVideo = workGraphResultKind(output) === "video";
+  const title = workGraphPlanSkillTitle(prompt, output);
+  const command = `/${workGraphSlug(title).slice(0, 40)}`;
+  return workGraphNormalizeSkill({
+    id: `skill-candidate-${Date.now().toString(36)}-${nanoid(6)}`,
+    title,
+    command,
+    output,
+    description: `Workflow Planner 自动创建的候选 Skill，用于执行目标：${prompt}`,
+    icon: isVideo ? "video" : "image",
+    keywords: [...workGraphPromptTokens(prompt).slice(0, 8), output.toLowerCase()],
+    nodeType: isVideo ? "video" : "output",
+    capabilityType: isVideo ? "video_planning" : "image_generation",
+    inputs: ["Goal Object", "Brand Object", "Asset Object", "Model Object"],
+    outputs: [`Result Object: ${output}`, "Memory Object: planner-created skill pattern"],
+    runtime: "pi-skill",
+    version: "0.1.0",
+    evolution: {
+      status: "candidate",
+      runCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      testPlan: ["run planner-created skill", "verify model route", "review result quality", "promote to reusable SKILL.md"]
+    },
+    source: "workgraph-workflow-planner",
+    createdAt
+  });
+}
+
 function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<typeof workGraphOsPlanSchema>) {
   const createdAt = now();
   const prompt = (input.prompt ?? workspace.prompt).trim() || workspace.prompt || "Generate a reusable brand workflow";
@@ -2334,10 +2377,15 @@ function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<ty
   const matchedSkill = skillCatalog
     .map((skill) => ({ skill, score: workGraphSkillScore(skill, prompt) }))
     .sort((left, right) => right.score - left.score)[0];
-  const usableSkill = matchedSkill && matchedSkill.score > 0 ? matchedSkill.skill : skillCatalog[0];
+  const matchedExistingSkill = matchedSkill && matchedSkill.score > 0 ? matchedSkill.skill : null;
+  const candidateSkill = matchedExistingSkill ? null : buildWorkGraphCandidateSkill(prompt, output, createdAt);
+  const usableSkill = matchedExistingSkill ?? candidateSkill;
   const skillId = usableSkill ? objectString(usableSkill, "id", "") : "";
   const skillCommand = usableSkill ? objectString(usableSkill, "command", "") : "";
   const skillTitle = usableSkill ? objectString(usableSkill, "title", "Reusable Skill") : "Create reusable skill";
+  const nextSkills = candidateSkill
+    ? [candidateSkill, ...workspace.skills.filter((skill) => objectString(skill, "id", "") !== objectString(candidateSkill, "id", ""))]
+    : workspace.skills;
   const plannerWorkspace: WorkGraphOsWorkspace = { ...workspace, prompt, activeBrandId: brandPayload.id, activeModelId, selectedIds };
   const outputType = workGraphResultKind(output) === "video" ? "video" : workGraphResultKind(output) === "document" || workGraphResultKind(output) === "archive" ? "file" : "output";
   const outputNode = workGraphPlannerNode({
@@ -2383,23 +2431,23 @@ function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<ty
       id: "skill-search",
       title: "Skill Search",
       type: "skill",
-      body: usableSkill
+      body: matchedExistingSkill
         ? `匹配 ${skillTitle} ${skillCommand}，优先复用已有 SKILL.md 能力。`
-        : "没有可复用 Skill；进入 Skill Creator 生成候选技能。",
+        : "没有匹配到现有 Skill；进入 Skill Creator 自动生成候选 Skill Object。",
       x: 410,
       y: 210,
-      status: usableSkill ? "ready" : "queued"
+      status: matchedExistingSkill ? "ready" : "done"
     }),
     workGraphPlannerNode({
       id: "skill-create",
       title: "Skill Creator",
       type: "skill",
-      body: usableSkill
+      body: matchedExistingSkill
         ? "已有 Skill 可覆盖当前目标；如失败再沉淀新的 SKILL.md、测试样例和回退模型。"
-        : `为目标创建 Skill：输入品牌上下文、Asset Object、输出 ${output}。`,
+        : `已创建候选 Skill ${skillCommand}：输入品牌上下文、Asset Object、输出 ${output}。`,
       x: 410,
       y: 380,
-      status: usableSkill ? "done" : "queued"
+      status: "done"
     }),
     workGraphPlannerNode({
       id: "model-router",
@@ -2481,6 +2529,7 @@ function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<ty
     activeMaterialId: workspace.activeMaterialId || selectedIds[0] || "",
     goal,
     workflow,
+    skills: nextSkills,
     nodes,
     memories: [memory, ...workspace.memories],
     updatedAt: createdAt
@@ -2495,6 +2544,7 @@ function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<ty
       nodeIds: nodes.map((node) => node.id),
       selectedMaterialIds: selectedIds,
       skillId,
+      createdSkillId: candidateSkill ? objectString(candidateSkill, "id", "") : "",
       routingDecision,
       createdAt
     },

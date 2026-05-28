@@ -268,6 +268,7 @@ type WorkGraphPlanResponse = WorkGraphRunResponse & {
     output: string;
     nodeIds: string[];
     selectedMaterialIds: string[];
+    createdSkillId?: string;
   };
 };
 
