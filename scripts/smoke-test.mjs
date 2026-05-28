@@ -8,6 +8,7 @@ const port = 4199;
 const baseUrl = `http://localhost:${port}`;
 const tempDir = await mkdtemp(path.join(tmpdir(), "sparkcanvas-smoke-"));
 const dataFile = path.join(tempDir, "sparkcanvas.json");
+const workGraphOsDataFile = path.join(tempDir, "workgraph-os.json");
 const generatedDir = path.join(tempDir, "generated");
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 let token = "";
@@ -19,6 +20,7 @@ const server = spawn("node", ["dist/server.js"], {
     ...process.env,
     PORT: String(port),
     SPARKCANVAS_DATA_FILE: dataFile,
+    WORKGRAPH_OS_DATA_FILE: workGraphOsDataFile,
     SPARKCANVAS_GENERATED_DIR: generatedDir,
     SPARKCANVAS_DISABLE_IMAGE_GEN: "1",
     SPARKCANVAS_PUBLIC_BASE_URL: "http://127.0.0.1:1234"
@@ -141,6 +143,8 @@ try {
 
   const unauthorized = await fetch(`${baseUrl}/workspace`);
   assert(unauthorized.status === 401, "workspace should require a demo token");
+  const unauthorizedWorkGraph = await fetch(`${baseUrl}/workgraph-os/workspace`);
+  assert(unauthorizedWorkGraph.status === 401, "WorkGraph OS workspace should require a token");
 
   const wrongLogin = await fetch(`${baseUrl}/auth/login`, {
     method: "POST",
@@ -179,6 +183,29 @@ try {
   assert(authConfig.demo?.defaultAccount === "shift", "local auth config should expose the default demo account");
   assert(typeof authConfig.registrationReason === "string" && authConfig.registrationReason.length > 0, "auth config should explain registration availability");
   assert(typeof authConfig.google?.reason === "string" && authConfig.google.reason.length > 0, "auth config should explain Google availability");
+
+  const initialWorkGraph = await request("/workgraph-os/workspace");
+  assert(initialWorkGraph.storage?.mode === "filesystem-json", "WorkGraph OS should use filesystem JSON storage through the backend");
+  assert(initialWorkGraph.workspace === null, "new WorkGraph OS storage should start empty in isolated smoke data dir");
+  const workGraphPayload = {
+    version: 1,
+    materials: [{ id: "mat-smoke", title: "Smoke asset", kind: "image", token: "$smoke.asset" }],
+    skills: [{ id: "skill-smoke", title: "Smoke skill", command: "/smoke" }],
+    activeBrandId: "dapot",
+    activeModelId: "imgen",
+    selectedIds: ["mat-smoke"],
+    prompt: "给 DAPOT 做一条开业短视频",
+    activeMaterialId: "mat-smoke",
+    jobs: [],
+    feedback: [{ id: "fb-smoke", note: "accepted" }],
+    memories: [{ id: "mem-smoke", body: "feedback memory" }]
+  };
+  const savedWorkGraph = await request("/workgraph-os/workspace", { method: "PUT", body: JSON.stringify(workGraphPayload) });
+  assert(savedWorkGraph.workspace?.prompt === workGraphPayload.prompt, "WorkGraph OS workspace should persist the prompt");
+  assert(savedWorkGraph.workspace?.feedback?.length === 1, "WorkGraph OS workspace should persist feedback objects");
+  const reloadedWorkGraph = await request("/workgraph-os/workspace");
+  assert(reloadedWorkGraph.workspace?.materials?.[0]?.id === "mat-smoke", "WorkGraph OS workspace should reload from filesystem JSON");
+  assert(reloadedWorkGraph.workspace?.memories?.[0]?.id === "mem-smoke", "WorkGraph OS workspace should reload memory objects");
 
   const initial = await request("/workspace");
   assert(initial.brands.some((brand) => brand.id === "brand_xmanx" && brand.active), "XMANX should be the active default brand");

@@ -63,6 +63,11 @@ Implemented in `apps/workgraph-os`:
   - Result Object
   - Feedback Object
   - Memory Object
+- Persists the same workspace snapshot through authenticated backend APIs:
+  - `GET /workgraph-os/workspace`
+  - `PUT /workgraph-os/workspace`
+  - filesystem JSON file controlled by `WORKGRAPH_OS_DATA_FILE`
+- The UI now prefers backend filesystem JSON storage and falls back to browser-local or memory-only modes when the backend is unavailable.
 - Shows an object graph counter for Goal, Asset, Brand, Skill, Model, Workflow, Result, Feedback, and Memory objects.
 - Records user feedback on the active node and converts it into Memory Objects for later skill/workflow evolution.
 - Displays task queue and simulated completion.
@@ -94,7 +99,7 @@ Relevant package facts:
 ## Next Integration Steps
 
 1. Add a local bridge service or Next/Vite proxy that can talk to pi-web/pi agent APIs.
-2. Move browser-local workspace persistence to a local disk/SQLite store.
+2. Upgrade filesystem JSON persistence to SQLite tables for object querying, version history, and future vector indexing.
 3. Convert uploaded files into real pi-readable paths and include them in prompts.
 4. Add output watcher for generated files in the active working directory.
 5. Replace simulated job completion with real pi session events.

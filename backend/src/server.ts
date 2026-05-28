@@ -462,6 +462,21 @@ type Db = {
   tasks: GenerationTask[];
 };
 
+type WorkGraphOsWorkspace = {
+  version: 1;
+  materials: unknown[];
+  skills: unknown[];
+  activeBrandId: string;
+  activeModelId: string;
+  selectedIds: string[];
+  prompt: string;
+  activeMaterialId: string;
+  jobs: unknown[];
+  feedback: unknown[];
+  memories: unknown[];
+  updatedAt: string;
+};
+
 declare global {
   namespace Express {
     interface Request {
@@ -475,6 +490,7 @@ declare global {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(__dirname, "../data");
 const dataFile = process.env.SPARKCANVAS_DATA_FILE ?? path.join(dataDir, "sparkcanvas.json");
+const workGraphOsDataFile = process.env.WORKGRAPH_OS_DATA_FILE ?? path.join(dataDir, "workgraph-os.json");
 const projectRoot = path.resolve(__dirname, "../..");
 const frontendPublicDir = path.join(projectRoot, "frontend", "public");
 const generatedDir = process.env.SPARKCANVAS_GENERATED_DIR ?? path.join(frontendPublicDir, "generated");
@@ -646,6 +662,21 @@ const outputSchema = z.object({
   fileUrl: z.string().optional(),
   videoId: z.string().optional(),
   videoUrl: z.string().optional()
+});
+
+const workGraphOsWorkspaceSchema = z.object({
+  version: z.literal(1),
+  materials: z.array(z.unknown()).default([]),
+  skills: z.array(z.unknown()).default([]),
+  activeBrandId: z.string().default("dapot"),
+  activeModelId: z.string().default("imgen"),
+  selectedIds: z.array(z.string()).default([]),
+  prompt: z.string().default(""),
+  activeMaterialId: z.string().default(""),
+  jobs: z.array(z.unknown()).default([]),
+  feedback: z.array(z.unknown()).default([]),
+  memories: z.array(z.unknown()).default([]),
+  updatedAt: z.string().default(now)
 });
 
 let db: Db = undefined as unknown as Db;
@@ -1963,6 +1994,23 @@ async function persistDb() {
     renameSync(tmpFile, dataFile);
   });
   return persistDbQueue;
+}
+
+async function readWorkGraphOsWorkspace() {
+  try {
+    return workGraphOsWorkspaceSchema.parse(JSON.parse(await readFile(workGraphOsDataFile, "utf8")));
+  } catch {
+    return null;
+  }
+}
+
+async function writeWorkGraphOsWorkspace(workspace: WorkGraphOsWorkspace) {
+  await mkdir(path.dirname(workGraphOsDataFile), { recursive: true });
+  const payload = JSON.stringify(workspace, null, 2);
+  const tmpFile = `${workGraphOsDataFile}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tmpFile, payload);
+  if (existsSync(workGraphOsDataFile)) renameSync(workGraphOsDataFile, `${workGraphOsDataFile}.bak`);
+  renameSync(tmpFile, workGraphOsDataFile);
 }
 
 function pdfArtifactHasEmbeddedImage(fileUrl?: string) {
@@ -5809,6 +5857,35 @@ app.get("/workspace/export", (req, res) => {
     exportedAt: now(),
     domain: "xmanx.com",
     workspace: { user: publicUser(req.authUser!), brands: db.brands, assets: db.assets, templates, models: publicModels(), frames: db.frames, tasks: db.tasks }
+  });
+});
+
+app.get("/workgraph-os/workspace", async (_req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  res.json({
+    storage: {
+      mode: "filesystem-json",
+      file: workGraphOsDataFile,
+      exists: Boolean(workspace)
+    },
+    workspace
+  });
+});
+
+app.put("/workgraph-os/workspace", async (req, res) => {
+  const parsed = workGraphOsWorkspaceSchema.safeParse({
+    ...req.body,
+    updatedAt: now()
+  });
+  if (!parsed.success) return res.status(400).json({ message: "Invalid WorkGraph OS workspace payload" });
+  await writeWorkGraphOsWorkspace(parsed.data);
+  res.json({
+    storage: {
+      mode: "filesystem-json",
+      file: workGraphOsDataFile,
+      exists: true
+    },
+    workspace: parsed.data
   });
 });
 

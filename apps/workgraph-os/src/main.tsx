@@ -125,6 +125,7 @@ type WorkGraphWorkspace = {
 };
 
 type StorageState = "browser-local" | "memory-only";
+type StorageMode = StorageState | "filesystem-json";
 
 const now = () => new Date().toISOString();
 
@@ -238,6 +239,7 @@ const modelOptions: ModelOption[] = [
 
 const defaultPrompt = "@imgen /compose 使用 $xmanx.logo $xmanx.product，生成黑橙品牌首图 -> PNG";
 const workspaceStorageKey = "workgraph-os.workspace.v1";
+const authStorageKey = "workgraph-os.auth-token";
 
 const defaultWorkspace = (): WorkGraphWorkspace => ({
   version: 1,
@@ -306,6 +308,55 @@ function saveWorkspace(workspace: WorkGraphWorkspace) {
   } catch {
     // Storage can be unavailable in restricted browser contexts. WGOS must keep running in memory.
   }
+}
+
+async function ensureBackendToken() {
+  const stored = window.localStorage?.getItem(authStorageKey);
+  if (stored) return stored;
+  const response = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ account: "shift", password: "123456" })
+  });
+  if (!response.ok) throw new Error("backend auth unavailable");
+  const data = await response.json() as { token?: string };
+  if (!data.token) throw new Error("backend auth token missing");
+  window.localStorage?.setItem(authStorageKey, data.token);
+  return data.token;
+}
+
+async function backendRequest(pathname: string, options: RequestInit = {}) {
+  const token = await ensureBackendToken();
+  return fetch(`/api${pathname}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(options.headers ?? {})
+    }
+  });
+}
+
+async function loadBackendWorkspace() {
+  const response = await backendRequest("/workgraph-os/workspace");
+  if (!response.ok) throw new Error("backend workspace unavailable");
+  const data = await response.json() as { workspace?: Partial<WorkGraphWorkspace> | null };
+  if (!data.workspace) return null;
+  return {
+    ...defaultWorkspace(),
+    ...data.workspace,
+    version: 1,
+    materials: data.workspace.materials?.length ? data.workspace.materials : seedMaterials,
+    skills: data.workspace.skills?.length ? data.workspace.skills : skillTemplates
+  } satisfies WorkGraphWorkspace;
+}
+
+async function saveBackendWorkspace(workspace: WorkGraphWorkspace) {
+  const response = await backendRequest("/workgraph-os/workspace", {
+    method: "PUT",
+    body: JSON.stringify(workspace)
+  });
+  if (!response.ok) throw new Error("backend workspace save failed");
 }
 
 function formatBytes(bytes: number) {
@@ -441,7 +492,8 @@ function App() {
   const [workspace, setWorkspace] = useState(loadWorkspace);
   const { materials, skills, activeBrandId, activeModelId, selectedIds, prompt, activeMaterialId, jobs, feedback, memories } = workspace;
   const [activeNodeId, setActiveNodeId] = useState("skill");
-  const [storageState] = useState(detectStorageState);
+  const [storageMode, setStorageMode] = useState<StorageMode>(detectStorageState);
+  const [backendLoaded, setBackendLoaded] = useState(false);
   const [skillSearch, setSkillSearch] = useState("");
   const [newSkillName, setNewSkillName] = useState("");
   const [newSkillCommand, setNewSkillCommand] = useState("");
@@ -481,8 +533,30 @@ function App() {
   };
 
   useEffect(() => {
+    let cancelled = false;
+    void loadBackendWorkspace()
+      .then((loaded) => {
+        if (cancelled) return;
+        if (loaded) setWorkspace(loaded);
+        setStorageMode("filesystem-json");
+      })
+      .catch(() => {
+        if (!cancelled) setStorageMode(detectStorageState());
+      })
+      .finally(() => {
+        if (!cancelled) setBackendLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     saveWorkspace(workspace);
-  }, [workspace]);
+    if (!backendLoaded) return;
+    if (storageMode !== "filesystem-json") return;
+    void saveBackendWorkspace(workspace).catch(() => setStorageMode(detectStorageState()));
+  }, [backendLoaded, storageMode, workspace]);
 
   function updateWorkspace(updater: (current: WorkGraphWorkspace) => WorkGraphWorkspace) {
     setWorkspace((current) => updater(current));
@@ -672,7 +746,7 @@ function App() {
           <span><Library /> {objectCounts.assets} assets</span>
           <span><Sparkles /> {objectCounts.skills} skills</span>
           <span><RefreshCcw /> {objectCounts.memories} memories</span>
-          <span><Archive /> {storageState === "browser-local" ? "browser local store" : "memory only"}</span>
+          <span><Archive /> {storageMode === "filesystem-json" ? "filesystem JSON" : storageMode === "browser-local" ? "browser local store" : "memory only"}</span>
           <span><CheckCircle2 /> WGOS local first</span>
         </div>
       </header>
