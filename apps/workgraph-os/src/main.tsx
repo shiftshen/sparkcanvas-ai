@@ -88,6 +88,25 @@ type Job = {
   createdAt: string;
 };
 
+type ResultObject = {
+  id: string;
+  title: string;
+  workflowId: string;
+  nodeId: string;
+  kind: "image" | "video" | "document" | "archive";
+  status: "preview" | "accepted" | "rejected" | "archived";
+  version: number;
+  output: string;
+  previewUrl: string;
+  sourceJobId: string;
+  materialIds: string[];
+  canSaveAsMaterial: boolean;
+  savedMaterialId?: string;
+  reviewNote?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type BrandMemory = {
   id: string;
   name: string;
@@ -181,6 +200,7 @@ type WorkGraphWorkspace = {
   prompt: string;
   activeMaterialId: string;
   jobs: Job[];
+  results: ResultObject[];
   feedback: FeedbackObject[];
   memories: MemoryObject[];
 };
@@ -494,10 +514,41 @@ function buildWorkflowObject(input: {
     selectedMaterialIds: input.selectedIds,
     skillIds: input.skills.map((skill) => skill.id),
     modelIds: [input.activeModelId],
-    resultIds: input.jobs.map((job) => job.id),
+    resultIds: input.jobs.map((job) => `result-${job.id}`),
     runCount: input.previous?.runCount ?? input.jobs.length,
     lastRunAt: input.jobs[0]?.createdAt ?? input.previous?.lastRunAt,
     createdAt: input.previous?.createdAt ?? timestamp,
+    updatedAt: timestamp
+  };
+}
+
+function resultKindForOutput(output: string): ResultObject["kind"] {
+  const normalized = output.toLowerCase();
+  if (normalized.includes("mp4") || normalized.includes("video")) return "video";
+  if (normalized.includes("zip") || normalized.includes("archive")) return "archive";
+  if (normalized.includes("pdf") || normalized.includes("doc")) return "document";
+  return "image";
+}
+
+function buildResultObject(job: Job, workflowId: string, previous?: ResultObject): ResultObject {
+  const timestamp = now();
+  const kind = resultKindForOutput(job.output);
+  return {
+    id: previous?.id ?? `result-${job.id}`,
+    title: `${job.title} -> ${job.output}`,
+    workflowId,
+    nodeId: "output",
+    kind,
+    status: previous?.status ?? (job.status === "done" ? "preview" : "preview"),
+    version: previous?.version ?? 1,
+    output: job.output,
+    previewUrl: previous?.previewUrl ?? (kind === "image" ? "/brand-assets/generated/xmanx-product.png" : ""),
+    sourceJobId: job.id,
+    materialIds: job.materials,
+    canSaveAsMaterial: kind === "image" || kind === "video" || kind === "document",
+    savedMaterialId: previous?.savedMaterialId,
+    reviewNote: previous?.reviewNote,
+    createdAt: previous?.createdAt ?? job.createdAt,
     updatedAt: timestamp
   };
 }
@@ -527,6 +578,7 @@ const defaultWorkspace = (): WorkGraphWorkspace => {
     prompt: defaultPrompt,
     activeMaterialId: seedMaterials[0].id,
     jobs,
+    results: [],
     feedback: [],
     memories: [
       {
@@ -570,6 +622,7 @@ function loadWorkspace(): WorkGraphWorkspace {
     const skills = parsed.skills?.length ? parsed.skills.map(normalizeSkillObject) : skillTemplates;
     const nodes = parsed.nodes?.length ? parsed.nodes : [];
     const jobs = parsed.jobs ?? [];
+    const results = parsed.results ?? jobs.map((job) => buildResultObject(job, parsed.workflow?.id ?? "workflow-active"));
     return {
       ...defaultWorkspace(),
       ...parsed,
@@ -587,7 +640,8 @@ function loadWorkspace(): WorkGraphWorkspace {
       materials: parsed.materials?.length ? parsed.materials : seedMaterials,
       skills,
       nodes,
-      jobs
+      jobs,
+      results
     };
   } catch {
     return defaultWorkspace();
@@ -639,6 +693,7 @@ async function loadBackendWorkspace() {
   const skills = data.workspace.skills?.length ? data.workspace.skills.map(normalizeSkillObject) : skillTemplates;
   const nodes = data.workspace.nodes?.length ? data.workspace.nodes : [];
   const jobs = data.workspace.jobs ?? [];
+  const results = data.workspace.results ?? jobs.map((job) => buildResultObject(job, data.workspace?.workflow?.id ?? "workflow-active"));
   return {
     workspace: {
       ...defaultWorkspace(),
@@ -657,7 +712,8 @@ async function loadBackendWorkspace() {
       materials: data.workspace.materials?.length ? data.workspace.materials : seedMaterials,
       skills,
       nodes,
-      jobs
+      jobs,
+      results
     } satisfies WorkGraphWorkspace,
     objectIndex: data.objectIndex
   };
@@ -1110,14 +1166,16 @@ function App() {
 
   function runWorkflow() {
     const activeSkill = matchingSkill;
+    const createdAt = now();
     const job: Job = {
       id: `job-${Date.now().toString(36)}`,
       title: ast.commands[0] ? `/${ast.commands[0]}` : "素材工作流",
       status: "running",
       output: ast.outputs[0]?.toUpperCase() || "PNG",
       materials: selectedMaterials.map((item) => item.token),
-      createdAt: now()
+      createdAt
     };
+    const result = buildResultObject(job, workspace.workflow.id);
     updateWorkspace((current) => ({
       ...current,
       skills: current.skills.map((skill) => skill.id === activeSkill.id
@@ -1133,6 +1191,7 @@ function App() {
           }
         : skill),
       jobs: [job, ...current.jobs],
+      results: [result, ...current.results],
       memories: [
         {
           id: `mem-${Date.now().toString(36)}`,
@@ -1145,11 +1204,36 @@ function App() {
       ]
     }));
     window.setTimeout(() => {
-      setWorkspace((current) => ({
+      updateWorkspace((current) => ({
         ...current,
-        jobs: current.jobs.map((item) => item.id === job.id ? { ...item, status: "done" } : item)
+        jobs: current.jobs.map((item) => item.id === job.id ? { ...item, status: "done" } : item),
+        results: current.results.map((item) => item.sourceJobId === job.id ? { ...item, status: "preview", updatedAt: now() } : item)
       }));
     }, 900);
+  }
+
+  function saveResultAsMaterial(result: ResultObject) {
+    if (!result.canSaveAsMaterial) return;
+    const materialId = result.savedMaterialId ?? `mat-result-${Date.now().toString(36)}`;
+    const material: Material = {
+      id: materialId,
+      title: result.title,
+      kind: result.kind === "video" ? "video" : result.kind === "document" || result.kind === "archive" ? "document" : "image",
+      token: `$result.${result.id.replace(/^result-/, "")}`,
+      previewUrl: result.previewUrl,
+      fileName: `${result.id}.${result.output.toLowerCase()}`,
+      size: 0,
+      createdAt: now(),
+      tags: ["result", result.kind, result.status],
+      note: `Saved from ${result.workflowId} version ${result.version}.`
+    };
+    updateWorkspace((current) => ({
+      ...current,
+      materials: current.materials.some((item) => item.id === materialId) ? current.materials : [material, ...current.materials],
+      selectedIds: current.selectedIds.includes(materialId) ? current.selectedIds : [materialId, ...current.selectedIds],
+      activeMaterialId: materialId,
+      results: current.results.map((item) => item.id === result.id ? { ...item, status: "accepted", savedMaterialId: materialId, updatedAt: now() } : item)
+    }));
   }
 
   function recordFeedback(rating: FeedbackObject["rating"]) {
@@ -1444,6 +1528,20 @@ function App() {
               <div><strong>{job.title} {"->"} {job.output}</strong><small>{job.materials.join(" ") || "no material refs"}</small></div>
             </div>
           )) : <p className="pm-muted">运行后会显示 skill / 合成 / 归档任务。</p>}
+        </section>
+
+        <section className="pm-panel">
+          <div className="pm-panel-head"><strong>结果版本</strong><CheckCircle2 /></div>
+          {workspace.results.length ? workspace.results.slice(0, 4).map((result) => (
+            <div key={result.id} className="pm-job">
+              <span>{result.status === "accepted" ? <CheckCircle2 /> : <FileImage />}</span>
+              <div>
+                <strong>{result.title}</strong>
+                <small>v{result.version} · {result.kind} · {result.status} · {result.canSaveAsMaterial ? "can save as material" : "view only"}</small>
+              </div>
+              {result.canSaveAsMaterial ? <button type="button" onClick={() => saveResultAsMaterial(result)}><Archive /> 存为素材</button> : null}
+            </div>
+          )) : <p className="pm-muted">运行节点后会生成可预览、可接受、可回写素材库的 Result Object。</p>}
         </section>
       </aside>
 

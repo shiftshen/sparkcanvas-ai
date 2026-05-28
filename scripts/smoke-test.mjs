@@ -228,7 +228,7 @@ try {
       selectedMaterialIds: ["mat-smoke"],
       skillIds: ["skill-smoke"],
       modelIds: ["imgen"],
-      resultIds: [],
+      resultIds: ["result-smoke"],
       runCount: 3
     },
     activeBrandId: "dapot",
@@ -237,6 +237,20 @@ try {
     prompt: "给 DAPOT 做一条开业短视频",
     activeMaterialId: "mat-smoke",
     jobs: [],
+    results: [{
+      id: "result-smoke",
+      title: "Smoke result",
+      workflowId: "workflow-smoke",
+      nodeId: "node-smoke",
+      kind: "image",
+      status: "preview",
+      version: 2,
+      output: "PNG",
+      previewUrl: "/brand-assets/generated/xmanx-product.png",
+      sourceJobId: "job-smoke",
+      materialIds: ["mat-smoke"],
+      canSaveAsMaterial: true
+    }],
     feedback: [{ id: "fb-smoke", note: "accepted" }],
     memories: [{ id: "mem-smoke", body: "feedback memory" }]
   };
@@ -244,6 +258,7 @@ try {
   assert(savedWorkGraph.workspace?.prompt === workGraphPayload.prompt, "WorkGraph OS workspace should persist the prompt");
   assert(savedWorkGraph.workspace?.goal?.goalType === "video_generation", "WorkGraph OS workspace should persist structured goal objects");
   assert(savedWorkGraph.workspace?.workflow?.reusable === true, "WorkGraph OS workspace should persist structured workflow objects");
+  assert(savedWorkGraph.workspace?.results?.[0]?.canSaveAsMaterial === true, "WorkGraph OS workspace should persist structured result objects");
   assert(savedWorkGraph.workspace?.skills?.[0]?.skillMdPath === "skills/generated/smoke/SKILL.md", "WorkGraph OS workspace should persist standardized skill object metadata");
   assert(savedWorkGraph.workspace?.feedback?.length === 1, "WorkGraph OS workspace should persist feedback objects");
   assert(savedWorkGraph.objectIndex?.counts?.asset === 1, "WorkGraph OS workspace save should return an asset object index");
@@ -259,6 +274,7 @@ try {
   assert(workGraphObjects.counts?.skill === 1, "WorkGraph OS object index should include skill objects");
   assert(workGraphObjects.counts?.model === 1, "WorkGraph OS object index should include model objects");
   assert(workGraphObjects.counts?.node === 1, "WorkGraph OS object index should include node objects");
+  assert(workGraphObjects.counts?.result === 1, "WorkGraph OS object index should include result objects");
   assert(workGraphObjects.counts?.memory === 1, "WorkGraph OS object index should include memory objects");
   const goalObject = workGraphObjects.objects.find((item) => item.id === "goal:goal-smoke");
   assert(goalObject?.source === "workspace" && goalObject?.summary === "video_generation -> mp4 using brand:dapot", "WorkGraph OS object index should include the saved structured goal");
@@ -268,6 +284,8 @@ try {
   assert(String(modelObject?.payload?.routingPolicy).includes("fallback"), "WorkGraph OS object index should include model routing policy metadata");
   const workflowObject = workGraphObjects.objects.find((item) => item.id === "workflow:workflow-smoke");
   assert(workflowObject?.source === "workspace" && String(workflowObject?.payload?.runCount) === "3", "WorkGraph OS object index should include reusable workflow object metadata");
+  const resultObject = workGraphObjects.objects.find((item) => item.id === "result:result-smoke");
+  assert(resultObject?.summary?.includes("image v2") && resultObject?.payload?.canSaveAsMaterial === true, "WorkGraph OS object index should include previewable result object metadata");
   assert(workGraphObjects.objects.some((item) => item.id === "asset:mat-smoke"), "WorkGraph OS object index should include the saved asset");
   assert(workGraphObjects.objects.some((item) => item.id === "node:node-smoke"), "WorkGraph OS object index should include the saved canvas node");
   const memoryObjects = await request("/workgraph-os/objects?type=memory");
@@ -293,6 +311,7 @@ try {
   assert(sqliteObjects?.rows?.some((row) => row.id === "skill:skill-smoke" && String(row.payload_json).includes("skillMdPath")), "WorkGraph OS SQLite export should include standardized skill payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "model:imgen" && String(row.payload_json).includes("routingPolicy")), "WorkGraph OS SQLite export should include model routing payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "workflow:workflow-smoke" && String(row.payload_json).includes("reusable")), "WorkGraph OS SQLite export should include structured workflow payload rows");
+  assert(sqliteObjects?.rows?.some((row) => row.id === "result:result-smoke" && String(row.payload_json).includes("canSaveAsMaterial")), "WorkGraph OS SQLite export should include structured result payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "node:node-smoke"), "WorkGraph OS SQLite export should include persisted node rows");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:workflow-smoke" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include workflow-to-asset graph edges");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "node:node-smoke" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include node-to-asset graph edges");

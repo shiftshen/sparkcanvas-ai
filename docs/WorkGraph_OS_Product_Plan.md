@@ -59,6 +59,7 @@ Implemented in `apps/workgraph-os`:
 - Converts the natural-language prompt into a structured Goal Object with raw input, normalized intent, goal type, output target, constraints, and success criteria.
 - Persists generated canvas nodes as first-class Node Objects instead of treating the work graph as UI-only state.
 - Persists the active graph as a Workflow Object with version, status, node IDs, edge IDs, selected materials, skill/model bindings, result IDs, run count, and reusability state.
+- Persists run outputs as Result Objects with kind, status, version, preview URL, source job, material references, review state, and save-as-material metadata.
 - Supports active node editing and natural-language modification routing.
 - Persists the active workspace snapshot in local browser storage as typed WGOS objects:
   - Goal Object
@@ -82,6 +83,7 @@ Implemented in `apps/workgraph-os`:
   - Skill Objects include evolution metadata and future `SKILL.md` export paths, so high-frequency workflows can become reusable Agent Skills.
   - Model Objects expose routing policy metadata so nodes can later choose models by capability, fallback, latency, cost, and local/cloud constraints.
   - Workflow Objects are indexed from workspace data when available, with legacy workspaces migrated into derived active workflows.
+  - Result Objects are indexed from workspace results when available, with legacy jobs migrated into derived results.
   - persisted canvas nodes are indexed as Node Objects and connected to workflow/assets in the SQLite export graph.
 - Records object-index history snapshots on every workspace save:
   - `GET /workgraph-os/history`

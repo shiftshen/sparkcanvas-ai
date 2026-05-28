@@ -475,6 +475,7 @@ type WorkGraphOsWorkspace = {
   prompt: string;
   activeMaterialId: string;
   jobs: unknown[];
+  results: unknown[];
   feedback: unknown[];
   memories: unknown[];
   updatedAt: string;
@@ -725,6 +726,7 @@ const workGraphOsWorkspaceSchema = z.object({
   prompt: z.string().default(""),
   activeMaterialId: z.string().default(""),
   jobs: z.array(z.unknown()).default([]),
+  results: z.array(z.unknown()).default([]),
   feedback: z.array(z.unknown()).default([]),
   memories: z.array(z.unknown()).default([]),
   updatedAt: z.string().default(now)
@@ -2133,7 +2135,7 @@ function workGraphGoalPayload(workspace: WorkGraphOsWorkspace) {
 function workGraphWorkflowPayload(workspace: WorkGraphOsWorkspace) {
   const existing = workspace.workflow && typeof workspace.workflow === "object" ? workspace.workflow : undefined;
   const nodeIds = objectField(existing, "nodeIds") ?? workspace.nodes.map((item, index) => `node:${objectString(item, "id", `node-${index}`)}`);
-  const resultIds = objectField(existing, "resultIds") ?? workspace.jobs.map((item, index) => objectString(item, "id", `result-${index}`));
+  const resultIds = objectField(existing, "resultIds") ?? (workspace.results.length ? workspace.results : workspace.jobs).map((item, index) => objectString(item, "id", `result-${index}`));
   return {
     id: objectString(existing, "id", "active"),
     title: objectString(existing, "title", "Active Workflow"),
@@ -2148,7 +2150,7 @@ function workGraphWorkflowPayload(workspace: WorkGraphOsWorkspace) {
     skillIds: objectField(existing, "skillIds") ?? workspace.skills.map((item, index) => objectString(item, "id", `skill-${index}`)),
     modelIds: objectField(existing, "modelIds") ?? [workspace.activeModelId],
     resultIds,
-    runCount: objectField(existing, "runCount") ?? workspace.jobs.length,
+    runCount: objectField(existing, "runCount") ?? Math.max(workspace.jobs.length, workspace.results.length),
     lastRunAt: objectString(existing, "lastRunAt", ""),
     jobs: workspace.jobs
   };
@@ -2186,8 +2188,11 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
     const status = objectString(item, "status", "ready");
     objects.push(workGraphObject("node", `node-${index}`, objectString(item, "title", `Node ${index + 1}`), `${type} · ${status} · ${objectString(item, "body", "")}`, item, updatedAt));
   });
-  workspace.jobs.forEach((item, index) => {
-    objects.push(workGraphObject("result", `result-${index}`, objectString(item, "title", `Result ${index + 1}`), `${objectString(item, "status", "unknown")} -> ${objectString(item, "output", "")}`, item, objectString(item, "createdAt", updatedAt)));
+  const resultItems = workspace.results.length ? workspace.results : workspace.jobs;
+  resultItems.forEach((item, index) => {
+    const version = objectField(item, "version") ?? 1;
+    const kind = objectString(item, "kind", "result");
+    objects.push(workGraphObject("result", `result-${index}`, objectString(item, "title", `Result ${index + 1}`), `${kind} v${version} · ${objectString(item, "status", "unknown")} -> ${objectString(item, "output", "")}`, item, objectString(item, "createdAt", updatedAt)));
   });
   workspace.feedback.forEach((item, index) => {
     objects.push(workGraphObject("feedback", `feedback-${index}`, objectString(item, "rating", `Feedback ${index + 1}`), objectString(item, "note", ""), item, objectString(item, "createdAt", updatedAt)));
@@ -2236,7 +2241,8 @@ function buildWorkGraphOsEdges(workspace: WorkGraphOsWorkspace | null, objects: 
       });
     }
   });
-  workspace.jobs.forEach((item, index) => {
+  const resultItems = workspace.results.length ? workspace.results : workspace.jobs;
+  resultItems.forEach((item, index) => {
     const id = objectString(item, "id", `result-${index}`);
     pushEdge(workflowObjectId, `result:${id}`, "produces_result", item);
   });

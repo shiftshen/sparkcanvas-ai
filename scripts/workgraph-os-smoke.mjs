@@ -42,6 +42,9 @@ assert(source.includes("routingRules"), "workgraph-os should define model routin
 assert(source.includes("type WorkflowObject"), "workgraph-os should define a structured Workflow Object");
 assert(source.includes("buildWorkflowObject"), "workgraph-os should build reusable workflow objects from graph state");
 assert(source.includes("edgeIds") && source.includes("runCount"), "workgraph-os should track workflow edges and run counts");
+assert(source.includes("type ResultObject"), "workgraph-os should define a structured Result Object");
+assert(source.includes("buildResultObject"), "workgraph-os should build result objects from workflow runs");
+assert(source.includes("saveResultAsMaterial"), "workgraph-os should allow accepted results to become reusable materials");
 
 console.log(JSON.stringify({
   ok: true,
@@ -58,6 +61,7 @@ console.log(JSON.stringify({
     "workgraph-os-goal-object-ready",
     "workgraph-os-skill-object-ready",
     "workgraph-os-model-object-ready",
-    "workgraph-os-workflow-object-ready"
+    "workgraph-os-workflow-object-ready",
+    "workgraph-os-result-object-ready"
   ]
 }));
