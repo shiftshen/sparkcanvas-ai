@@ -114,6 +114,7 @@ type WorkGraphWorkspace = {
   version: 1;
   materials: Material[];
   skills: SkillTemplate[];
+  nodes: WorkflowNode[];
   activeBrandId: string;
   activeModelId: string;
   selectedIds: string[];
@@ -268,6 +269,7 @@ const defaultWorkspace = (): WorkGraphWorkspace => ({
   version: 1,
   materials: seedMaterials,
   skills: skillTemplates,
+  nodes: [],
   activeBrandId: "dapot",
   activeModelId: "imgen",
   selectedIds: ["mat-x-logo", "mat-product"],
@@ -317,7 +319,8 @@ function loadWorkspace(): WorkGraphWorkspace {
       ...parsed,
       version: 1,
       materials: parsed.materials?.length ? parsed.materials : seedMaterials,
-      skills: parsed.skills?.length ? parsed.skills : skillTemplates
+      skills: parsed.skills?.length ? parsed.skills : skillTemplates,
+      nodes: parsed.nodes?.length ? parsed.nodes : []
     };
   } catch {
     return defaultWorkspace();
@@ -371,7 +374,8 @@ async function loadBackendWorkspace() {
       ...data.workspace,
       version: 1,
       materials: data.workspace.materials?.length ? data.workspace.materials : seedMaterials,
-      skills: data.workspace.skills?.length ? data.workspace.skills : skillTemplates
+      skills: data.workspace.skills?.length ? data.workspace.skills : skillTemplates,
+      nodes: data.workspace.nodes?.length ? data.workspace.nodes : []
     } satisfies WorkGraphWorkspace,
     objectIndex: data.objectIndex
   };
@@ -380,7 +384,16 @@ async function loadBackendWorkspace() {
 async function saveBackendWorkspace(workspace: WorkGraphWorkspace) {
   const response = await backendRequest("/workgraph-os/workspace", {
     method: "PUT",
-    body: JSON.stringify(workspace)
+    body: JSON.stringify({
+      ...workspace,
+      nodes: workspace.nodes.length ? workspace.nodes : buildNodes(
+        workspace.prompt,
+        workspace.materials,
+        workspace.skills,
+        brandMemories.find((item) => item.id === workspace.activeBrandId) ?? brandMemories[0],
+        modelOptions.find((item) => item.id === workspace.activeModelId) ?? modelOptions[1]
+      )
+    })
   });
   if (!response.ok) throw new Error("backend workspace save failed");
 }

@@ -28,6 +28,8 @@ assert(source.includes("WorkGraphObjectIndex"), "workgraph-os should consume the
 assert(source.includes("/workgraph-os/objects"), "workgraph-os should request the object index API");
 assert(source.includes("WorkGraphHistoryEntry"), "workgraph-os should model object history entries");
 assert(source.includes("/workgraph-os/history"), "workgraph-os should request the history API");
+assert(source.includes("nodes: WorkflowNode[]"), "workgraph-os should persist canvas nodes as workspace objects");
+assert(source.includes("nodes: workspace.nodes.length ? workspace.nodes : buildNodes"), "workgraph-os should save generated canvas nodes to the backend");
 
 console.log(JSON.stringify({
   ok: true,
@@ -39,6 +41,7 @@ console.log(JSON.stringify({
     "workgraph-os-object-persistence-ready",
     "workgraph-os-feedback-memory-ready",
     "workgraph-os-backend-object-index-ready",
-    "workgraph-os-history-ready"
+    "workgraph-os-history-ready",
+    "workgraph-os-node-object-ready"
   ]
 }));

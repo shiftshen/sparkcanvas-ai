@@ -193,6 +193,7 @@ try {
     version: 1,
     materials: [{ id: "mat-smoke", title: "Smoke asset", kind: "image", token: "$smoke.asset" }],
     skills: [{ id: "skill-smoke", title: "Smoke skill", command: "/smoke" }],
+    nodes: [{ id: "node-smoke", title: "Smoke node", type: "skill", body: "Use smoke asset", status: "ready", materialIds: ["mat-smoke"] }],
     activeBrandId: "dapot",
     activeModelId: "imgen",
     selectedIds: ["mat-smoke"],
@@ -206,15 +207,19 @@ try {
   assert(savedWorkGraph.workspace?.prompt === workGraphPayload.prompt, "WorkGraph OS workspace should persist the prompt");
   assert(savedWorkGraph.workspace?.feedback?.length === 1, "WorkGraph OS workspace should persist feedback objects");
   assert(savedWorkGraph.objectIndex?.counts?.asset === 1, "WorkGraph OS workspace save should return an asset object index");
+  assert(savedWorkGraph.objectIndex?.counts?.node === 1, "WorkGraph OS workspace save should return persisted node objects");
   assert(savedWorkGraph.historyEntry?.objectIds?.includes("asset:mat-smoke"), "WorkGraph OS workspace save should record a history snapshot");
   const reloadedWorkGraph = await request("/workgraph-os/workspace");
   assert(reloadedWorkGraph.workspace?.materials?.[0]?.id === "mat-smoke", "WorkGraph OS workspace should reload from filesystem JSON");
+  assert(reloadedWorkGraph.workspace?.nodes?.[0]?.id === "node-smoke", "WorkGraph OS workspace should reload canvas node objects");
   assert(reloadedWorkGraph.workspace?.memories?.[0]?.id === "mem-smoke", "WorkGraph OS workspace should reload memory objects");
   const workGraphObjects = await request("/workgraph-os/objects");
   assert(workGraphObjects.counts?.goal === 1, "WorkGraph OS object index should include a goal object");
   assert(workGraphObjects.counts?.asset === 1, "WorkGraph OS object index should include asset objects");
+  assert(workGraphObjects.counts?.node === 1, "WorkGraph OS object index should include node objects");
   assert(workGraphObjects.counts?.memory === 1, "WorkGraph OS object index should include memory objects");
   assert(workGraphObjects.objects.some((item) => item.id === "asset:mat-smoke"), "WorkGraph OS object index should include the saved asset");
+  assert(workGraphObjects.objects.some((item) => item.id === "node:node-smoke"), "WorkGraph OS object index should include the saved canvas node");
   const memoryObjects = await request("/workgraph-os/objects?type=memory");
   assert(memoryObjects.objects.length === 1 && memoryObjects.objects[0].id === "memory:mem-smoke", "WorkGraph OS object index should support type filtering");
   const smokeAssetObject = await request("/workgraph-os/objects/asset/mat-smoke");
@@ -234,7 +239,9 @@ try {
   const sqliteEdges = workGraphSqliteExport.tables.find((table) => table.name === "wgos_edges");
   const sqliteHistory = workGraphSqliteExport.tables.find((table) => table.name === "wgos_history");
   assert(sqliteObjects?.rows?.some((row) => row.id === "asset:mat-smoke"), "WorkGraph OS SQLite export should include indexed asset rows");
+  assert(sqliteObjects?.rows?.some((row) => row.id === "node:node-smoke"), "WorkGraph OS SQLite export should include persisted node rows");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:active" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include workflow-to-asset graph edges");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "node:node-smoke" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include node-to-asset graph edges");
   assert(sqliteHistory?.rows?.some((row) => row.id === workGraphHistory.entries[0].id), "WorkGraph OS SQLite export should include history rows");
 
   const initial = await request("/workspace");

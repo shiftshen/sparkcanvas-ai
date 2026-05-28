@@ -466,6 +466,7 @@ type WorkGraphOsWorkspace = {
   version: 1;
   materials: unknown[];
   skills: unknown[];
+  nodes: unknown[];
   activeBrandId: string;
   activeModelId: string;
   selectedIds: string[];
@@ -713,6 +714,7 @@ const workGraphOsWorkspaceSchema = z.object({
   version: z.literal(1),
   materials: z.array(z.unknown()).default([]),
   skills: z.array(z.unknown()).default([]),
+  nodes: z.array(z.unknown()).default([]),
   activeBrandId: z.string().default("dapot"),
   activeModelId: z.string().default("imgen"),
   selectedIds: z.array(z.string()).default([]),
@@ -2122,6 +2124,11 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
   workspace.skills.forEach((item, index) => {
     objects.push(workGraphObject("skill", `skill-${index}`, objectString(item, "title", `Skill ${index + 1}`), objectString(item, "command", objectString(item, "description", "")), item, updatedAt));
   });
+  workspace.nodes.forEach((item, index) => {
+    const type = objectString(item, "type", "node");
+    const status = objectString(item, "status", "ready");
+    objects.push(workGraphObject("node", `node-${index}`, objectString(item, "title", `Node ${index + 1}`), `${type} · ${status} · ${objectString(item, "body", "")}`, item, updatedAt));
+  });
   workspace.jobs.forEach((item, index) => {
     objects.push(workGraphObject("result", `result-${index}`, objectString(item, "title", `Result ${index + 1}`), `${objectString(item, "status", "unknown")} -> ${objectString(item, "output", "")}`, item, objectString(item, "createdAt", updatedAt)));
   });
@@ -2159,6 +2166,16 @@ function buildWorkGraphOsEdges(workspace: WorkGraphOsWorkspace | null, objects: 
   pushEdge("goal:active", `model:${workspace.activeModelId || "active"}`, "uses_model", { activeModelId: workspace.activeModelId });
   workspace.selectedIds.forEach((id) => {
     pushEdge("workflow:active", `asset:${id}`, "uses_asset", { selectedId: id });
+  });
+  workspace.nodes.forEach((item, index) => {
+    const id = objectString(item, "id", `node-${index}`);
+    pushEdge("workflow:active", `node:${id}`, "produces_result", item);
+    const materialIds = objectField(item, "materialIds");
+    if (Array.isArray(materialIds)) {
+      materialIds.forEach((materialId) => {
+        if (typeof materialId === "string") pushEdge(`node:${id}`, `asset:${materialId}`, "uses_asset", { materialId });
+      });
+    }
   });
   workspace.jobs.forEach((item, index) => {
     const id = objectString(item, "id", `result-${index}`);

@@ -55,6 +55,7 @@ Implemented in `apps/workgraph-os`:
 - Supports one-sentence skill search.
 - Supports no-match skill creation from the search phrase.
 - Builds a visible workflow graph from CAL prompt resources, brand memory, model, skill, output, and review nodes.
+- Persists generated canvas nodes as first-class Node Objects instead of treating the work graph as UI-only state.
 - Supports active node editing and natural-language modification routing.
 - Persists the active workspace snapshot in local browser storage as typed WGOS objects:
   - Asset Object
@@ -71,7 +72,8 @@ Implemented in `apps/workgraph-os`:
   - `GET /workgraph-os/objects`
   - `GET /workgraph-os/objects?type=memory`
   - `GET /workgraph-os/objects/:type/:id`
-  - current index types: Goal, Asset, Brand, Skill, Model, Workflow, Result, Feedback, Memory
+  - current index types: Goal, Asset, Brand, Skill, Model, Workflow, Node, Result, Feedback, Memory
+  - persisted canvas nodes are indexed as Node Objects and connected to workflow/assets in the SQLite export graph.
 - Records object-index history snapshots on every workspace save:
   - `GET /workgraph-os/history`
   - `GET /workgraph-os/history?type=memory`
