@@ -766,6 +766,17 @@ const workGraphOsRunSchema = z.object({
   note: z.string().optional()
 });
 
+const workGraphOsSkillInputSchema = z.object({
+  title: z.string().min(1),
+  command: z.string().min(1),
+  output: z.string().default("PNG"),
+  description: z.string().optional(),
+  keywords: z.array(z.string()).optional(),
+  capabilityType: z.string().optional(),
+  runtime: z.string().optional(),
+  skillMdPath: z.string().optional()
+});
+
 let db: Db = undefined as unknown as Db;
 let persistDbQueue = Promise.resolve();
 const runningTimers = new Map<string, NodeJS.Timeout>();
@@ -2442,7 +2453,7 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
       const payload = workGraphAssetPayload(asset);
       objects.push(workGraphObject("asset", asset.id, payload.title, `${payload.token} · ${payload.source}`, payload, payload.createdAt, "derived"));
     });
-  workspace.skills.forEach((item, index) => {
+  workGraphSkillCatalog(workspace).forEach((item, index) => {
     const command = objectString(item, "command", "");
     const capabilityType = objectString(item, "capabilityType", "custom");
     const skillMdPath = objectString(item, "skillMdPath", "");
@@ -2868,6 +2879,55 @@ function workGraphAssetPayload(asset: Asset) {
     referencePath,
     source: "sparkcanvas-asset-store"
   };
+}
+
+function workGraphSlug(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/^\//, "")
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "-")
+    .replace(/^-|-$/g, "")
+    || "skill";
+}
+
+function workGraphNormalizeSkill(input: unknown, index = 0) {
+  const title = objectString(input, "title", `Skill ${index + 1}`);
+  const command = objectString(input, "command", `/${workGraphSlug(title)}`).replace(/^\/?/, "/");
+  const output = objectString(input, "output", /video|视频|mp4/i.test(`${title} ${command}`) ? "MP4" : "PNG");
+  const isVideo = /video|视频|mp4/i.test(`${title} ${command} ${output}`);
+  const isArchive = /archive|归档|zip|kit/i.test(`${title} ${command} ${output}`);
+  const slug = workGraphSlug(command || title);
+  const createdAt = objectString(input, "createdAt", now());
+  return {
+    id: objectString(input, "id", `skill-${slug}`),
+    title,
+    command,
+    output,
+    description: objectString(input, "description", "由 WorkGraph OS Skill Store 管理的能力对象。"),
+    icon: objectString(input, "icon", isVideo ? "video" : isArchive ? "archive" : "image"),
+    keywords: objectStringArray(input, "keywords").length ? objectStringArray(input, "keywords") : title.split(/\s+/).filter(Boolean),
+    nodeType: objectString(input, "nodeType", isVideo ? "video" : isArchive ? "file" : "output"),
+    capabilityType: objectString(input, "capabilityType", isVideo ? "video_planning" : isArchive ? "archive" : "image_generation"),
+    inputs: objectStringArray(input, "inputs").length ? objectStringArray(input, "inputs") : ["Goal Object", "Asset Object", "Brand Object"],
+    outputs: objectStringArray(input, "outputs").length ? objectStringArray(input, "outputs") : [`Result Object: ${output}`],
+    runtime: objectString(input, "runtime", "pi-skill"),
+    skillMdPath: objectString(input, "skillMdPath", `skills/generated/${slug}/SKILL.md`),
+    version: objectString(input, "version", "0.1.0"),
+    evolution: objectField(input, "evolution") ?? {
+      status: "created",
+      runCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      testPlan: ["run generated skill", "verify result object", "save reusable SKILL.md"]
+    },
+    source: objectString(input, "source", "workgraph-skill-store"),
+    createdAt
+  };
+}
+
+function workGraphSkillCatalog(workspace: WorkGraphOsWorkspace | null) {
+  const skills = workspace?.skills ?? [];
+  return skills.map((skill, index) => workGraphNormalizeSkill(skill, index));
 }
 
 function orientationFromRatio(ratio?: string): WorkflowOrientation {
@@ -6596,6 +6656,47 @@ app.get("/workgraph-os/assets", async (req, res) => {
   res.json({
     source: "sparkcanvas-asset-store",
     assets
+  });
+});
+
+app.get("/workgraph-os/skills", async (req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  const query = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+  const skills = workGraphSkillCatalog(workspace).filter((skill) => {
+    if (!query) return true;
+    return [skill.title, skill.command, skill.description, skill.keywords.join(" "), skill.capabilityType].join(" ").toLowerCase().includes(query);
+  });
+  res.json({
+    source: "workgraph-skill-store",
+    skills
+  });
+});
+
+app.post("/workgraph-os/skills", async (req, res) => {
+  const parsed = workGraphOsSkillInputSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ message: "Invalid WorkGraph OS skill payload" });
+  const workspace = await readWorkGraphOsWorkspace();
+  if (!workspace) return res.status(409).json({ message: "WorkGraph OS workspace is empty; save a workspace before creating skills" });
+  const skill = workGraphNormalizeSkill({
+    ...parsed.data,
+    id: `skill-${Date.now().toString(36)}-${nanoid(6)}`,
+    source: "workgraph-skill-store",
+    createdAt: now()
+  });
+  const nextWorkspace: WorkGraphOsWorkspace = {
+    ...workspace,
+    skills: [skill, ...workspace.skills],
+    updatedAt: now()
+  };
+  await writeWorkGraphOsWorkspace(nextWorkspace);
+  const objectIndex = buildWorkGraphOsObjectIndex(nextWorkspace);
+  const historyEntry = await appendWorkGraphOsHistory(nextWorkspace, "manual");
+  res.status(201).json({
+    source: "workgraph-skill-store",
+    skill,
+    workspace: nextWorkspace,
+    objectIndex,
+    historyEntry
   });
 });
 

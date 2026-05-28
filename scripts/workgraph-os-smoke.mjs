@@ -28,6 +28,7 @@ assert(source.includes("WorkGraphObjectIndex"), "workgraph-os should consume the
 assert(source.includes("/workgraph-os/objects"), "workgraph-os should request the object index API");
 assert(source.includes("/workgraph-os/brands"), "workgraph-os should request backend brand memory objects");
 assert(source.includes("/workgraph-os/assets"), "workgraph-os should request backend asset material objects");
+assert(source.includes("/workgraph-os/skills"), "workgraph-os should request backend skill store objects");
 assert(source.includes("/workgraph-os/run"), "workgraph-os should request the backend workflow runner API");
 assert(source.includes("WorkGraphHistoryEntry"), "workgraph-os should model object history entries");
 assert(source.includes("/workgraph-os/history"), "workgraph-os should request the history API");
@@ -68,6 +69,7 @@ console.log(JSON.stringify({
     "workgraph-os-backend-object-index-ready",
     "workgraph-os-backend-brand-memory-ready",
     "workgraph-os-backend-asset-retriever-ready",
+    "workgraph-os-backend-skill-store-ready",
     "workgraph-os-backend-runner-ready",
     "workgraph-os-history-ready",
     "workgraph-os-node-object-ready",

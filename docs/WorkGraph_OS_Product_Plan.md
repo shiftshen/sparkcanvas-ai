@@ -80,6 +80,10 @@ Implemented in `apps/workgraph-os`:
 - Retrieves local asset memory from the SparkCanvas asset store:
   - `GET /workgraph-os/assets`
   - Asset Objects include tokenized CAL references, brand id, role, preview URL, source marker, and tags.
+- Stores and creates skill memory through a backend Skill Store:
+  - `GET /workgraph-os/skills`
+  - `POST /workgraph-os/skills`
+  - Skill Objects are normalized with capability type, runtime, input/output contracts, future `SKILL.md` path, version, source marker, and evolution test plan.
 - Runs nodes through a backend Workflow Runner / Node Executor foundation:
   - `POST /workgraph-os/run`
   - persists Job, Result, and Memory Objects with `executor: workgraph-os-backend`

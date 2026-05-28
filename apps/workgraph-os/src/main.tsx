@@ -255,6 +255,12 @@ type WorkGraphRunResponse = {
   };
 };
 
+type WorkGraphSkillResponse = {
+  skill?: SkillTemplate;
+  workspace?: Partial<WorkGraphWorkspace>;
+  objectIndex?: WorkGraphObjectIndex;
+};
+
 type StorageState = "browser-local" | "memory-only";
 type StorageMode = StorageState | "filesystem-json";
 
@@ -649,35 +655,7 @@ function loadWorkspace(): WorkGraphWorkspace {
     const raw = readStoredWorkspace();
     if (!raw) return defaultWorkspace();
     const parsed = JSON.parse(raw) as Partial<WorkGraphWorkspace>;
-    const goal = parsed.goal ?? interpretGoal(parsed.prompt ?? defaultPrompt, parsed.activeBrandId ?? "dapot");
-    const skills = parsed.skills?.length ? parsed.skills.map(normalizeSkillObject) : skillTemplates;
-    const nodes = parsed.nodes?.length ? parsed.nodes : [];
-    const jobs = parsed.jobs ?? [];
-    const results = parsed.results ?? jobs.map((job) => buildResultObject(job, parsed.workflow?.id ?? "workflow-active"));
-    const feedback = parsed.feedback?.length ? parsed.feedback.map((item) => normalizeFeedbackObject({ ...item, id: item.id })) : [];
-    const memories = parsed.memories?.length ? parsed.memories.map((item) => normalizeMemoryObject({ ...item, id: item.id })) : defaultWorkspace().memories;
-    return {
-      ...defaultWorkspace(),
-      ...parsed,
-      version: 1,
-      goal,
-      workflow: parsed.workflow ?? buildWorkflowObject({
-        prompt: parsed.prompt ?? defaultPrompt,
-        goal,
-        nodes,
-        selectedIds: parsed.selectedIds ?? ["mat-x-logo", "mat-product"],
-        skills,
-        activeModelId: parsed.activeModelId ?? "imgen",
-        jobs
-      }),
-      materials: parsed.materials?.length ? parsed.materials : seedMaterials,
-      skills,
-      nodes,
-      jobs,
-      results,
-      feedback,
-      memories
-    };
+    return normalizeWorkspacePayload(parsed);
   } catch {
     return defaultWorkspace();
   }
@@ -724,36 +702,8 @@ async function loadBackendWorkspace() {
   if (!response.ok) throw new Error("backend workspace unavailable");
   const data = await response.json() as { workspace?: Partial<WorkGraphWorkspace> | null; objectIndex?: WorkGraphObjectIndex };
   if (!data.workspace) return null;
-  const goal = data.workspace.goal ?? interpretGoal(data.workspace.prompt ?? defaultPrompt, data.workspace.activeBrandId ?? "dapot");
-  const skills = data.workspace.skills?.length ? data.workspace.skills.map(normalizeSkillObject) : skillTemplates;
-  const nodes = data.workspace.nodes?.length ? data.workspace.nodes : [];
-  const jobs = data.workspace.jobs ?? [];
-  const results = data.workspace.results ?? jobs.map((job) => buildResultObject(job, data.workspace?.workflow?.id ?? "workflow-active"));
-  const feedback = data.workspace.feedback?.length ? data.workspace.feedback.map((item) => normalizeFeedbackObject({ ...item, id: item.id })) : [];
-  const memories = data.workspace.memories?.length ? data.workspace.memories.map((item) => normalizeMemoryObject({ ...item, id: item.id })) : defaultWorkspace().memories;
   return {
-    workspace: {
-      ...defaultWorkspace(),
-      ...data.workspace,
-      version: 1,
-      goal,
-      workflow: data.workspace.workflow ?? buildWorkflowObject({
-        prompt: data.workspace.prompt ?? defaultPrompt,
-        goal,
-        nodes,
-        selectedIds: data.workspace.selectedIds ?? ["mat-x-logo", "mat-product"],
-        skills,
-        activeModelId: data.workspace.activeModelId ?? "imgen",
-        jobs
-      }),
-      materials: data.workspace.materials?.length ? data.workspace.materials : seedMaterials,
-      skills,
-      nodes,
-      jobs,
-      results,
-      feedback,
-      memories
-    } satisfies WorkGraphWorkspace,
+    workspace: normalizeWorkspacePayload(data.workspace),
     objectIndex: data.objectIndex
   };
 }
@@ -850,6 +800,15 @@ async function runBackendWorkflow(nodeId: string, mode: "workflow" | "node") {
   return response.json() as Promise<WorkGraphRunResponse>;
 }
 
+async function createBackendSkill(input: Pick<SkillTemplate, "title" | "command" | "output" | "description" | "keywords" | "capabilityType" | "runtime" | "skillMdPath">) {
+  const response = await backendRequest("/workgraph-os/skills", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+  if (!response.ok) throw new Error("backend skill create failed");
+  return response.json() as Promise<WorkGraphSkillResponse>;
+}
+
 function formatBytes(bytes: number) {
   if (!bytes) return "0 B";
   if (bytes > 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -882,6 +841,29 @@ function mergeMaterials(current: Material[], incoming: Material[]) {
     seen.add(key);
     return true;
   });
+}
+
+function normalizeWorkspacePayload(loaded: Partial<WorkGraphWorkspace>): WorkGraphWorkspace {
+  const goal = loaded.goal ?? interpretGoal(loaded.prompt ?? defaultPrompt, loaded.activeBrandId ?? "dapot");
+  const skills = loaded.skills?.length ? loaded.skills.map(normalizeSkillObject) : skillTemplates;
+  const nodes = loaded.nodes?.length ? loaded.nodes : [];
+  const jobs = loaded.jobs ?? [];
+  const results = loaded.results ?? jobs.map((job) => buildResultObject(job, loaded.workflow?.id ?? "workflow-active"));
+  const feedback = loaded.feedback?.length ? loaded.feedback.map((item) => normalizeFeedbackObject({ ...item, id: item.id })) : [];
+  const memories = loaded.memories?.length ? loaded.memories.map((item) => normalizeMemoryObject({ ...item, id: item.id })) : defaultWorkspace().memories;
+  return {
+    ...defaultWorkspace(),
+    ...loaded,
+    version: 1,
+    goal,
+    materials: loaded.materials?.length ? loaded.materials : seedMaterials,
+    skills,
+    nodes,
+    jobs,
+    results,
+    feedback,
+    memories
+  } satisfies WorkGraphWorkspace;
 }
 
 function normalizeSkillObject(skill: Partial<SkillTemplate> & Pick<SkillTemplate, "id" | "title" | "command">): SkillTemplate {
@@ -1281,10 +1263,10 @@ function App() {
     }));
   }
 
-  function createSkillFromSearch() {
+  function buildSkillFromSearchInput() {
     const title = newSkillName.trim() || skillSearch.trim() || "自定义 Skill";
     const command = (newSkillCommand.trim() || title.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "-")).replace(/^\/?/, "/");
-    const skill = normalizeSkillObject({
+    return normalizeSkillObject({
       id: `skill-${Date.now().toString(36)}`,
       title,
       command,
@@ -1295,6 +1277,9 @@ function App() {
       nodeType: /video|视频|mp4/i.test(`${title} ${command}`) ? "video" : "output",
       evolution: { status: "created", runCount: 0, successCount: 0, failureCount: 0, testPlan: ["run generated skill", "verify result object", "save reusable SKILL.md"] }
     });
+  }
+
+  function addSkillLocally(skill: SkillTemplate) {
     const refs = selectedMaterials.map((item) => item.token).join(" ") || "$local.asset";
     updateWorkspace((current) => ({
       ...current,
@@ -1320,6 +1305,38 @@ function App() {
     setSkillSearch("");
     setNewSkillName("");
     setNewSkillCommand("");
+  }
+
+  function createSkillFromSearch() {
+    const skill = buildSkillFromSearchInput();
+    if (storageMode === "filesystem-json") {
+      void createBackendSkill({
+        title: skill.title,
+        command: skill.command,
+        output: skill.output,
+        description: skill.description,
+        keywords: skill.keywords,
+        capabilityType: skill.capabilityType,
+        runtime: skill.runtime,
+        skillMdPath: skill.skillMdPath
+      })
+        .then((data) => {
+          if (data.workspace) setWorkspace(normalizeWorkspacePayload(data.workspace));
+          if (data.objectIndex) setObjectIndex(data.objectIndex);
+          const refs = selectedMaterials.map((item) => item.token).join(" ") || "$local.asset";
+          updateWorkspace((current) => ({
+            ...current,
+            prompt: `@imgen ${data.skill?.command ?? skill.command} 使用 ${refs}，生成可预览素材结果 -> ${data.skill?.output ?? skill.output}`
+          }));
+          void loadBackendHistory().then(setHistoryEntries).catch(() => undefined);
+          setSkillSearch("");
+          setNewSkillName("");
+          setNewSkillCommand("");
+        })
+        .catch(() => addSkillLocally(skill));
+      return;
+    }
+    addSkillLocally(skill);
   }
 
   function updateActiveNodeBody(body: string) {
@@ -1412,27 +1429,7 @@ function App() {
       void runBackendWorkflow(activeNode.id, activeNode.type === "goal" ? "workflow" : "node")
         .then((data) => {
           if (data.workspace) {
-            const loaded = data.workspace;
-            const goal = loaded.goal ?? interpretGoal(loaded.prompt ?? defaultPrompt, loaded.activeBrandId ?? "dapot");
-            const skills = loaded.skills?.length ? loaded.skills.map(normalizeSkillObject) : skillTemplates;
-            const nodes = loaded.nodes?.length ? loaded.nodes : [];
-            const jobs = loaded.jobs ?? [];
-            const results = loaded.results ?? jobs.map((job) => buildResultObject(job, loaded.workflow?.id ?? "workflow-active"));
-            const feedback = loaded.feedback?.length ? loaded.feedback.map((item) => normalizeFeedbackObject({ ...item, id: item.id })) : [];
-            const memories = loaded.memories?.length ? loaded.memories.map((item) => normalizeMemoryObject({ ...item, id: item.id })) : defaultWorkspace().memories;
-            setWorkspace({
-              ...defaultWorkspace(),
-              ...loaded,
-              version: 1,
-              goal,
-              materials: loaded.materials?.length ? loaded.materials : seedMaterials,
-              skills,
-              nodes,
-              jobs,
-              results,
-              feedback,
-              memories
-            } satisfies WorkGraphWorkspace);
+            setWorkspace(normalizeWorkspacePayload(data.workspace));
           }
           if (data.objectIndex) setObjectIndex(data.objectIndex);
           if (data.routingDecision) setLastRoutingDecision(data.routingDecision);

@@ -329,6 +329,22 @@ try {
   assert(memoryObjects.objects.length === 1 && memoryObjects.objects[0].id === "memory:mem-smoke", "WorkGraph OS object index should support type filtering");
   const smokeAssetObject = await request("/workgraph-os/objects/asset/mat-smoke");
   assert(smokeAssetObject.title === "Smoke asset", "WorkGraph OS object detail should return the requested object");
+  const workGraphSkills = await request("/workgraph-os/skills");
+  assert(workGraphSkills.source === "workgraph-skill-store" && workGraphSkills.skills?.some((skill) => skill.id === "skill-smoke"), "WorkGraph OS skill store should list workspace skills");
+  const createdWorkGraphSkill = await request("/workgraph-os/skills", {
+    method: "POST",
+    body: JSON.stringify({
+      title: "Smoke created skill",
+      command: "/smoke-created",
+      output: "PNG",
+      description: "Created by smoke through the WorkGraph OS skill store",
+      keywords: ["smoke", "created"],
+      capabilityType: "image_generation"
+    })
+  });
+  assert(createdWorkGraphSkill.skill?.source === "workgraph-skill-store" && createdWorkGraphSkill.skill?.skillMdPath?.includes("smoke-created"), "WorkGraph OS skill store should create normalized Skill Objects");
+  assert(createdWorkGraphSkill.workspace?.skills?.some((skill) => skill.command === "/smoke-created"), "WorkGraph OS skill store should persist created skills into the workspace");
+  assert(createdWorkGraphSkill.objectIndex?.counts?.skill === 2, "WorkGraph OS skill store should update the skill object index");
   const workGraphRun = await request("/workgraph-os/run", { method: "POST", body: JSON.stringify({ nodeId: "node-smoke", mode: "node" }) });
   assert(workGraphRun.execution?.executor === "workgraph-os-backend", "WorkGraph OS should run nodes through the backend executor");
   assert(workGraphRun.routingDecision?.selectedModelId === "imgen", "WorkGraph OS backend executor should return a model routing decision");
@@ -340,10 +356,10 @@ try {
   assert(workGraphRun.workspace?.memories?.[0]?.sourceId === "workflow-smoke", "WorkGraph OS backend executor should persist run memory objects");
   assert(workGraphRun.objectIndex?.counts?.result === 2, "WorkGraph OS backend executor should update the result object index");
   const workGraphHistory = await request("/workgraph-os/history");
-  assert(workGraphHistory.entries?.length === 2, "WorkGraph OS history should include save and run snapshots");
+  assert(workGraphHistory.entries?.length === 3, "WorkGraph OS history should include save, skill-create and run snapshots");
   assert(workGraphHistory.entries[0].counts?.result === 2, "WorkGraph OS run history should retain updated result counts");
   const workGraphHistoryByType = await request("/workgraph-os/history?type=memory");
-  assert(workGraphHistoryByType.entries?.length === 2, "WorkGraph OS history should support type filtering");
+  assert(workGraphHistoryByType.entries?.length === 3, "WorkGraph OS history should support type filtering");
   const workGraphHistoryDetail = await request(`/workgraph-os/history/${workGraphHistory.entries[0].id}`);
   assert(workGraphHistoryDetail.objects?.some((item) => item.id === `result:${workGraphRun.execution.resultId}`), "WorkGraph OS history detail should retain backend executor result objects");
   const workGraphSqliteSchema = await request("/workgraph-os/sqlite/schema");
@@ -356,6 +372,7 @@ try {
   assert(sqliteObjects?.rows?.some((row) => row.id === "asset:mat-smoke"), "WorkGraph OS SQLite export should include indexed asset rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "goal:goal-smoke" && String(row.payload_json).includes("successCriteria")), "WorkGraph OS SQLite export should include structured goal payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "skill:skill-smoke" && String(row.payload_json).includes("skillMdPath")), "WorkGraph OS SQLite export should include standardized skill payload rows");
+  assert(sqliteObjects?.rows?.some((row) => String(row.payload_json).includes("/smoke-created") && String(row.payload_json).includes("workgraph-skill-store")), "WorkGraph OS SQLite export should include skill-store created skill payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "model:imgen" && String(row.payload_json).includes("routingPolicy")), "WorkGraph OS SQLite export should include model routing payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "workflow:workflow-smoke" && String(row.payload_json).includes("reusable")), "WorkGraph OS SQLite export should include structured workflow payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "result:result-smoke" && String(row.payload_json).includes("canSaveAsMaterial")), "WorkGraph OS SQLite export should include structured result payload rows");
