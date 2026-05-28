@@ -353,8 +353,13 @@ try {
   assert(workGraphRun.workspace?.jobs?.[0]?.routingDecision?.selectedModelId === "imgen", "WorkGraph OS backend executor should persist job routing decisions");
   assert(workGraphRun.workspace?.results?.[0]?.sourceJobId === workGraphRun.execution?.jobId, "WorkGraph OS backend executor should persist linked result objects");
   assert(workGraphRun.workspace?.results?.[0]?.routingDecision?.route === "/v1/responses image_generation", "WorkGraph OS backend executor should persist result routing decisions");
+  assert(workGraphRun.executionLog?.length === 4 && workGraphRun.executionLog.some((entry) => entry.step === "route"), "WorkGraph OS backend executor should return node execution log entries");
+  assert(workGraphRun.workspace?.executionLog?.[0]?.executionId === workGraphRun.execution?.id, "WorkGraph OS backend executor should persist execution logs in the workspace");
   assert(workGraphRun.workspace?.memories?.[0]?.sourceId === "workflow-smoke", "WorkGraph OS backend executor should persist run memory objects");
   assert(workGraphRun.objectIndex?.counts?.result === 2, "WorkGraph OS backend executor should update the result object index");
+  const workGraphLogs = await request(`/workgraph-os/logs?executionId=${workGraphRun.execution.id}`);
+  assert(workGraphLogs.source === "workgraph-log-store" && workGraphLogs.logs?.length === 4, "WorkGraph OS log store should query execution logs by execution id");
+  assert(workGraphLogs.logs.some((entry) => entry.step === "execute" && entry.payload?.jobId === workGraphRun.execution.jobId), "WorkGraph OS log store should retain node executor payloads");
   const workGraphHistory = await request("/workgraph-os/history");
   assert(workGraphHistory.entries?.length === 3, "WorkGraph OS history should include save, skill-create and run snapshots");
   assert(workGraphHistory.entries[0].counts?.result === 2, "WorkGraph OS run history should retain updated result counts");

@@ -478,6 +478,7 @@ type WorkGraphOsWorkspace = {
   results: unknown[];
   feedback: unknown[];
   memories: unknown[];
+  executionLog: unknown[];
   updatedAt: string;
 };
 
@@ -757,6 +758,7 @@ const workGraphOsWorkspaceSchema = z.object({
   results: z.array(z.unknown()).default([]),
   feedback: z.array(z.unknown()).default([]),
   memories: z.array(z.unknown()).default([]),
+  executionLog: z.array(z.unknown()).default([]),
   updatedAt: z.string().default(now)
 });
 
@@ -2570,6 +2572,7 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
   const materialIds = objectStringArray(node, "materialIds").length ? objectStringArray(node, "materialIds") : workspace.selectedIds;
   const jobId = `job-${Date.now().toString(36)}-${nanoid(6)}`;
   const resultId = `result-${Date.now().toString(36)}-${nanoid(6)}`;
+  const executionId = `wgos-run-${Date.now().toString(36)}-${nanoid(6)}`;
   const job = {
     id: jobId,
     title: input.mode === "workflow" ? "Backend workflow run" : `Run ${nodeTitle}`,
@@ -2617,6 +2620,52 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
     body: `${job.title} -> ${output} via ${skillId} and ${routingDecision.selectedModelId}: ${routingDecision.reason}`,
     createdAt
   };
+  const executionLog = [
+    {
+      id: `${executionId}-plan`,
+      executionId,
+      step: "plan",
+      status: "done",
+      nodeId,
+      workflowId,
+      message: `Resolved node ${nodeTitle} with output ${output}.`,
+      payload: { mode: input.mode, materialIds },
+      createdAt
+    },
+    {
+      id: `${executionId}-route`,
+      executionId,
+      step: "route",
+      status: "done",
+      nodeId,
+      workflowId,
+      message: routingDecision.reason,
+      payload: routingDecision,
+      createdAt
+    },
+    {
+      id: `${executionId}-execute`,
+      executionId,
+      step: "execute",
+      status: "done",
+      nodeId,
+      workflowId,
+      message: `Executed ${skillId} through ${routingDecision.route}.`,
+      payload: { skillId, modelId: routingDecision.selectedModelId, jobId },
+      createdAt
+    },
+    {
+      id: `${executionId}-result`,
+      executionId,
+      step: "result",
+      status: "done",
+      nodeId,
+      workflowId,
+      message: `Created Result Object ${resultId}.`,
+      payload: { resultId, output, kind: workGraphResultKind(output) },
+      createdAt
+    }
+  ];
   const workflow = workspace.workflow && typeof workspace.workflow === "object"
     ? {
         ...(workspace.workflow as Record<string, unknown>),
@@ -2633,10 +2682,11 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
     jobs: [job, ...workspace.jobs],
     results: [result, ...workspace.results],
     memories: [memory, ...workspace.memories],
+    executionLog: [...executionLog, ...(workspace.executionLog ?? [])].slice(0, 500),
     updatedAt: createdAt
   };
   const execution: WorkGraphOsExecution = {
-    id: `wgos-run-${Date.now().toString(36)}-${nanoid(6)}`,
+    id: executionId,
     mode: input.mode,
     nodeId,
     nodeTitle,
@@ -2649,7 +2699,7 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
     executor: "workgraph-os-backend",
     createdAt
   };
-  return { execution, workspace: nextWorkspace, job, result, memory, routingDecision };
+  return { execution, workspace: nextWorkspace, job, result, memory, routingDecision, executionLog };
 }
 
 function workGraphObject(
@@ -7053,8 +7103,25 @@ app.post("/workgraph-os/run", async (req, res) => {
     result: run.result,
     memory: run.memory,
     routingDecision: run.routingDecision,
+    executionLog: run.executionLog,
     objectIndex,
     historyEntry
+  });
+});
+
+app.get("/workgraph-os/logs", async (req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  const nodeId = typeof req.query.nodeId === "string" ? req.query.nodeId : "";
+  const executionId = typeof req.query.executionId === "string" ? req.query.executionId : "";
+  const limit = Math.min(Number.parseInt(typeof req.query.limit === "string" ? req.query.limit : "50", 10) || 50, 200);
+  const logs = (workspace?.executionLog ?? [])
+    .filter((entry) => !nodeId || objectString(entry, "nodeId", "") === nodeId)
+    .filter((entry) => !executionId || objectString(entry, "executionId", "") === executionId)
+    .slice(0, limit);
+  res.json({
+    source: "workgraph-log-store",
+    logs,
+    count: logs.length
   });
 });
 

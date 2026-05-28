@@ -92,6 +92,17 @@ type Job = {
   createdAt: string;
 };
 
+type ExecutionLogEntry = {
+  id: string;
+  executionId: string;
+  step: "plan" | "route" | "execute" | "result";
+  status: WorkflowStatus;
+  nodeId: string;
+  workflowId: string;
+  message: string;
+  createdAt: string;
+};
+
 type ResultObject = {
   id: string;
   title: string;
@@ -219,6 +230,7 @@ type WorkGraphWorkspace = {
   results: ResultObject[];
   feedback: FeedbackObject[];
   memories: MemoryObject[];
+  executionLog: ExecutionLogEntry[];
 };
 
 type WorkGraphObject = {
@@ -247,6 +259,7 @@ type WorkGraphHistoryEntry = {
 type WorkGraphRunResponse = {
   workspace?: Partial<WorkGraphWorkspace>;
   objectIndex?: WorkGraphObjectIndex;
+  executionLog?: ExecutionLogEntry[];
   routingDecision?: {
     selectedModelId: string;
     selectedCapability: string;
@@ -624,6 +637,7 @@ const defaultWorkspace = (): WorkGraphWorkspace => {
     jobs,
     results: [],
     feedback: [],
+    executionLog: [],
     memories: [
       {
         id: "mem-wgos-principle",
@@ -876,6 +890,7 @@ function normalizeWorkspacePayload(loaded: Partial<WorkGraphWorkspace>): WorkGra
   const results = loaded.results ?? jobs.map((job) => buildResultObject(job, loaded.workflow?.id ?? "workflow-active"));
   const feedback = loaded.feedback?.length ? loaded.feedback.map((item) => normalizeFeedbackObject({ ...item, id: item.id })) : [];
   const memories = loaded.memories?.length ? loaded.memories.map((item) => normalizeMemoryObject({ ...item, id: item.id })) : defaultWorkspace().memories;
+  const executionLog = loaded.executionLog ?? [];
   return {
     ...defaultWorkspace(),
     ...loaded,
@@ -887,7 +902,8 @@ function normalizeWorkspacePayload(loaded: Partial<WorkGraphWorkspace>): WorkGra
     jobs,
     results,
     feedback,
-    memories
+    memories,
+    executionLog
   } satisfies WorkGraphWorkspace;
 }
 

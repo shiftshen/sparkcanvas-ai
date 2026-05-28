@@ -31,6 +31,7 @@ assert(source.includes("/workgraph-os/assets"), "workgraph-os should request bac
 assert(source.includes("/workgraph-os/skills"), "workgraph-os should request backend skill store objects");
 assert(source.includes("/workgraph-os/run"), "workgraph-os should request the backend workflow runner API");
 assert(source.includes("/workgraph-os/plan"), "workgraph-os should request the backend workflow planner API");
+assert(source.includes("ExecutionLogEntry"), "workgraph-os should model node execution log entries");
 assert(source.includes("planBackendWorkflow"), "workgraph-os should expose backend workflow planning from the UI");
 assert(source.includes("createdSkillId"), "workgraph-os should expose planner-created skill ids");
 assert(source.includes("WorkGraphHistoryEntry"), "workgraph-os should model object history entries");
@@ -75,6 +76,7 @@ console.log(JSON.stringify({
     "workgraph-os-backend-skill-store-ready",
     "workgraph-os-backend-runner-ready",
     "workgraph-os-backend-workflow-planner-ready",
+    "workgraph-os-node-execution-log-ready",
     "workgraph-os-planner-created-skill-ready",
     "workgraph-os-history-ready",
     "workgraph-os-node-object-ready",
