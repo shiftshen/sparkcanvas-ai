@@ -99,7 +99,9 @@ Implemented in `apps/workgraph-os`:
 - The object graph panel consumes the backend index when available, so counts and recent objects are no longer UI-only state.
 - The object graph panel also shows recent version history, giving WGOS a first version-management surface.
 - Shows an object graph counter for Goal, Asset, Brand, Skill, Model, Workflow, Result, Feedback, and Memory objects.
-- Records user feedback on the active node and converts it into Memory Objects for later skill/workflow evolution.
+- Records user feedback as linked Feedback Objects with target type/id, reuse/revise/avoid action, source result, and paired Memory Object id.
+- Converts Feedback Objects into Memory Objects with sourceType/sourceId, target linkage, confidence, and reusable flags for later skill/workflow evolution.
+- Backend object graph and SQLite export now connect feedback to its target and memory back to the feedback source.
 - Displays task queue and simulated completion.
 
 ## pi-web Findings

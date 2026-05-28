@@ -2195,10 +2195,22 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
     objects.push(workGraphObject("result", `result-${index}`, objectString(item, "title", `Result ${index + 1}`), `${kind} v${version} · ${objectString(item, "status", "unknown")} -> ${objectString(item, "output", "")}`, item, objectString(item, "createdAt", updatedAt)));
   });
   workspace.feedback.forEach((item, index) => {
-    objects.push(workGraphObject("feedback", `feedback-${index}`, objectString(item, "rating", `Feedback ${index + 1}`), objectString(item, "note", ""), item, objectString(item, "createdAt", updatedAt)));
+    const rating = objectString(item, "rating", `Feedback ${index + 1}`);
+    const action = objectString(item, "action", "");
+    const targetType = objectString(item, "targetType", "");
+    const targetId = objectString(item, "targetId", "");
+    const target = targetType && targetId ? `${targetType}:${targetId}` : "";
+    const summary = [action, target, objectString(item, "note", "")].filter(Boolean).join(" · ");
+    objects.push(workGraphObject("feedback", `feedback-${index}`, rating, summary, item, objectString(item, "createdAt", updatedAt)));
   });
   workspace.memories.forEach((item, index) => {
-    objects.push(workGraphObject("memory", `memory-${index}`, objectString(item, "title", `Memory ${index + 1}`), objectString(item, "body", ""), item, objectString(item, "createdAt", updatedAt)));
+    const sourceType = objectString(item, "sourceType", objectString(item, "source", ""));
+    const sourceId = objectString(item, "sourceId", "");
+    const source = sourceType && sourceId ? `${sourceType}:${sourceId}` : sourceType;
+    const confidence = objectField(item, "confidence");
+    const reusable = objectField(item, "reusable");
+    const summary = [source, confidence === undefined ? "" : `confidence:${confidence}`, reusable === undefined ? "" : `reusable:${reusable}`, objectString(item, "body", "")].filter(Boolean).join(" · ");
+    objects.push(workGraphObject("memory", `memory-${index}`, objectString(item, "title", `Memory ${index + 1}`), summary, item, objectString(item, "createdAt", updatedAt)));
   });
   const counts = objects.reduce<Record<string, number>>((acc, object) => {
     acc[object.type] = (acc[object.type] ?? 0) + 1;

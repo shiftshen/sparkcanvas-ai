@@ -251,8 +251,31 @@ try {
       materialIds: ["mat-smoke"],
       canSaveAsMaterial: true
     }],
-    feedback: [{ id: "fb-smoke", note: "accepted" }],
-    memories: [{ id: "mem-smoke", body: "feedback memory" }]
+    feedback: [{
+      id: "fb-smoke",
+      targetId: "result-smoke",
+      targetType: "result",
+      rating: "accepted",
+      action: "reuse",
+      note: "accepted",
+      memoryId: "mem-smoke",
+      sourceResultId: "result-smoke",
+      sourceWorkflowId: "workflow-smoke",
+      createdAt: "2026-05-24T00:00:00.000Z"
+    }],
+    memories: [{
+      id: "mem-smoke",
+      title: "Smoke feedback memory",
+      source: "feedback",
+      sourceType: "feedback",
+      sourceId: "fb-smoke",
+      targetType: "result",
+      targetId: "result-smoke",
+      confidence: 0.9,
+      reusable: true,
+      body: "reuse: feedback memory",
+      createdAt: "2026-05-24T00:00:00.000Z"
+    }]
   };
   const savedWorkGraph = await request("/workgraph-os/workspace", { method: "PUT", body: JSON.stringify(workGraphPayload) });
   assert(savedWorkGraph.workspace?.prompt === workGraphPayload.prompt, "WorkGraph OS workspace should persist the prompt");
@@ -260,7 +283,7 @@ try {
   assert(savedWorkGraph.workspace?.workflow?.reusable === true, "WorkGraph OS workspace should persist structured workflow objects");
   assert(savedWorkGraph.workspace?.results?.[0]?.canSaveAsMaterial === true, "WorkGraph OS workspace should persist structured result objects");
   assert(savedWorkGraph.workspace?.skills?.[0]?.skillMdPath === "skills/generated/smoke/SKILL.md", "WorkGraph OS workspace should persist standardized skill object metadata");
-  assert(savedWorkGraph.workspace?.feedback?.length === 1, "WorkGraph OS workspace should persist feedback objects");
+  assert(savedWorkGraph.workspace?.feedback?.[0]?.memoryId === "mem-smoke", "WorkGraph OS workspace should persist linked feedback objects");
   assert(savedWorkGraph.objectIndex?.counts?.asset === 1, "WorkGraph OS workspace save should return an asset object index");
   assert(savedWorkGraph.objectIndex?.counts?.node === 1, "WorkGraph OS workspace save should return persisted node objects");
   assert(savedWorkGraph.historyEntry?.objectIds?.includes("asset:mat-smoke"), "WorkGraph OS workspace save should record a history snapshot");
@@ -286,6 +309,10 @@ try {
   assert(workflowObject?.source === "workspace" && String(workflowObject?.payload?.runCount) === "3", "WorkGraph OS object index should include reusable workflow object metadata");
   const resultObject = workGraphObjects.objects.find((item) => item.id === "result:result-smoke");
   assert(resultObject?.summary?.includes("image v2") && resultObject?.payload?.canSaveAsMaterial === true, "WorkGraph OS object index should include previewable result object metadata");
+  const feedbackObject = workGraphObjects.objects.find((item) => item.id === "feedback:fb-smoke");
+  assert(feedbackObject?.summary?.includes("reuse") && feedbackObject?.summary?.includes("result:result-smoke"), "WorkGraph OS object index should include feedback target/action metadata");
+  const memoryObject = workGraphObjects.objects.find((item) => item.id === "memory:mem-smoke");
+  assert(memoryObject?.payload?.sourceId === "fb-smoke" && memoryObject?.payload?.reusable === true, "WorkGraph OS object index should include reusable memory source metadata");
   assert(workGraphObjects.objects.some((item) => item.id === "asset:mat-smoke"), "WorkGraph OS object index should include the saved asset");
   assert(workGraphObjects.objects.some((item) => item.id === "node:node-smoke"), "WorkGraph OS object index should include the saved canvas node");
   const memoryObjects = await request("/workgraph-os/objects?type=memory");
@@ -312,9 +339,13 @@ try {
   assert(sqliteObjects?.rows?.some((row) => row.id === "model:imgen" && String(row.payload_json).includes("routingPolicy")), "WorkGraph OS SQLite export should include model routing payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "workflow:workflow-smoke" && String(row.payload_json).includes("reusable")), "WorkGraph OS SQLite export should include structured workflow payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "result:result-smoke" && String(row.payload_json).includes("canSaveAsMaterial")), "WorkGraph OS SQLite export should include structured result payload rows");
+  assert(sqliteObjects?.rows?.some((row) => row.id === "feedback:fb-smoke" && String(row.payload_json).includes("memoryId")), "WorkGraph OS SQLite export should include linked feedback payload rows");
+  assert(sqliteObjects?.rows?.some((row) => row.id === "memory:mem-smoke" && String(row.payload_json).includes("sourceType")), "WorkGraph OS SQLite export should include structured memory payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "node:node-smoke"), "WorkGraph OS SQLite export should include persisted node rows");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:workflow-smoke" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include workflow-to-asset graph edges");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "node:node-smoke" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include node-to-asset graph edges");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "feedback:fb-smoke" && row.to_object_id === "result:result-smoke" && row.relation === "comments_on"), "WorkGraph OS SQLite export should include feedback-to-result graph edges");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "memory:mem-smoke" && row.to_object_id === "feedback:fb-smoke" && row.relation === "remembers"), "WorkGraph OS SQLite export should include memory-to-feedback graph edges");
   assert(sqliteHistory?.rows?.some((row) => row.id === workGraphHistory.entries[0].id), "WorkGraph OS SQLite export should include history rows");
 
   const initial = await request("/workspace");

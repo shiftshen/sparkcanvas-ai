@@ -137,9 +137,13 @@ type ModelOption = {
 type FeedbackObject = {
   id: string;
   targetId: string;
-  targetType: "workflow" | "skill" | "result" | "model" | "brand";
+  targetType: "workflow" | "skill" | "result" | "model" | "brand" | "node";
   rating: "accepted" | "needs_revision" | "failed";
+  action: "reuse" | "revise" | "avoid";
   note: string;
+  memoryId?: string;
+  sourceResultId?: string;
+  sourceWorkflowId?: string;
   createdAt: string;
 };
 
@@ -147,6 +151,12 @@ type MemoryObject = {
   id: string;
   title: string;
   source: "feedback" | "run" | "manual";
+  sourceType?: "feedback" | "result" | "workflow" | "node" | "skill";
+  sourceId?: string;
+  targetType?: FeedbackObject["targetType"];
+  targetId?: string;
+  confidence: number;
+  reusable: boolean;
   body: string;
   createdAt: string;
 };
@@ -585,6 +595,10 @@ const defaultWorkspace = (): WorkGraphWorkspace => {
         id: "mem-wgos-principle",
         title: "WGOS product rule",
         source: "manual",
+        sourceType: "workflow",
+        sourceId: "workflow-active",
+        confidence: 0.8,
+        reusable: true,
         body: "用户定义目标，系统组织工作图谱，用户判断结果，系统沉淀能力。",
         createdAt: now()
       }
@@ -623,6 +637,8 @@ function loadWorkspace(): WorkGraphWorkspace {
     const nodes = parsed.nodes?.length ? parsed.nodes : [];
     const jobs = parsed.jobs ?? [];
     const results = parsed.results ?? jobs.map((job) => buildResultObject(job, parsed.workflow?.id ?? "workflow-active"));
+    const feedback = parsed.feedback?.length ? parsed.feedback.map((item) => normalizeFeedbackObject({ ...item, id: item.id })) : [];
+    const memories = parsed.memories?.length ? parsed.memories.map((item) => normalizeMemoryObject({ ...item, id: item.id })) : defaultWorkspace().memories;
     return {
       ...defaultWorkspace(),
       ...parsed,
@@ -641,7 +657,9 @@ function loadWorkspace(): WorkGraphWorkspace {
       skills,
       nodes,
       jobs,
-      results
+      results,
+      feedback,
+      memories
     };
   } catch {
     return defaultWorkspace();
@@ -694,6 +712,8 @@ async function loadBackendWorkspace() {
   const nodes = data.workspace.nodes?.length ? data.workspace.nodes : [];
   const jobs = data.workspace.jobs ?? [];
   const results = data.workspace.results ?? jobs.map((job) => buildResultObject(job, data.workspace?.workflow?.id ?? "workflow-active"));
+  const feedback = data.workspace.feedback?.length ? data.workspace.feedback.map((item) => normalizeFeedbackObject({ ...item, id: item.id })) : [];
+  const memories = data.workspace.memories?.length ? data.workspace.memories.map((item) => normalizeMemoryObject({ ...item, id: item.id })) : defaultWorkspace().memories;
   return {
     workspace: {
       ...defaultWorkspace(),
@@ -713,7 +733,9 @@ async function loadBackendWorkspace() {
       skills,
       nodes,
       jobs,
-      results
+      results,
+      feedback,
+      memories
     } satisfies WorkGraphWorkspace,
     objectIndex: data.objectIndex
   };
@@ -835,6 +857,74 @@ function normalizeModelObject(model: Partial<ModelOption> & Pick<ModelOption, "i
     fallbackModelIds: model.fallbackModelIds ?? (isLocal ? ["imgen"] : ["imgen", "local-flux"].filter((id) => id !== model.id)),
     nodeAffinity: model.nodeAffinity?.length ? model.nodeAffinity : isVideo ? ["video"] : ["skill", "compose", "output"],
     routingRules: model.routingRules?.length ? model.routingRules : ["match node capability first", "fallback by availability and cost"]
+  };
+}
+
+function normalizeFeedbackObject(feedback: Partial<FeedbackObject> & Pick<FeedbackObject, "id">): FeedbackObject {
+  const rating = feedback.rating ?? "needs_revision";
+  return {
+    id: feedback.id,
+    targetId: feedback.targetId ?? feedback.sourceResultId ?? "workflow-active",
+    targetType: feedback.targetType ?? (feedback.sourceResultId ? "result" : "workflow"),
+    rating,
+    action: feedback.action ?? (rating === "accepted" ? "reuse" : rating === "failed" ? "avoid" : "revise"),
+    note: feedback.note ?? "",
+    memoryId: feedback.memoryId,
+    sourceResultId: feedback.sourceResultId,
+    sourceWorkflowId: feedback.sourceWorkflowId,
+    createdAt: feedback.createdAt ?? now()
+  };
+}
+
+function normalizeMemoryObject(memory: Partial<MemoryObject> & Pick<MemoryObject, "id">): MemoryObject {
+  return {
+    id: memory.id,
+    title: memory.title ?? "Memory Object",
+    source: memory.source ?? "manual",
+    sourceType: memory.sourceType,
+    sourceId: memory.sourceId,
+    targetType: memory.targetType,
+    targetId: memory.targetId,
+    confidence: memory.confidence ?? 0.5,
+    reusable: memory.reusable ?? memory.source !== "run",
+    body: memory.body ?? "",
+    createdAt: memory.createdAt ?? now()
+  };
+}
+
+function feedbackTargetForActiveNode(node: WorkflowNode, workspace: WorkGraphWorkspace) {
+  const latestResult = workspace.results[0];
+  if ((node.type === "output" || node.type === "review") && latestResult) {
+    return { targetType: "result" as const, targetId: latestResult.id, sourceResultId: latestResult.id };
+  }
+  if (node.type === "skill") {
+    return { targetType: "skill" as const, targetId: findMatchingSkill(workspace.prompt, workspace.skills).id };
+  }
+  if (node.type === "model") {
+    return { targetType: "model" as const, targetId: workspace.activeModelId };
+  }
+  if (node.type === "brand") {
+    return { targetType: "brand" as const, targetId: workspace.activeBrandId };
+  }
+  if (node.type === "goal") {
+    return { targetType: "workflow" as const, targetId: workspace.workflow.id };
+  }
+  return { targetType: "node" as const, targetId: node.id };
+}
+
+function buildMemoryFromFeedback(feedback: FeedbackObject, nodeTitle: string): MemoryObject {
+  return {
+    id: feedback.memoryId ?? `mem-${Date.now().toString(36)}`,
+    title: `Feedback memory · ${nodeTitle}`,
+    source: "feedback",
+    sourceType: "feedback",
+    sourceId: feedback.id,
+    targetType: feedback.targetType,
+    targetId: feedback.targetId,
+    confidence: feedback.rating === "accepted" ? 0.9 : feedback.rating === "failed" ? 0.7 : 0.65,
+    reusable: feedback.rating === "accepted",
+    body: `${feedback.action}: ${feedback.note}`,
+    createdAt: feedback.createdAt
   };
 }
 
@@ -1122,6 +1212,12 @@ function App() {
           id: `mem-${Date.now().toString(36)}`,
           title: `Created skill ${skill.command}`,
           source: "manual",
+          sourceType: "skill",
+          sourceId: skill.id,
+          targetType: "skill",
+          targetId: skill.id,
+          confidence: 0.7,
+          reusable: true,
           body: `${skill.title}: ${skill.description}`,
           createdAt: now()
         },
@@ -1197,6 +1293,12 @@ function App() {
           id: `mem-${Date.now().toString(36)}`,
           title: `Ran ${job.title}`,
           source: "run",
+          sourceType: "workflow",
+          sourceId: current.workflow.id,
+          targetType: "result",
+          targetId: result.id,
+          confidence: 0.6,
+          reusable: false,
           body: `${job.title} -> ${job.output} with ${job.materials.join(" ") || "no material refs"}`,
           createdAt: now()
         },
@@ -1238,27 +1340,26 @@ function App() {
 
   function recordFeedback(rating: FeedbackObject["rating"]) {
     const note = feedbackNote.trim() || (rating === "accepted" ? "结果可复用，沉淀为正向样例。" : "需要继续调整。");
+    const target = feedbackTargetForActiveNode(activeNode, workspace);
+    const feedbackId = `fb-${Date.now().toString(36)}`;
+    const memoryId = `mem-${Date.now().toString(36)}`;
     const feedbackObject: FeedbackObject = {
-      id: `fb-${Date.now().toString(36)}`,
-      targetId: activeNode.id,
-      targetType: activeNode.type === "skill" ? "skill" : activeNode.type === "model" ? "model" : activeNode.type === "brand" ? "brand" : "workflow",
+      id: feedbackId,
+      targetId: target.targetId,
+      targetType: target.targetType,
       rating,
+      action: rating === "accepted" ? "reuse" : rating === "failed" ? "avoid" : "revise",
       note,
+      memoryId,
+      sourceResultId: target.sourceResultId,
+      sourceWorkflowId: workspace.workflow.id,
       createdAt: now()
     };
+    const memoryObject = buildMemoryFromFeedback(feedbackObject, activeNode.title);
     updateWorkspace((current) => ({
       ...current,
       feedback: [feedbackObject, ...current.feedback],
-      memories: [
-        {
-          id: `mem-${Date.now().toString(36)}`,
-          title: `Feedback on ${activeNode.title}`,
-          source: "feedback",
-          body: `${rating}: ${note}`,
-          createdAt: feedbackObject.createdAt
-        },
-        ...current.memories
-      ]
+      memories: [memoryObject, ...current.memories]
     }));
     setFeedbackNote("");
   }

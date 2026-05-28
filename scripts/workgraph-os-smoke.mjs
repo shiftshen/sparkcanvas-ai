@@ -45,6 +45,11 @@ assert(source.includes("edgeIds") && source.includes("runCount"), "workgraph-os 
 assert(source.includes("type ResultObject"), "workgraph-os should define a structured Result Object");
 assert(source.includes("buildResultObject"), "workgraph-os should build result objects from workflow runs");
 assert(source.includes("saveResultAsMaterial"), "workgraph-os should allow accepted results to become reusable materials");
+assert(source.includes("normalizeFeedbackObject"), "workgraph-os should normalize linked Feedback Objects");
+assert(source.includes("normalizeMemoryObject"), "workgraph-os should normalize structured Memory Objects");
+assert(source.includes("buildMemoryFromFeedback"), "workgraph-os should turn feedback into linked reusable memory");
+assert(source.includes("memoryId") && source.includes("sourceType"), "workgraph-os should link feedback and memory object ids");
+assert(source.includes("confidence") && source.includes("reusable"), "workgraph-os should track memory confidence and reusability");
 
 console.log(JSON.stringify({
   ok: true,
@@ -62,6 +67,7 @@ console.log(JSON.stringify({
     "workgraph-os-skill-object-ready",
     "workgraph-os-model-object-ready",
     "workgraph-os-workflow-object-ready",
-    "workgraph-os-result-object-ready"
+    "workgraph-os-result-object-ready",
+    "workgraph-os-feedback-memory-link-ready"
   ]
 }));
