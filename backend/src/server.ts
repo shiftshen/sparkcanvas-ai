@@ -2435,6 +2435,13 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
   workspace.materials.forEach((item, index) => {
     objects.push(workGraphObject("asset", `asset-${index}`, objectString(item, "title", `Asset ${index + 1}`), objectString(item, "token", objectString(item, "fileName", "")), item, objectString(item, "createdAt", updatedAt)));
   });
+  db.assets
+    .filter((asset) => !workspace.materials.some((item) => objectString(item, "id", "") === asset.id))
+    .slice(0, 50)
+    .forEach((asset) => {
+      const payload = workGraphAssetPayload(asset);
+      objects.push(workGraphObject("asset", asset.id, payload.title, `${payload.token} · ${payload.source}`, payload, payload.createdAt, "derived"));
+    });
   workspace.skills.forEach((item, index) => {
     const command = objectString(item, "command", "");
     const capabilityType = objectString(item, "capabilityType", "custom");
@@ -2825,6 +2832,41 @@ function workGraphBrandPayload(brand: Brand | undefined, activeBrandId: string) 
         referencePath: assetReferencePath(asset)
       })),
     source: "sparkcanvas-brand-db"
+  };
+}
+
+function workGraphAssetToken(asset: Asset) {
+  const referencePath = assetReferencePath(asset);
+  if (referencePath) return `$${referencePath}`;
+  const brand = db.brands.find((item) => item.id === asset.brandId);
+  const brandPrefix = brand ? normalizeKey(brand.name) || brand.id : asset.brandId;
+  const role = assetTypeToReferenceRole(asset.type, asset.title, asset.meta);
+  return `$${brandPrefix}.${role}`;
+}
+
+function workGraphMaterialKind(asset: Asset): "image" | "video" | "document" | "audio" {
+  if (asset.type === "generated_video") return "video";
+  return asset.imageUrl ? "image" : "document";
+}
+
+function workGraphAssetPayload(asset: Asset) {
+  const role = assetTypeToReferenceRole(asset.type, asset.title, asset.meta);
+  const referencePath = assetReferencePath(asset);
+  return {
+    id: asset.id,
+    title: asset.title,
+    kind: workGraphMaterialKind(asset),
+    token: workGraphAssetToken(asset),
+    previewUrl: asset.imageUrl ?? "",
+    fileName: asset.imageUrl?.split("/").pop() ?? `${asset.id}.asset`,
+    size: 0,
+    createdAt: asset.createdAt,
+    tags: [asset.type, role, asset.brandId].filter(Boolean),
+    note: asset.meta,
+    brandId: asset.brandId,
+    role,
+    referencePath,
+    source: "sparkcanvas-asset-store"
   };
 }
 
@@ -6538,6 +6580,22 @@ app.get("/workgraph-os/brands", async (_req, res) => {
     brands: db.brands
       .filter((brand) => !brand.archived)
       .map((brand) => workGraphBrandPayload(brand, brand.id))
+  });
+});
+
+app.get("/workgraph-os/assets", async (req, res) => {
+  const brandId = typeof req.query.brandId === "string" ? req.query.brandId : "";
+  const query = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+  const assets = db.assets
+    .filter((asset) => !brandId || asset.brandId === brandId)
+    .map(workGraphAssetPayload)
+    .filter((asset) => {
+      if (!query) return true;
+      return [asset.title, asset.token, asset.note, asset.tags.join(" ")].join(" ").toLowerCase().includes(query);
+    });
+  res.json({
+    source: "sparkcanvas-asset-store",
+    assets
   });
 });
 

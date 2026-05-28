@@ -41,6 +41,10 @@ type Material = {
   createdAt: string;
   tags: string[];
   note: string;
+  source?: string;
+  brandId?: string;
+  role?: string;
+  referencePath?: string;
 };
 
 type SkillTemplate = {
@@ -812,6 +816,31 @@ async function loadBackendBrands() {
     } satisfies BrandMemory));
 }
 
+async function loadBackendAssets(brandId?: string) {
+  const query = brandId ? `?brandId=${encodeURIComponent(brandId)}` : "";
+  const response = await backendRequest(`/workgraph-os/assets${query}`);
+  if (!response.ok) throw new Error("backend assets unavailable");
+  const data = await response.json() as { assets?: Partial<Material>[] };
+  return (data.assets ?? [])
+    .filter((asset): asset is Partial<Material> & Pick<Material, "id" | "title"> => Boolean(asset.id && asset.title))
+    .map((asset) => ({
+      id: asset.id,
+      title: asset.title,
+      kind: asset.kind ?? "document",
+      token: asset.token ?? `$asset.${asset.id}`,
+      previewUrl: asset.previewUrl ?? "",
+      fileName: asset.fileName ?? `${asset.id}.asset`,
+      size: asset.size ?? 0,
+      createdAt: asset.createdAt ?? now(),
+      tags: asset.tags?.length ? asset.tags : [],
+      note: asset.note ?? "",
+      source: asset.source,
+      brandId: asset.brandId,
+      role: asset.role,
+      referencePath: asset.referencePath
+    } satisfies Material));
+}
+
 async function runBackendWorkflow(nodeId: string, mode: "workflow" | "node") {
   const response = await backendRequest("/workgraph-os/run", {
     method: "POST",
@@ -843,6 +872,16 @@ function inferKind(file: File): MaterialKind {
   if (file.type.startsWith("audio/")) return "audio";
   if (file.type.startsWith("image/")) return "image";
   return "document";
+}
+
+function mergeMaterials(current: Material[], incoming: Material[]) {
+  const seen = new Set<string>();
+  return [...incoming, ...current].filter((item) => {
+    const key = item.id || item.token;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function normalizeSkillObject(skill: Partial<SkillTemplate> & Pick<SkillTemplate, "id" | "title" | "command">): SkillTemplate {
@@ -1137,6 +1176,15 @@ function App() {
         }
         void loadBackendBrands().then((brands) => {
           if (!cancelled && brands.length) setBrandCatalog(brands);
+        }).catch(() => undefined);
+        void loadBackendAssets(loaded?.workspace.activeBrandId ?? activeBrandId).then((assets) => {
+          if (!cancelled && assets.length) {
+            setWorkspace((current) => ({
+              ...current,
+              materials: mergeMaterials(current.materials, assets),
+              activeMaterialId: current.activeMaterialId || assets[0].id
+            }));
+          }
         }).catch(() => undefined);
         void loadBackendHistory().then(setHistoryEntries).catch(() => undefined);
         setStorageMode("filesystem-json");

@@ -192,6 +192,9 @@ try {
   const workGraphBrands = await request("/workgraph-os/brands");
   assert(workGraphBrands.source === "sparkcanvas-brand-db", "WorkGraph OS should read brands from the SparkCanvas brand database");
   assert(workGraphBrands.brands?.some((brand) => brand.id === "brand_xmanx" && String(brand.context).includes("$copy.brand_name")), "WorkGraph OS brand API should expose compiled brand context");
+  const workGraphAssets = await request("/workgraph-os/assets?brandId=brand_xmanx");
+  assert(workGraphAssets.source === "sparkcanvas-asset-store", "WorkGraph OS should read assets from the SparkCanvas asset store");
+  assert(workGraphAssets.assets?.some((asset) => asset.source === "sparkcanvas-asset-store" && String(asset.token).startsWith("$")), "WorkGraph OS asset API should expose tokenized material objects");
   const workGraphPayload = {
     version: 1,
     goal: {
@@ -287,9 +290,10 @@ try {
   assert(savedWorkGraph.workspace?.results?.[0]?.canSaveAsMaterial === true, "WorkGraph OS workspace should persist structured result objects");
   assert(savedWorkGraph.workspace?.skills?.[0]?.skillMdPath === "skills/generated/smoke/SKILL.md", "WorkGraph OS workspace should persist standardized skill object metadata");
   assert(savedWorkGraph.workspace?.feedback?.[0]?.memoryId === "mem-smoke", "WorkGraph OS workspace should persist linked feedback objects");
-  assert(savedWorkGraph.objectIndex?.counts?.asset === 1, "WorkGraph OS workspace save should return an asset object index");
+  assert(savedWorkGraph.objectIndex?.counts?.asset >= 2, "WorkGraph OS workspace save should return workspace and asset-store Asset Objects");
   const savedBrandObject = savedWorkGraph.objectIndex?.objects?.find((item) => item.type === "brand");
   assert(savedBrandObject?.payload?.source === "sparkcanvas-brand-db", "WorkGraph OS workspace save should index brand database payloads");
+  assert(savedWorkGraph.objectIndex?.objects?.some((item) => item.type === "asset" && item.payload?.source === "sparkcanvas-asset-store"), "WorkGraph OS object index should include asset-store derived Asset Objects");
   assert(savedWorkGraph.objectIndex?.counts?.node === 1, "WorkGraph OS workspace save should return persisted node objects");
   assert(savedWorkGraph.historyEntry?.objectIds?.includes("asset:mat-smoke"), "WorkGraph OS workspace save should record a history snapshot");
   const reloadedWorkGraph = await request("/workgraph-os/workspace");
@@ -298,7 +302,7 @@ try {
   assert(reloadedWorkGraph.workspace?.memories?.[0]?.id === "mem-smoke", "WorkGraph OS workspace should reload memory objects");
   const workGraphObjects = await request("/workgraph-os/objects");
   assert(workGraphObjects.counts?.goal === 1, "WorkGraph OS object index should include a goal object");
-  assert(workGraphObjects.counts?.asset === 1, "WorkGraph OS object index should include asset objects");
+  assert(workGraphObjects.counts?.asset >= 2, "WorkGraph OS object index should include workspace and asset-store asset objects");
   assert(workGraphObjects.counts?.skill === 1, "WorkGraph OS object index should include skill objects");
   assert(workGraphObjects.counts?.model === 1, "WorkGraph OS object index should include model objects");
   assert(workGraphObjects.counts?.node === 1, "WorkGraph OS object index should include node objects");

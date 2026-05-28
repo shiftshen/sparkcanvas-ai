@@ -77,6 +77,9 @@ Implemented in `apps/workgraph-os`:
 - Reads local brand memory from the SparkCanvas brand database:
   - `GET /workgraph-os/brands`
   - Brand Objects include compiled brand context, asset roles, linked assets, source marker, rules, colors, and audience.
+- Retrieves local asset memory from the SparkCanvas asset store:
+  - `GET /workgraph-os/assets`
+  - Asset Objects include tokenized CAL references, brand id, role, preview URL, source marker, and tags.
 - Runs nodes through a backend Workflow Runner / Node Executor foundation:
   - `POST /workgraph-os/run`
   - persists Job, Result, and Memory Objects with `executor: workgraph-os-backend`
@@ -87,6 +90,7 @@ Implemented in `apps/workgraph-os`:
   - `GET /workgraph-os/objects?type=memory`
   - `GET /workgraph-os/objects/:type/:id`
   - current index types: Goal, Asset, Brand, Skill, Model, Workflow, Node, Result, Feedback, Memory
+  - Asset Objects are indexed from both the WGOS workspace materials and the SparkCanvas asset store.
   - structured Goal Objects are indexed from workspace data when available, with legacy prompt-only workspaces migrated into derived goals.
   - Skill Objects include evolution metadata and future `SKILL.md` export paths, so high-frequency workflows can become reusable Agent Skills.
   - Model Objects expose routing policy metadata so nodes can later choose models by capability, fallback, latency, cost, and local/cloud constraints.
