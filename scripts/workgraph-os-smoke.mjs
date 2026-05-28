@@ -36,6 +36,9 @@ assert(source.includes("successCriteria"), "workgraph-os should carry goal succe
 assert(source.includes("capabilityType"), "workgraph-os should define standardized Skill Object capability metadata");
 assert(source.includes("skillMdPath"), "workgraph-os should carry a future SKILL.md export path");
 assert(source.includes("runCount") && source.includes("successCount"), "workgraph-os should track skill evolution counters");
+assert(source.includes("fallbackModelIds"), "workgraph-os should define model fallback routing metadata");
+assert(source.includes("nodeAffinity"), "workgraph-os should define node-level model affinity");
+assert(source.includes("routingRules"), "workgraph-os should define model routing rules");
 
 console.log(JSON.stringify({
   ok: true,
@@ -50,6 +53,7 @@ console.log(JSON.stringify({
     "workgraph-os-history-ready",
     "workgraph-os-node-object-ready",
     "workgraph-os-goal-object-ready",
-    "workgraph-os-skill-object-ready"
+    "workgraph-os-skill-object-ready",
+    "workgraph-os-model-object-ready"
   ]
 }));

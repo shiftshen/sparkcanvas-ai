@@ -46,7 +46,7 @@ Implemented in `apps/workgraph-os`:
 - Generates object URL previews for local image/video/audio files.
 - Maintains material tokens and selected material parameters.
 - Provides brand memory nodes for DAPOT and XMANX.
-- Provides model nodes for cloud image, @imgen, video, and local model candidates.
+- Provides Model Objects for cloud image, @imgen, video, and local model candidates, including provider, capability tags, route, cost/latency tier, fallback model IDs, node affinity, and routing rules.
 - Provides skill templates:
   - poster generation
   - material composition
@@ -63,6 +63,7 @@ Implemented in `apps/workgraph-os`:
   - Goal Object
   - Asset Object
   - Skill Object
+  - Model Object
   - Workflow Object
   - Result Object
   - Feedback Object
@@ -78,6 +79,7 @@ Implemented in `apps/workgraph-os`:
   - current index types: Goal, Asset, Brand, Skill, Model, Workflow, Node, Result, Feedback, Memory
   - structured Goal Objects are indexed from workspace data when available, with legacy prompt-only workspaces migrated into derived goals.
   - Skill Objects include evolution metadata and future `SKILL.md` export paths, so high-frequency workflows can become reusable Agent Skills.
+  - Model Objects expose routing policy metadata so nodes can later choose models by capability, fallback, latency, cost, and local/cloud constraints.
   - persisted canvas nodes are indexed as Node Objects and connected to workflow/assets in the SQLite export graph.
 - Records object-index history snapshots on every workspace save:
   - `GET /workgraph-os/history`

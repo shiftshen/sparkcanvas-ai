@@ -2135,7 +2135,13 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
   const objects: WorkGraphOsObject[] = [
     workGraphObject("goal", "active", goalPayload.title, goalPayload.normalizedIntent || goalPayload.rawInput || "No goal prompt", goalPayload, updatedAt, workspace.goal ? "workspace" : "derived"),
     workGraphObject("brand", workspace.activeBrandId || "active", `Brand ${workspace.activeBrandId || "active"}`, `Active brand context: ${workspace.activeBrandId || "unset"}`, { id: workspace.activeBrandId || "active" }, updatedAt, "derived"),
-    workGraphObject("model", workspace.activeModelId || "active", `Model ${workspace.activeModelId || "active"}`, `Active model strategy: ${workspace.activeModelId || "unset"}`, { id: workspace.activeModelId || "active" }, updatedAt, "derived"),
+    workGraphObject("model", workspace.activeModelId || "active", `Model ${workspace.activeModelId || "active"}`, `Active model strategy: ${workspace.activeModelId || "unset"}`, {
+      id: workspace.activeModelId || "active",
+      activeModelId: workspace.activeModelId,
+      routingPolicy: "match node capability first, then fallback by availability and cost",
+      fallbackModelIds: [],
+      nodeAffinity: ["skill", "compose", "output", "video"]
+    }, updatedAt, "derived"),
     workGraphObject("workflow", "active", "Active Workflow", `${workspace.jobs.length || 1} workflow run(s), ${workspace.selectedIds.length} selected asset(s)`, { id: "active", prompt: workspace.prompt, selectedIds: workspace.selectedIds, jobs: workspace.jobs }, updatedAt, "derived")
   ];
   workspace.materials.forEach((item, index) => {

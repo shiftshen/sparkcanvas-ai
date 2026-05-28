@@ -105,6 +105,14 @@ type ModelOption = {
   speed: string;
   quality: string;
   status: "ready" | "fallback" | "offline";
+  provider: "openai-compatible" | "local" | "video-api";
+  capabilities: Array<"image" | "video" | "text" | "local" | "reference_image" | "composition">;
+  route: string;
+  costTier: "low" | "medium" | "high";
+  latencyTier: "fast" | "medium" | "slow";
+  fallbackModelIds: string[];
+  nodeAffinity: WorkflowNode["type"][];
+  routingRules: string[];
 };
 
 type FeedbackObject = {
@@ -314,10 +322,74 @@ const brandMemories: BrandMemory[] = [
 ];
 
 const modelOptions: ModelOption[] = [
-  { id: "gpt-image", name: "GPT Image / cloud", kind: "image", cost: "高", speed: "中", quality: "高", status: "fallback" },
-  { id: "imgen", name: "@imgen gpt-5.4", kind: "image", cost: "中", speed: "中", quality: "中高", status: "ready" },
-  { id: "kling", name: "Kling / 可灵", kind: "video", cost: "高", speed: "慢", quality: "高", status: "fallback" },
-  { id: "local-flux", name: "Local Flux", kind: "local", cost: "低", speed: "中", quality: "中高", status: "offline" }
+  {
+    id: "gpt-image",
+    name: "GPT Image / cloud",
+    kind: "image",
+    cost: "高",
+    speed: "中",
+    quality: "高",
+    status: "fallback",
+    provider: "openai-compatible",
+    capabilities: ["image", "reference_image"],
+    route: "/v1/images/generations",
+    costTier: "high",
+    latencyTier: "medium",
+    fallbackModelIds: ["imgen"],
+    nodeAffinity: ["output", "compose"],
+    routingRules: ["use when final visual quality matters", "fallback to imgen when unavailable"]
+  },
+  {
+    id: "imgen",
+    name: "@imgen gpt-5.4",
+    kind: "image",
+    cost: "中",
+    speed: "中",
+    quality: "中高",
+    status: "ready",
+    provider: "openai-compatible",
+    capabilities: ["image", "reference_image", "composition"],
+    route: "/v1/responses image_generation",
+    costTier: "medium",
+    latencyTier: "medium",
+    fallbackModelIds: ["gpt-image", "local-flux"],
+    nodeAffinity: ["skill", "compose", "output"],
+    routingRules: ["default image/composition route", "keep brand references attached"]
+  },
+  {
+    id: "kling",
+    name: "Kling / 可灵",
+    kind: "video",
+    cost: "高",
+    speed: "慢",
+    quality: "高",
+    status: "fallback",
+    provider: "video-api",
+    capabilities: ["video", "reference_image"],
+    route: "/v1/videos",
+    costTier: "high",
+    latencyTier: "slow",
+    fallbackModelIds: ["imgen"],
+    nodeAffinity: ["video"],
+    routingRules: ["use for final video nodes", "requires public input reference"]
+  },
+  {
+    id: "local-flux",
+    name: "Local Flux",
+    kind: "local",
+    cost: "低",
+    speed: "中",
+    quality: "中高",
+    status: "offline",
+    provider: "local",
+    capabilities: ["image", "local"],
+    route: "ollama/local-image",
+    costTier: "low",
+    latencyTier: "medium",
+    fallbackModelIds: ["imgen"],
+    nodeAffinity: ["compose", "output"],
+    routingRules: ["use when local privacy is preferred", "fallback to imgen until local runtime is online"]
+  }
 ];
 
 const defaultPrompt = "@imgen /compose 使用 $xmanx.logo $xmanx.product，生成黑橙品牌首图 -> PNG";
@@ -577,6 +649,30 @@ function normalizeSkillObject(skill: Partial<SkillTemplate> & Pick<SkillTemplate
   };
 }
 
+function normalizeModelObject(model: Partial<ModelOption> & Pick<ModelOption, "id" | "name" | "kind">): ModelOption {
+  const isVideo = model.kind === "video";
+  const isLocal = model.kind === "local";
+  const costTier = model.costTier ?? (model.cost === "低" ? "low" : model.cost === "高" ? "high" : "medium");
+  const latencyTier = model.latencyTier ?? (model.speed === "慢" ? "slow" : model.speed === "快" ? "fast" : "medium");
+  return {
+    id: model.id,
+    name: model.name,
+    kind: model.kind,
+    cost: model.cost ?? (costTier === "low" ? "低" : costTier === "high" ? "高" : "中"),
+    speed: model.speed ?? (latencyTier === "slow" ? "慢" : latencyTier === "fast" ? "快" : "中"),
+    quality: model.quality ?? "中高",
+    status: model.status ?? (isLocal ? "offline" : "fallback"),
+    provider: model.provider ?? (isLocal ? "local" : isVideo ? "video-api" : "openai-compatible"),
+    capabilities: model.capabilities?.length ? model.capabilities : isVideo ? ["video", "reference_image"] : isLocal ? ["image", "local"] : ["image", "reference_image"],
+    route: model.route ?? (isVideo ? "/v1/videos" : isLocal ? "ollama/local-image" : "/v1/responses image_generation"),
+    costTier,
+    latencyTier,
+    fallbackModelIds: model.fallbackModelIds ?? (isLocal ? ["imgen"] : ["imgen", "local-flux"].filter((id) => id !== model.id)),
+    nodeAffinity: model.nodeAffinity?.length ? model.nodeAffinity : isVideo ? ["video"] : ["skill", "compose", "output"],
+    routingRules: model.routingRules?.length ? model.routingRules : ["match node capability first", "fallback by availability and cost"]
+  };
+}
+
 function skillIcon(icon: SkillTemplate["icon"]) {
   if (icon === "compose") return <Scissors />;
   if (icon === "video") return <Film />;
@@ -643,7 +739,7 @@ function buildNodes(prompt: string, materials: Material[], skills: SkillTemplate
       id: "model",
       title: `模型节点 · ${model.name}`,
       type: "model",
-      body: `${model.kind} · 成本 ${model.cost} · 速度 ${model.speed} · 质量 ${model.quality} · ${model.status}`,
+      body: `${model.kind} · ${model.provider} · ${model.route}\ncapabilities: ${model.capabilities.join(", ")}\nfallback: ${model.fallbackModelIds.join(" -> ") || "none"}\nrouting: ${model.routingRules.join(" / ")}`,
       x: 690,
       y: 72,
       materialIds: [],
@@ -1085,7 +1181,11 @@ function App() {
           {modelOptions.map((model) => (
             <button key={model.id} className={`pm-skill ${activeModelId === model.id ? "selected" : ""}`} onClick={() => updateWorkspace((current) => ({ ...current, activeModelId: model.id }))}>
               <Bot />
-              <span><strong>{model.name}</strong><small>{model.kind} · {model.cost} · {model.status}</small></span>
+              <span>
+                <strong>{model.name}</strong>
+                <small>{model.kind} · {model.provider} · {model.costTier}/{model.latencyTier} · {model.status}</small>
+                <small>{model.capabilities.join(", ")} · fallback {model.fallbackModelIds.join(" -> ") || "none"}</small>
+              </span>
             </button>
           ))}
         </section>
