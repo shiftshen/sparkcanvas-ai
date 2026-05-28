@@ -77,6 +77,11 @@ Implemented in `apps/workgraph-os`:
   - `GET /workgraph-os/history?type=memory`
   - `GET /workgraph-os/history/:id`
   - filesystem JSON file controlled by `WORKGRAPH_OS_HISTORY_FILE`
+- Exposes a SQLite-ready migration/export layer without adding a runtime SQLite dependency yet:
+  - `GET /workgraph-os/sqlite/schema`
+  - `GET /workgraph-os/sqlite/export`
+  - tables: `wgos_workspaces`, `wgos_objects`, `wgos_edges`, `wgos_history`
+  - current mode is `json-export`, so WGOS can validate table shape and graph rows before switching the write path to SQLite.
 - The UI now prefers backend filesystem JSON storage and falls back to browser-local or memory-only modes when the backend is unavailable.
 - The object graph panel consumes the backend index when available, so counts and recent objects are no longer UI-only state.
 - The object graph panel also shows recent version history, giving WGOS a first version-management surface.
@@ -111,7 +116,7 @@ Relevant package facts:
 ## Next Integration Steps
 
 1. Add a local bridge service or Next/Vite proxy that can talk to pi-web/pi agent APIs.
-2. Upgrade filesystem JSON persistence to SQLite tables for object querying, version history, and future vector indexing.
+2. Replace the SQLite-ready JSON export layer with an actual SQLite write path for object querying, version history, and future vector indexing.
 3. Convert uploaded files into real pi-readable paths and include them in prompts.
 4. Add output watcher for generated files in the active working directory.
 5. Replace simulated job completion with real pi session events.

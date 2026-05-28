@@ -226,6 +226,16 @@ try {
   assert(workGraphHistoryByType.entries?.length === 1, "WorkGraph OS history should support type filtering");
   const workGraphHistoryDetail = await request(`/workgraph-os/history/${workGraphHistory.entries[0].id}`);
   assert(workGraphHistoryDetail.objects?.some((item) => item.id === "memory:mem-smoke"), "WorkGraph OS history detail should retain indexed objects");
+  const workGraphSqliteSchema = await request("/workgraph-os/sqlite/schema");
+  assert(workGraphSqliteSchema.ready === true && workGraphSqliteSchema.dialect === "sqlite", "WorkGraph OS SQLite schema should report export readiness");
+  assert(workGraphSqliteSchema.tables.includes("wgos_objects") && workGraphSqliteSchema.tables.includes("wgos_edges") && workGraphSqliteSchema.tables.includes("wgos_history"), "WorkGraph OS SQLite schema should expose object, edge and history tables");
+  const workGraphSqliteExport = await request("/workgraph-os/sqlite/export");
+  const sqliteObjects = workGraphSqliteExport.tables.find((table) => table.name === "wgos_objects");
+  const sqliteEdges = workGraphSqliteExport.tables.find((table) => table.name === "wgos_edges");
+  const sqliteHistory = workGraphSqliteExport.tables.find((table) => table.name === "wgos_history");
+  assert(sqliteObjects?.rows?.some((row) => row.id === "asset:mat-smoke"), "WorkGraph OS SQLite export should include indexed asset rows");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:active" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include workflow-to-asset graph edges");
+  assert(sqliteHistory?.rows?.some((row) => row.id === workGraphHistory.entries[0].id), "WorkGraph OS SQLite export should include history rows");
 
   const initial = await request("/workspace");
   assert(initial.brands.some((brand) => brand.id === "brand_xmanx" && brand.active), "XMANX should be the active default brand");

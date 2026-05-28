@@ -499,6 +499,28 @@ type WorkGraphOsHistoryEntry = {
   objects: WorkGraphOsObject[];
 };
 
+type WorkGraphOsEdge = {
+  id: string;
+  fromObjectId: string;
+  toObjectId: string;
+  relation: "uses_brand" | "uses_model" | "uses_asset" | "produces_result" | "comments_on" | "remembers";
+  updatedAt: string;
+  payload: unknown;
+};
+
+type WorkGraphOsSqliteTable = {
+  name: string;
+  createSql: string;
+  rows: Array<Record<string, unknown>>;
+};
+
+type WorkGraphOsSqliteExport = {
+  dialect: "sqlite";
+  generatedAt: string;
+  migrationMode: "json-export";
+  tables: WorkGraphOsSqliteTable[];
+};
+
 declare global {
   namespace Express {
     interface Request {
@@ -2114,6 +2136,127 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
     return acc;
   }, {});
   return { counts, objects };
+}
+
+function buildWorkGraphOsEdges(workspace: WorkGraphOsWorkspace | null, objects: WorkGraphOsObject[]) {
+  if (!workspace) return [] as WorkGraphOsEdge[];
+  const updatedAt = workspace.updatedAt || now();
+  const objectIds = new Set(objects.map((object) => object.id));
+  const edges: WorkGraphOsEdge[] = [];
+  const pushEdge = (fromObjectId: string, toObjectId: string, relation: WorkGraphOsEdge["relation"], payload: unknown = {}) => {
+    if (!objectIds.has(fromObjectId) || !objectIds.has(toObjectId)) return;
+    edges.push({
+      id: `${fromObjectId}->${relation}->${toObjectId}`,
+      fromObjectId,
+      toObjectId,
+      relation,
+      updatedAt,
+      payload
+    });
+  };
+
+  pushEdge("goal:active", `brand:${workspace.activeBrandId || "active"}`, "uses_brand", { activeBrandId: workspace.activeBrandId });
+  pushEdge("goal:active", `model:${workspace.activeModelId || "active"}`, "uses_model", { activeModelId: workspace.activeModelId });
+  workspace.selectedIds.forEach((id) => {
+    pushEdge("workflow:active", `asset:${id}`, "uses_asset", { selectedId: id });
+  });
+  workspace.jobs.forEach((item, index) => {
+    const id = objectString(item, "id", `result-${index}`);
+    pushEdge("workflow:active", `result:${id}`, "produces_result", item);
+  });
+  workspace.feedback.forEach((item, index) => {
+    const id = objectString(item, "id", `feedback-${index}`);
+    const targetType = objectString(item, "targetType", "");
+    const targetId = objectString(item, "targetId", "");
+    if (targetType && targetId) pushEdge(`feedback:${id}`, `${targetType}:${targetId}`, "comments_on", item);
+  });
+  workspace.memories.forEach((item, index) => {
+    const id = objectString(item, "id", `memory-${index}`);
+    const sourceType = objectString(item, "sourceType", "feedback");
+    const sourceId = objectString(item, "sourceId", "");
+    if (sourceId) pushEdge(`memory:${id}`, `${sourceType}:${sourceId}`, "remembers", item);
+  });
+  return edges;
+}
+
+function sqliteJson(value: unknown) {
+  return JSON.stringify(value ?? null);
+}
+
+function buildWorkGraphOsSqliteExport(workspace: WorkGraphOsWorkspace | null, history: WorkGraphOsHistoryEntry[]): WorkGraphOsSqliteExport {
+  const { objects } = buildWorkGraphOsObjectIndex(workspace);
+  const edges = buildWorkGraphOsEdges(workspace, objects);
+  const updatedAt = workspace?.updatedAt || now();
+  return {
+    dialect: "sqlite",
+    generatedAt: now(),
+    migrationMode: "json-export",
+    tables: [
+      {
+        name: "wgos_workspaces",
+        createSql: "CREATE TABLE IF NOT EXISTS wgos_workspaces (id TEXT PRIMARY KEY, version INTEGER NOT NULL, active_brand_id TEXT NOT NULL, active_model_id TEXT NOT NULL, prompt TEXT NOT NULL, active_material_id TEXT NOT NULL, updated_at TEXT NOT NULL, payload_json TEXT NOT NULL);",
+        rows: workspace ? [{
+          id: "active",
+          version: workspace.version,
+          active_brand_id: workspace.activeBrandId,
+          active_model_id: workspace.activeModelId,
+          prompt: workspace.prompt,
+          active_material_id: workspace.activeMaterialId,
+          updated_at: updatedAt,
+          payload_json: sqliteJson(workspace)
+        }] : []
+      },
+      {
+        name: "wgos_objects",
+        createSql: "CREATE TABLE IF NOT EXISTS wgos_objects (id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL, source TEXT NOT NULL, updated_at TEXT NOT NULL, payload_json TEXT NOT NULL);",
+        rows: objects.map((object) => ({
+          id: object.id,
+          type: object.type,
+          title: object.title,
+          summary: object.summary,
+          source: object.source,
+          updated_at: object.updatedAt,
+          payload_json: sqliteJson(object.payload)
+        }))
+      },
+      {
+        name: "wgos_edges",
+        createSql: "CREATE TABLE IF NOT EXISTS wgos_edges (id TEXT PRIMARY KEY, from_object_id TEXT NOT NULL, to_object_id TEXT NOT NULL, relation TEXT NOT NULL, updated_at TEXT NOT NULL, payload_json TEXT NOT NULL);",
+        rows: edges.map((edge) => ({
+          id: edge.id,
+          from_object_id: edge.fromObjectId,
+          to_object_id: edge.toObjectId,
+          relation: edge.relation,
+          updated_at: edge.updatedAt,
+          payload_json: sqliteJson(edge.payload)
+        }))
+      },
+      {
+        name: "wgos_history",
+        createSql: "CREATE TABLE IF NOT EXISTS wgos_history (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, reason TEXT NOT NULL, prompt TEXT NOT NULL, counts_json TEXT NOT NULL, object_ids_json TEXT NOT NULL, objects_json TEXT NOT NULL);",
+        rows: history.map((entry) => ({
+          id: entry.id,
+          created_at: entry.createdAt,
+          reason: entry.reason,
+          prompt: entry.prompt,
+          counts_json: sqliteJson(entry.counts),
+          object_ids_json: sqliteJson(entry.objectIds),
+          objects_json: sqliteJson(entry.objects)
+        }))
+      }
+    ]
+  };
+}
+
+function workGraphOsSqliteReadiness(exportPayload: WorkGraphOsSqliteExport) {
+  return {
+    ready: true,
+    dialect: exportPayload.dialect,
+    migrationMode: exportPayload.migrationMode,
+    tables: exportPayload.tables.map((table) => table.name),
+    rowCounts: Object.fromEntries(exportPayload.tables.map((table) => [table.name, table.rows.length])),
+    message: "WorkGraph OS can export the current filesystem JSON workspace into SQLite-compatible table rows. The runtime still writes JSON until a SQLite driver is intentionally added."
+  };
 }
 
 async function appendWorkGraphOsHistory(workspace: WorkGraphOsWorkspace, reason: WorkGraphOsHistoryEntry["reason"] = "workspace-save") {
@@ -6043,6 +6186,26 @@ app.get("/workgraph-os/objects/:type/:id", async (req, res) => {
   const object = objects.find((item) => item.id === id);
   if (!object) return res.status(404).json({ message: "WorkGraph OS object not found" });
   res.json(object);
+});
+
+app.get("/workgraph-os/sqlite/schema", async (_req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  const history = await readWorkGraphOsHistory();
+  const exportPayload = buildWorkGraphOsSqliteExport(workspace, history);
+  res.json({
+    ...workGraphOsSqliteReadiness(exportPayload),
+    schema: exportPayload.tables.map((table) => ({ name: table.name, createSql: table.createSql }))
+  });
+});
+
+app.get("/workgraph-os/sqlite/export", async (_req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  const history = await readWorkGraphOsHistory();
+  const exportPayload = buildWorkGraphOsSqliteExport(workspace, history);
+  res.json({
+    ...exportPayload,
+    readiness: workGraphOsSqliteReadiness(exportPayload)
+  });
 });
 
 app.get("/workgraph-os/history", async (req, res) => {
