@@ -54,6 +54,7 @@ Implemented in `apps/workgraph-os`:
   - material kit archive
 - Supports one-sentence skill search.
 - Supports no-match skill creation from the search phrase.
+- Stores skills as Skill Objects with capability type, input/output contracts, runtime target, future `SKILL.md` path, version, test plan, and evolution counters.
 - Builds a visible workflow graph from CAL prompt resources, brand memory, model, skill, output, and review nodes.
 - Converts the natural-language prompt into a structured Goal Object with raw input, normalized intent, goal type, output target, constraints, and success criteria.
 - Persists generated canvas nodes as first-class Node Objects instead of treating the work graph as UI-only state.
@@ -76,6 +77,7 @@ Implemented in `apps/workgraph-os`:
   - `GET /workgraph-os/objects/:type/:id`
   - current index types: Goal, Asset, Brand, Skill, Model, Workflow, Node, Result, Feedback, Memory
   - structured Goal Objects are indexed from workspace data when available, with legacy prompt-only workspaces migrated into derived goals.
+  - Skill Objects include evolution metadata and future `SKILL.md` export paths, so high-frequency workflows can become reusable Agent Skills.
   - persisted canvas nodes are indexed as Node Objects and connected to workflow/assets in the SQLite export graph.
 - Records object-index history snapshots on every workspace save:
   - `GET /workgraph-os/history`

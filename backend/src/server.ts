@@ -2142,7 +2142,11 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
     objects.push(workGraphObject("asset", `asset-${index}`, objectString(item, "title", `Asset ${index + 1}`), objectString(item, "token", objectString(item, "fileName", "")), item, objectString(item, "createdAt", updatedAt)));
   });
   workspace.skills.forEach((item, index) => {
-    objects.push(workGraphObject("skill", `skill-${index}`, objectString(item, "title", `Skill ${index + 1}`), objectString(item, "command", objectString(item, "description", "")), item, updatedAt));
+    const command = objectString(item, "command", "");
+    const capabilityType = objectString(item, "capabilityType", "custom");
+    const skillMdPath = objectString(item, "skillMdPath", "");
+    const summary = [command, capabilityType, skillMdPath].filter(Boolean).join(" · ") || objectString(item, "description", "");
+    objects.push(workGraphObject("skill", `skill-${index}`, objectString(item, "title", `Skill ${index + 1}`), summary, item, updatedAt));
   });
   workspace.nodes.forEach((item, index) => {
     const type = objectString(item, "type", "node");

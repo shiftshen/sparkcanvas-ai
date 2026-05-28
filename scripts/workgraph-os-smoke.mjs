@@ -33,6 +33,9 @@ assert(source.includes("nodes: workspace.nodes.length ? workspace.nodes : buildN
 assert(source.includes("type GoalObject"), "workgraph-os should define a structured Goal Object");
 assert(source.includes("interpretGoal"), "workgraph-os should interpret natural language input into a Goal Object");
 assert(source.includes("successCriteria"), "workgraph-os should carry goal success criteria");
+assert(source.includes("capabilityType"), "workgraph-os should define standardized Skill Object capability metadata");
+assert(source.includes("skillMdPath"), "workgraph-os should carry a future SKILL.md export path");
+assert(source.includes("runCount") && source.includes("successCount"), "workgraph-os should track skill evolution counters");
 
 console.log(JSON.stringify({
   ok: true,
@@ -46,6 +49,7 @@ console.log(JSON.stringify({
     "workgraph-os-backend-object-index-ready",
     "workgraph-os-history-ready",
     "workgraph-os-node-object-ready",
-    "workgraph-os-goal-object-ready"
+    "workgraph-os-goal-object-ready",
+    "workgraph-os-skill-object-ready"
   ]
 }));

@@ -52,6 +52,20 @@ type SkillTemplate = {
   icon: "image" | "compose" | "video" | "archive";
   keywords: string[];
   nodeType: WorkflowNode["type"];
+  capabilityType: "image_generation" | "composition" | "video_planning" | "archive" | "custom";
+  inputs: string[];
+  outputs: string[];
+  runtime: "pi-skill" | "local-simulated" | "api";
+  skillMdPath: string;
+  version: string;
+  evolution: {
+    status: "seed" | "created" | "candidate" | "validated";
+    runCount: number;
+    successCount: number;
+    failureCount: number;
+    lastRunAt?: string;
+    testPlan: string[];
+  };
 };
 
 type WorkflowNode = {
@@ -218,7 +232,14 @@ const skillTemplates: SkillTemplate[] = [
     description: "引用图片素材，生成可预览海报或封面图。",
     icon: "image",
     keywords: ["图片", "海报", "封面", "poster", "image", "png", "jpg"],
-    nodeType: "output"
+    nodeType: "output",
+    capabilityType: "image_generation",
+    inputs: ["Goal Object", "Asset Object", "Brand Object", "Model Object"],
+    outputs: ["Result Object: PNG/JPG", "Memory Object: reusable prompt pattern"],
+    runtime: "api",
+    skillMdPath: "skills/generated/generate-poster/SKILL.md",
+    version: "0.1.0",
+    evolution: { status: "seed", runCount: 0, successCount: 0, failureCount: 0, testPlan: ["resolve image references", "generate preview image", "save result as asset"] }
   },
   {
     id: "compose",
@@ -228,7 +249,14 @@ const skillTemplates: SkillTemplate[] = [
     description: "把多张素材按主题合成统一画面。",
     icon: "compose",
     keywords: ["合成", "融合", "compose", "merge", "mix"],
-    nodeType: "compose"
+    nodeType: "compose",
+    capabilityType: "composition",
+    inputs: ["Goal Object", "2+ Asset Objects", "Brand Object"],
+    outputs: ["Result Object: composed visual", "Workflow Object: reusable composition graph"],
+    runtime: "local-simulated",
+    skillMdPath: "skills/generated/compose-materials/SKILL.md",
+    version: "0.1.0",
+    evolution: { status: "seed", runCount: 0, successCount: 0, failureCount: 0, testPlan: ["validate selected materials", "compose preview", "record review feedback"] }
   },
   {
     id: "story",
@@ -238,7 +266,14 @@ const skillTemplates: SkillTemplate[] = [
     description: "把素材作为首帧/参考图，生成视频任务规划。",
     icon: "video",
     keywords: ["视频", "首帧", "分镜", "video", "mp4", "storyboard"],
-    nodeType: "video"
+    nodeType: "video",
+    capabilityType: "video_planning",
+    inputs: ["Goal Object", "First-frame Asset Object", "Brand Object", "Model Object"],
+    outputs: ["Result Object: storyboard", "Result Object: MP4 plan"],
+    runtime: "api",
+    skillMdPath: "skills/generated/generate-video/SKILL.md",
+    version: "0.1.0",
+    evolution: { status: "seed", runCount: 0, successCount: 0, failureCount: 0, testPlan: ["materialize public input reference", "create video job", "verify playable mp4"] }
   },
   {
     id: "kit",
@@ -248,7 +283,14 @@ const skillTemplates: SkillTemplate[] = [
     description: "把当前素材、提示词和输出整理成项目包。",
     icon: "archive",
     keywords: ["文件", "归档", "zip", "kit", "素材包", "导出"],
-    nodeType: "file"
+    nodeType: "file",
+    capabilityType: "archive",
+    inputs: ["Workflow Object", "Asset Objects", "Result Objects", "Memory Objects"],
+    outputs: ["Result Object: project kit archive"],
+    runtime: "pi-skill",
+    skillMdPath: "skills/generated/build-kit/SKILL.md",
+    version: "0.1.0",
+    evolution: { status: "seed", runCount: 0, successCount: 0, failureCount: 0, testPlan: ["collect graph objects", "write manifest", "verify archive contents"] }
   }
 ];
 
@@ -389,7 +431,7 @@ function loadWorkspace(): WorkGraphWorkspace {
       version: 1,
       goal: parsed.goal ?? interpretGoal(parsed.prompt ?? defaultPrompt, parsed.activeBrandId ?? "dapot"),
       materials: parsed.materials?.length ? parsed.materials : seedMaterials,
-      skills: parsed.skills?.length ? parsed.skills : skillTemplates,
+      skills: parsed.skills?.length ? parsed.skills.map(normalizeSkillObject) : skillTemplates,
       nodes: parsed.nodes?.length ? parsed.nodes : []
     };
   } catch {
@@ -445,7 +487,7 @@ async function loadBackendWorkspace() {
       version: 1,
       goal: data.workspace.goal ?? interpretGoal(data.workspace.prompt ?? defaultPrompt, data.workspace.activeBrandId ?? "dapot"),
       materials: data.workspace.materials?.length ? data.workspace.materials : seedMaterials,
-      skills: data.workspace.skills?.length ? data.workspace.skills : skillTemplates,
+      skills: data.workspace.skills?.length ? data.workspace.skills.map(normalizeSkillObject) : skillTemplates,
       nodes: data.workspace.nodes?.length ? data.workspace.nodes : []
     } satisfies WorkGraphWorkspace,
     objectIndex: data.objectIndex
@@ -502,6 +544,37 @@ function inferKind(file: File): MaterialKind {
   if (file.type.startsWith("audio/")) return "audio";
   if (file.type.startsWith("image/")) return "image";
   return "document";
+}
+
+function normalizeSkillObject(skill: Partial<SkillTemplate> & Pick<SkillTemplate, "id" | "title" | "command">): SkillTemplate {
+  const isVideo = /video|视频|mp4/i.test(`${skill.title} ${skill.command} ${skill.output ?? ""}`);
+  const isArchive = /archive|归档|zip|kit/i.test(`${skill.title} ${skill.command} ${skill.output ?? ""}`);
+  const capabilityType = skill.capabilityType ?? (isVideo ? "video_planning" : isArchive ? "archive" : skill.nodeType === "compose" ? "composition" : "custom");
+  const output = skill.output ?? (isVideo ? "MP4" : isArchive ? "ZIP" : "PNG");
+  return {
+    id: skill.id,
+    title: skill.title,
+    command: skill.command,
+    output,
+    description: skill.description ?? "由一句话搜索自动创建，可继续编辑命令、输出和提示词。",
+    icon: skill.icon ?? (isVideo ? "video" : isArchive ? "archive" : "image"),
+    keywords: skill.keywords?.length ? skill.keywords : skill.title.split(/\s+/).filter(Boolean),
+    nodeType: skill.nodeType ?? (isVideo ? "video" : isArchive ? "file" : "output"),
+    capabilityType,
+    inputs: skill.inputs?.length ? skill.inputs : ["Goal Object", "Asset Object", "Brand Object"],
+    outputs: skill.outputs?.length ? skill.outputs : [`Result Object: ${output}`],
+    runtime: skill.runtime ?? "pi-skill",
+    skillMdPath: skill.skillMdPath ?? `skills/generated/${skill.command.replace(/^\//, "").replace(/[^a-z0-9-]+/gi, "-") || skill.id}/SKILL.md`,
+    version: skill.version ?? "0.1.0",
+    evolution: {
+      status: skill.evolution?.status ?? "created",
+      runCount: skill.evolution?.runCount ?? 0,
+      successCount: skill.evolution?.successCount ?? 0,
+      failureCount: skill.evolution?.failureCount ?? 0,
+      lastRunAt: skill.evolution?.lastRunAt,
+      testPlan: skill.evolution?.testPlan?.length ? skill.evolution.testPlan : ["run with selected materials", "verify output object", "record feedback memory"]
+    }
+  };
 }
 
 function skillIcon(icon: SkillTemplate["icon"]) {
@@ -757,7 +830,7 @@ function App() {
   function createSkillFromSearch() {
     const title = newSkillName.trim() || skillSearch.trim() || "自定义 Skill";
     const command = (newSkillCommand.trim() || title.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "-")).replace(/^\/?/, "/");
-    const skill: SkillTemplate = {
+    const skill = normalizeSkillObject({
       id: `skill-${Date.now().toString(36)}`,
       title,
       command,
@@ -765,8 +838,9 @@ function App() {
       description: "由一句话搜索自动创建，可继续编辑命令、输出和提示词。",
       icon: /video|视频|mp4/i.test(`${title} ${command}`) ? "video" : "image",
       keywords: title.split(/\s+/).filter(Boolean),
-      nodeType: /video|视频|mp4/i.test(`${title} ${command}`) ? "video" : "output"
-    };
+      nodeType: /video|视频|mp4/i.test(`${title} ${command}`) ? "video" : "output",
+      evolution: { status: "created", runCount: 0, successCount: 0, failureCount: 0, testPlan: ["run generated skill", "verify result object", "save reusable SKILL.md"] }
+    });
     const refs = selectedMaterials.map((item) => item.token).join(" ") || "$local.asset";
     updateWorkspace((current) => ({
       ...current,
@@ -820,6 +894,7 @@ function App() {
   }
 
   function runWorkflow() {
+    const activeSkill = matchingSkill;
     const job: Job = {
       id: `job-${Date.now().toString(36)}`,
       title: ast.commands[0] ? `/${ast.commands[0]}` : "素材工作流",
@@ -830,6 +905,18 @@ function App() {
     };
     updateWorkspace((current) => ({
       ...current,
+      skills: current.skills.map((skill) => skill.id === activeSkill.id
+        ? {
+            ...skill,
+            evolution: {
+              ...skill.evolution,
+              status: skill.evolution.status === "seed" ? "candidate" : skill.evolution.status,
+              runCount: skill.evolution.runCount + 1,
+              successCount: skill.evolution.successCount + 1,
+              lastRunAt: job.createdAt
+            }
+          }
+        : skill),
       jobs: [job, ...current.jobs],
       memories: [
         {
@@ -1088,6 +1175,8 @@ function App() {
               <span>当前 Skill</span>
               <strong>{matchingSkill.title}</strong>
               <small>{matchingSkill.command} · 输出 {matchingSkill.output}</small>
+              <small>{matchingSkill.capabilityType} · {matchingSkill.runtime} · {matchingSkill.skillMdPath}</small>
+              <small>runs {matchingSkill.evolution.runCount} · pass {matchingSkill.evolution.successCount} · status {matchingSkill.evolution.status}</small>
             </div>
             <button type="button" onClick={() => setSkillSearch(matchingSkill.title)}>
               <Search /> 查找相似 Skill
