@@ -1,0 +1,47 @@
+{
+  "project": "sparkcanvas-ai",
+  "title": "SparkCanvas AI",
+  "business": "sparkcanvas",
+  "category": "sparkcanvas-ai",
+  "siyuan_root": "/项目库/sparkcanvas-ai",
+  "tech": [
+    "Node.js",
+    "pnpm",
+    "React",
+    "Vite",
+    "TypeScript",
+    "Docker",
+    "Nginx"
+  ],
+  "ports": [
+    "5173",
+    "3000"
+  ],
+  "domains": [
+    "xmanx.com"
+  ],
+  "servers": [
+    "本机开发：/Users/shift/Documents/sparkcanvas-ai",
+    "生产/部署信息以 config/nginx-xmanx.com.conf 和 config/docker-compose.yml 为准"
+  ],
+  "env": [
+    "config/auth.example.json",
+    "config/docker-compose.yml",
+    "config/nginx-xmanx.com.conf"
+  ],
+  "commands": [
+    "pnpm install",
+    "pnpm test",
+    "pnpm build"
+  ],
+  "artifacts": [
+    "README.md",
+    "config/docker-compose.yml",
+    "config/nginx-xmanx.com.conf",
+    "frontend/package.json",
+    "backend/package.json"
+  ],
+  "notes": [
+    "开发完成后必须运行 /Users/shift/openclaw/scripts/oc project-note --project-dir /Users/shift/Documents/sparkcanvas-ai，把端口、域名、服务器、环境、验证结果同步到 SiYuan。"
+  ]
+}

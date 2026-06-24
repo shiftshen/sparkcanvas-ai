@@ -6,6 +6,7 @@ import {
   Bot,
   CheckCircle2,
   ChevronRight,
+  Database,
   FileImage,
   Film,
   FolderOpen,
@@ -21,6 +22,7 @@ import {
   Search,
   Send,
   Sparkles,
+  Trash2,
   Upload,
   Wand2,
   Pencil
@@ -62,6 +64,13 @@ type SkillTemplate = {
   runtime: "pi-skill" | "local-simulated" | "api";
   skillMdPath: string;
   version: string;
+  filesystem?: {
+    source?: string;
+    folder?: string;
+    dir?: string;
+    root?: string;
+  };
+  source?: string;
   evolution: {
     status: "seed" | "created" | "candidate" | "validated";
     runCount: number;
@@ -69,6 +78,30 @@ type SkillTemplate = {
     failureCount: number;
     lastRunAt?: string;
     testPlan: string[];
+  };
+};
+
+type SkillDetail = {
+  source: string;
+  skill: SkillTemplate;
+  folder: string;
+  piDir: string;
+  mirrorDir: string;
+  tree: Array<{ name: string; path: string; type: "file" | "directory"; size?: number; children?: SkillDetail["tree"] }>;
+  files: Array<{ path: string; content: string }>;
+  onlineSearch?: { status: string; disabled: boolean; message?: string };
+};
+
+type SkillOptimizePreview = {
+  status: "preview" | "applied";
+  writesFiles: boolean;
+  plan?: string[];
+  diffPreview?: string;
+  message: string;
+  applied?: {
+    createdAt: string;
+    previousVersion: string;
+    version: string;
   };
 };
 
@@ -81,6 +114,10 @@ type WorkflowNode = {
   y: number;
   materialIds?: string[];
   status: WorkflowStatus;
+  disabled?: boolean;
+  modelId?: string;
+  skillId?: string;
+  retryCount?: number;
 };
 
 type Job = {
@@ -114,12 +151,32 @@ type ResultObject = {
   output: string;
   previewUrl: string;
   sourceJobId: string;
+  promptRecordId?: string;
   materialIds: string[];
   canSaveAsMaterial: boolean;
   savedMaterialId?: string;
+  promptRecord?: PromptRecordObject;
   reviewNote?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+type PromptRecordObject = {
+  id: string;
+  executionId: string;
+  workflowId: string;
+  nodeId: string;
+  nodeTitle: string;
+  sourcePrompt: string;
+  nodePrompt: string;
+  finalPrompt: string;
+  brandId: string;
+  brandContext: string;
+  materialIds: string[];
+  skillId: string;
+  modelId: string;
+  output: string;
+  createdAt: string;
 };
 
 type BrandMemory = {
@@ -131,6 +188,8 @@ type BrandMemory = {
   rules: string[];
   context?: string;
   source?: string;
+  forbiddenWords?: string[];
+  disliked?: string[];
 };
 
 type ModelOption = {
@@ -141,7 +200,7 @@ type ModelOption = {
   speed: string;
   quality: string;
   status: "ready" | "fallback" | "offline";
-  provider: "openai-compatible" | "local" | "video-api";
+  provider: "openai-compatible" | "vdamo-openai" | "yijiarj" | "local" | "video-api";
   capabilities: Array<"image" | "video" | "text" | "local" | "reference_image" | "composition">;
   route: string;
   costTier: "low" | "medium" | "high";
@@ -154,13 +213,14 @@ type ModelOption = {
 type FeedbackObject = {
   id: string;
   targetId: string;
-  targetType: "workflow" | "skill" | "result" | "model" | "brand" | "node";
+  targetType: "workflow" | "skill" | "result" | "model" | "brand" | "node" | "asset";
   rating: "accepted" | "needs_revision" | "failed";
   action: "reuse" | "revise" | "avoid";
   note: string;
   memoryId?: string;
   sourceResultId?: string;
   sourceWorkflowId?: string;
+  brandId?: string;
   createdAt: string;
 };
 
@@ -228,6 +288,7 @@ type WorkGraphWorkspace = {
   activeMaterialId: string;
   jobs: Job[];
   results: ResultObject[];
+  promptRecords: PromptRecordObject[];
   feedback: FeedbackObject[];
   memories: MemoryObject[];
   executionLog: ExecutionLogEntry[];
@@ -235,7 +296,7 @@ type WorkGraphWorkspace = {
 
 type WorkGraphObject = {
   id: string;
-  type: "goal" | "asset" | "brand" | "skill" | "model" | "workflow" | "node" | "result" | "feedback" | "memory";
+  type: "goal" | "asset" | "brand" | "skill" | "model" | "workflow" | "node" | "result" | "prompt" | "feedback" | "memory";
   title: string;
   summary: string;
   source: "workspace" | "derived";
@@ -256,6 +317,15 @@ type WorkGraphHistoryEntry = {
   objectIds: string[];
 };
 
+type WorkGraphSqliteStatus = {
+  ready: boolean;
+  dialect: "sqlite";
+  migrationMode: "json-export";
+  tables: string[];
+  rowCounts: Record<string, number>;
+  message: string;
+};
+
 type WorkGraphRunResponse = {
   workspace?: Partial<WorkGraphWorkspace>;
   objectIndex?: WorkGraphObjectIndex;
@@ -274,6 +344,16 @@ type WorkGraphSkillResponse = {
   objectIndex?: WorkGraphObjectIndex;
 };
 
+type WorkGraphSkillListResponse = {
+  skills?: Partial<SkillTemplate>[];
+  filesystem?: {
+    piDir: string;
+    dataDir: string;
+    systemFiles: string[];
+  };
+  onlineSearch?: { status: string; disabled: boolean };
+};
+
 type WorkGraphPlanResponse = WorkGraphRunResponse & {
   source?: "workgraph-workflow-planner";
   plan?: {
@@ -287,6 +367,7 @@ type WorkGraphPlanResponse = WorkGraphRunResponse & {
 
 type StorageState = "browser-local" | "memory-only";
 type StorageMode = StorageState | "filesystem-json";
+type LibraryView = "assets" | "objects" | "skills" | "settings";
 
 const now = () => new Date().toISOString();
 
@@ -421,25 +502,59 @@ const brandMemories: BrandMemory[] = [
 
 const modelOptions: ModelOption[] = [
   {
-    id: "gpt-image",
-    name: "GPT Image / cloud",
+    id: "vdamo-gpt-image-2",
+    name: "VDAMO · GPT Image 2",
     kind: "image",
-    cost: "高",
+    cost: "中",
+    speed: "中",
+    quality: "高",
+    status: "ready",
+    provider: "vdamo-openai",
+    capabilities: ["image", "reference_image"],
+    route: "/v1/images/generations",
+    costTier: "medium",
+    latencyTier: "medium",
+    fallbackModelIds: ["vdamo-gpt-image-1-5", "vdamo-gpt-image-1", "imgen"],
+    nodeAffinity: ["output", "compose"],
+    routingRules: ["default image route", "fallback to older VDAMO image models or retained skill route"]
+  },
+  {
+    id: "vdamo-gpt-image-1-5",
+    name: "VDAMO · GPT Image 1.5",
+    kind: "image",
+    cost: "中",
     speed: "中",
     quality: "高",
     status: "fallback",
-    provider: "openai-compatible",
+    provider: "vdamo-openai",
     capabilities: ["image", "reference_image"],
     route: "/v1/images/generations",
-    costTier: "high",
+    costTier: "medium",
+    latencyTier: "medium",
+    fallbackModelIds: ["vdamo-gpt-image-1", "imgen"],
+    nodeAffinity: ["output", "compose"],
+    routingRules: ["image fallback", "keep old skill route available"]
+  },
+  {
+    id: "vdamo-gpt-image-1",
+    name: "VDAMO · GPT Image 1",
+    kind: "image",
+    cost: "中",
+    speed: "中",
+    quality: "中高",
+    status: "fallback",
+    provider: "vdamo-openai",
+    capabilities: ["image", "reference_image"],
+    route: "/v1/images/generations",
+    costTier: "medium",
     latencyTier: "medium",
     fallbackModelIds: ["imgen"],
     nodeAffinity: ["output", "compose"],
-    routingRules: ["use when final visual quality matters", "fallback to imgen when unavailable"]
+    routingRules: ["image fallback", "keep old skill route available"]
   },
   {
     id: "imgen",
-    name: "@imgen gpt-5.4",
+    name: "@imgen image skill",
     kind: "image",
     cost: "中",
     speed: "中",
@@ -450,26 +565,60 @@ const modelOptions: ModelOption[] = [
     route: "/v1/responses image_generation",
     costTier: "medium",
     latencyTier: "medium",
-    fallbackModelIds: ["gpt-image", "local-flux"],
+    fallbackModelIds: ["vdamo-gpt-image-2", "local-flux"],
     nodeAffinity: ["skill", "compose", "output"],
     routingRules: ["default image/composition route", "keep brand references attached"]
   },
   {
-    id: "kling",
-    name: "Kling / 可灵",
+    id: "yijiarj-grok-video-super",
+    name: "yijiarj · grok video super",
     kind: "video",
-    cost: "高",
-    speed: "慢",
-    quality: "高",
-    status: "fallback",
-    provider: "video-api",
+    cost: "中",
+    speed: "中",
+    quality: "中高",
+    status: "ready",
+    provider: "yijiarj",
     capabilities: ["video", "reference_image"],
     route: "/v1/videos",
-    costTier: "high",
-    latencyTier: "slow",
-    fallbackModelIds: ["imgen"],
+    costTier: "medium",
+    latencyTier: "medium",
+    fallbackModelIds: ["yijiarj-grok-video-720p", "yijiarj-veo-3-1-fast"],
     nodeAffinity: ["video"],
-    routingRules: ["use for final video nodes", "requires public input reference"]
+    routingRules: ["paid yijia generation disabled by default", "requires SPARKCANVAS_ALLOW_PAID_VIDEO_GEN=1 for real create calls", "requires public input_reference for reference workflows"]
+  },
+  {
+    id: "yijiarj-grok-video-720p",
+    name: "yijiarj · grok video 720p",
+    kind: "video",
+    cost: "中",
+    speed: "中",
+    quality: "高",
+    status: "fallback",
+    provider: "yijiarj",
+    capabilities: ["video", "reference_image"],
+    route: "/v1/videos",
+    costTier: "medium",
+    latencyTier: "medium",
+    fallbackModelIds: ["yijiarj-grok-video-super"],
+    nodeAffinity: ["video"],
+    routingRules: ["video fallback", "paid yijia generation disabled by default", "do not probe paid create endpoints automatically"]
+  },
+  {
+    id: "yijiarj-veo-3-1-fast",
+    name: "yijiarj · veo_3_1-fast",
+    kind: "video",
+    cost: "中",
+    speed: "中",
+    quality: "高",
+    status: "fallback",
+    provider: "yijiarj",
+    capabilities: ["video", "reference_image"],
+    route: "/v1/videos",
+    costTier: "medium",
+    latencyTier: "medium",
+    fallbackModelIds: ["yijiarj-grok-video-super"],
+    nodeAffinity: ["video"],
+    routingRules: ["VEO fallback", "paid yijia generation disabled by default", "do not probe paid create endpoints automatically"]
   },
   {
     id: "local-flux",
@@ -601,6 +750,8 @@ function buildResultObject(job: Job, workflowId: string, previous?: ResultObject
     output: job.output,
     previewUrl: previous?.previewUrl ?? (kind === "image" ? "/brand-assets/generated/xmanx-product.png" : ""),
     sourceJobId: job.id,
+    promptRecordId: previous?.promptRecordId,
+    promptRecord: previous?.promptRecord,
     materialIds: job.materials,
     canSaveAsMaterial: kind === "image" || kind === "video" || kind === "document",
     savedMaterialId: previous?.savedMaterialId,
@@ -623,19 +774,20 @@ const defaultWorkspace = (): WorkGraphWorkspace => {
       nodes,
       selectedIds: ["mat-x-logo", "mat-product"],
       skills: skillTemplates,
-      activeModelId: "imgen",
+      activeModelId: "vdamo-gpt-image-2",
       jobs
     }),
     materials: seedMaterials,
     skills: skillTemplates,
     nodes,
     activeBrandId: "dapot",
-    activeModelId: "imgen",
+    activeModelId: "vdamo-gpt-image-2",
     selectedIds: ["mat-x-logo", "mat-product"],
     prompt: defaultPrompt,
     activeMaterialId: seedMaterials[0].id,
     jobs,
     results: [],
+    promptRecords: [],
     feedback: [],
     executionLog: [],
     memories: [
@@ -773,6 +925,12 @@ async function loadBackendHistory() {
   return data.entries ?? [];
 }
 
+async function loadBackendSqliteStatus() {
+  const response = await backendRequest("/workgraph-os/sqlite/schema");
+  if (!response.ok) throw new Error("backend sqlite status unavailable");
+  return response.json() as Promise<WorkGraphSqliteStatus>;
+}
+
 async function searchBackendMemories(query: string, limit = 5) {
   const params = new URLSearchParams({
     q: query,
@@ -785,6 +943,65 @@ async function searchBackendMemories(query: string, limit = 5) {
   return (data.memories ?? [])
     .filter((memory): memory is Partial<MemoryObject> & Pick<MemoryObject, "id"> => Boolean(memory.id))
     .map((memory) => normalizeMemoryObject({ ...memory, id: memory.id }));
+}
+
+async function loadBackendSkills(query = "") {
+  const params = query ? `?q=${encodeURIComponent(query)}` : "";
+  const response = await backendRequest(`/workgraph-os/skills${params}`);
+  if (!response.ok) throw new Error("backend skills unavailable");
+  const data = await response.json() as WorkGraphSkillListResponse;
+  return {
+    skills: (data.skills ?? [])
+      .filter((skill): skill is Partial<SkillTemplate> & Pick<SkillTemplate, "id" | "title" | "command"> => Boolean(skill.id && skill.title && skill.command))
+      .map(normalizeSkillObject),
+    filesystem: data.filesystem,
+    onlineSearch: data.onlineSearch
+  };
+}
+
+async function loadBackendSkillDetail(skillId: string) {
+  const response = await backendRequest(`/workgraph-os/skills/${encodeURIComponent(skillId)}`);
+  if (!response.ok) throw new Error("backend skill detail unavailable");
+  const data = await response.json() as SkillDetail;
+  return {
+    ...data,
+    skill: normalizeSkillObject(data.skill)
+  } satisfies SkillDetail;
+}
+
+async function previewBackendSkillOptimization(skillId: string, prompt: string) {
+  const response = await backendRequest(`/workgraph-os/skills/${encodeURIComponent(skillId)}/optimize`, {
+    method: "POST",
+    body: JSON.stringify({ prompt })
+  });
+  if (!response.ok) throw new Error("backend skill optimize preview unavailable");
+  return response.json() as Promise<SkillOptimizePreview>;
+}
+
+async function applyBackendSkillOptimization(skillId: string, prompt: string) {
+  const response = await backendRequest(`/workgraph-os/skills/${encodeURIComponent(skillId)}/optimize/apply`, {
+    method: "POST",
+    body: JSON.stringify({ prompt })
+  });
+  if (!response.ok) throw new Error("backend skill optimize apply unavailable");
+  return response.json() as Promise<SkillOptimizePreview & { detail?: SkillDetail; objectIndex?: WorkGraphObjectIndex }>;
+}
+
+async function recordBackendFeedback(feedback: FeedbackObject, brandId: string) {
+  const response = await backendRequest("/workgraph-os/feedback", {
+    method: "POST",
+    body: JSON.stringify({
+      ...feedback,
+      brandId
+    })
+  });
+  if (!response.ok) throw new Error("backend feedback save failed");
+  return response.json() as Promise<{
+    workspace?: Partial<WorkGraphWorkspace>;
+    objectIndex?: WorkGraphObjectIndex;
+    brand?: Partial<BrandMemory>;
+    memory?: Partial<MemoryObject>;
+  }>;
 }
 
 async function loadBackendBrands() {
@@ -801,7 +1018,9 @@ async function loadBackendBrands() {
       audience: brand.audience ?? "",
       rules: brand.rules?.length ? brand.rules : [],
       context: brand.context,
-      source: brand.source
+      source: brand.source,
+      forbiddenWords: brand.forbiddenWords,
+      disliked: brand.disliked
     } satisfies BrandMemory));
 }
 
@@ -828,6 +1047,25 @@ async function loadBackendAssets(brandId?: string) {
       role: asset.role,
       referencePath: asset.referencePath
     } satisfies Material));
+}
+
+async function uploadBackendAsset(file: File, brandId: string) {
+  const params = new URLSearchParams({
+    filename: file.name,
+    title: file.name.replace(/\.[^.]+$/, ""),
+    mime: file.type || "application/octet-stream",
+    brandId,
+    tags: `upload,${inferKind(file)}`
+  });
+  const response = await backendRequest(`/workgraph-os/assets/upload?${params.toString()}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": file.type || "application/octet-stream"
+    },
+    body: await file.arrayBuffer()
+  });
+  if (!response.ok) throw new Error("backend asset upload failed");
+  return response.json() as Promise<{ asset?: Partial<Material>; workspace?: Partial<WorkGraphWorkspace>; objectIndex?: WorkGraphObjectIndex }>;
 }
 
 async function runBackendWorkflow(nodeId: string, mode: "workflow" | "node") {
@@ -902,6 +1140,7 @@ function normalizeWorkspacePayload(loaded: Partial<WorkGraphWorkspace>): WorkGra
   const nodes = loaded.nodes?.length ? loaded.nodes : [];
   const jobs = loaded.jobs ?? [];
   const results = loaded.results ?? jobs.map((job) => buildResultObject(job, loaded.workflow?.id ?? "workflow-active"));
+  const promptRecords = loaded.promptRecords ?? [];
   const feedback = loaded.feedback?.length ? loaded.feedback.map((item) => normalizeFeedbackObject({ ...item, id: item.id })) : [];
   const memories = loaded.memories?.length ? loaded.memories.map((item) => normalizeMemoryObject({ ...item, id: item.id })) : defaultWorkspace().memories;
   const executionLog = loaded.executionLog ?? [];
@@ -915,6 +1154,7 @@ function normalizeWorkspacePayload(loaded: Partial<WorkGraphWorkspace>): WorkGra
     nodes,
     jobs,
     results,
+    promptRecords,
     feedback,
     memories,
     executionLog
@@ -941,6 +1181,8 @@ function normalizeSkillObject(skill: Partial<SkillTemplate> & Pick<SkillTemplate
     runtime: skill.runtime ?? "pi-skill",
     skillMdPath: skill.skillMdPath ?? `skills/generated/${skill.command.replace(/^\//, "").replace(/[^a-z0-9-]+/gi, "-") || skill.id}/SKILL.md`,
     version: skill.version ?? "0.1.0",
+    filesystem: skill.filesystem,
+    source: skill.source,
     evolution: {
       status: skill.evolution?.status ?? "created",
       runCount: skill.evolution?.runCount ?? 0,
@@ -988,6 +1230,7 @@ function normalizeFeedbackObject(feedback: Partial<FeedbackObject> & Pick<Feedba
     memoryId: feedback.memoryId,
     sourceResultId: feedback.sourceResultId,
     sourceWorkflowId: feedback.sourceWorkflowId,
+    brandId: feedback.brandId,
     createdAt: feedback.createdAt ?? now()
   };
 }
@@ -1084,6 +1327,45 @@ function findMatchingSkill(prompt: string, skills: SkillTemplate[]) {
     ?? skills[1];
 }
 
+function selectModelForPrompt(prompt: string, requestedModelId: string) {
+  const output = parseCalPrompt(prompt).outputs[0]?.toLowerCase() ?? "";
+  const wantsVideo = /视频|mp4|tiktok|reel|short|video/i.test(`${prompt} ${output}`);
+  if (wantsVideo) {
+    const requested = modelOptions.find((model) => model.id === requestedModelId && model.kind === "video");
+    return requested ?? modelOptions.find((model) => model.id === "yijiarj-grok-video-super") ?? modelOptions[0];
+  }
+  const requested = modelOptions.find((model) => model.id === requestedModelId && model.kind !== "video");
+  return requested ?? modelOptions.find((model) => model.id === "vdamo-gpt-image-2") ?? modelOptions[0];
+}
+
+function inferBrandIdFromPrompt(prompt: string, currentBrandId: string, brands: BrandMemory[]) {
+  const normalized = prompt.toLowerCase();
+  const match = brands.find((brand) => {
+    const brandKey = brand.id.replace(/^brand_/, "").toLowerCase();
+    return normalized.includes(brand.name.toLowerCase()) || normalized.includes(brandKey);
+  });
+  return match?.id ?? currentBrandId;
+}
+
+function brandScopedMaterialIds(materials: Material[], brandId: string) {
+  const brandSpecific = materials.filter((item) => item.brandId === brandId).map((item) => item.id);
+  if (brandSpecific.length) return brandSpecific;
+  return materials.filter((item) => !item.brandId).map((item) => item.id);
+}
+
+function syncWorkspaceBrandMaterials(workspace: WorkGraphWorkspace, brandId: string) {
+  const scopedIds = brandScopedMaterialIds(workspace.materials, brandId);
+  if (!scopedIds.length) return { ...workspace, activeBrandId: brandId };
+  const selectedIds = workspace.selectedIds.filter((id) => scopedIds.includes(id));
+  const nextSelectedIds = selectedIds.length ? selectedIds : scopedIds.slice(0, 2);
+  return {
+    ...workspace,
+    activeBrandId: brandId,
+    selectedIds: nextSelectedIds,
+    activeMaterialId: scopedIds.includes(workspace.activeMaterialId) ? workspace.activeMaterialId : nextSelectedIds[0] ?? scopedIds[0]
+  };
+}
+
 function buildNodes(prompt: string, materials: Material[], skills: SkillTemplate[], brand: BrandMemory, model: ModelOption): WorkflowNode[] {
   const ast = parseCalPrompt(prompt);
   const refs = ast.resources
@@ -1130,7 +1412,8 @@ function buildNodes(prompt: string, materials: Material[], skills: SkillTemplate
       x: 410,
       y: 210,
       materialIds: refs.map((item) => item.id),
-      status: ast.warnings.length ? "queued" : "ready"
+      status: ast.warnings.length ? "queued" : "ready",
+      skillId: matchedSkill.id
     },
     {
       id: "model",
@@ -1140,7 +1423,8 @@ function buildNodes(prompt: string, materials: Material[], skills: SkillTemplate
       x: 690,
       y: 72,
       materialIds: [],
-      status: model.status === "offline" ? "queued" : "ready"
+      status: model.status === "offline" ? "queued" : "ready",
+      modelId: model.id
     },
     {
       id: "compose",
@@ -1150,7 +1434,9 @@ function buildNodes(prompt: string, materials: Material[], skills: SkillTemplate
       x: 690,
       y: 270,
       materialIds: refs.map((item) => item.id),
-      status: "ready"
+      status: "ready",
+      skillId: matchedSkill.id,
+      modelId: model.id
     },
     {
       id: "output",
@@ -1183,17 +1469,24 @@ function App() {
   const [backendLoaded, setBackendLoaded] = useState(false);
   const [objectIndex, setObjectIndex] = useState<WorkGraphObjectIndex | null>(null);
   const [historyEntries, setHistoryEntries] = useState<WorkGraphHistoryEntry[]>([]);
+  const [sqliteStatus, setSqliteStatus] = useState<WorkGraphSqliteStatus | null>(null);
   const [relatedMemories, setRelatedMemories] = useState<MemoryObject[]>([]);
   const [brandCatalog, setBrandCatalog] = useState<BrandMemory[]>(brandMemories);
+  const [libraryView, setLibraryView] = useState<LibraryView>("assets");
   const [skillSearch, setSkillSearch] = useState("");
   const [newSkillName, setNewSkillName] = useState("");
   const [newSkillCommand, setNewSkillCommand] = useState("");
+  const [activeSkillDetail, setActiveSkillDetail] = useState<SkillDetail | null>(null);
+  const [skillOptimizePrompt, setSkillOptimizePrompt] = useState("");
+  const [skillOptimizePreview, setSkillOptimizePreview] = useState<SkillOptimizePreview | null>(null);
+  const [skillStoreStatus, setSkillStoreStatus] = useState<{ piDir?: string; dataDir?: string; onlineDisabled?: boolean }>({});
   const [query, setQuery] = useState("");
   const [feedbackNote, setFeedbackNote] = useState("");
   const [lastRoutingDecision, setLastRoutingDecision] = useState<WorkGraphRunResponse["routingDecision"] | null>(null);
   const activeBrand = brandCatalog.find((item) => item.id === activeBrandId) ?? brandCatalog[0] ?? brandMemories[0];
-  const activeModel = modelOptions.find((item) => item.id === activeModelId) ?? modelOptions[1];
-  const nodes = useMemo(() => buildNodes(prompt, materials, skills, activeBrand, activeModel), [materials, prompt, skills, activeBrand, activeModel]);
+  const activeModel = selectModelForPrompt(prompt, activeModelId);
+  const generatedNodes = useMemo(() => buildNodes(prompt, materials, skills, activeBrand, activeModel), [materials, prompt, skills, activeBrand, activeModel]);
+  const nodes = workspace.nodes.length ? workspace.nodes : generatedNodes;
   const activeMaterial = materials.find((item) => item.id === activeMaterialId) ?? materials[0];
   const activeNode = nodes.find((item) => item.id === activeNodeId) ?? nodes[1];
   const filteredMaterials = materials.filter((item) => {
@@ -1236,23 +1529,49 @@ function App() {
       .then((loaded) => {
         if (cancelled) return;
         if (loaded) {
-          setWorkspace(loaded.workspace);
+          setWorkspace((current) => {
+            const nextBrands = brandCatalog.length ? brandCatalog : brandMemories;
+            const inferredBrandId = inferBrandIdFromPrompt(loaded.workspace.prompt, loaded.workspace.activeBrandId || current.activeBrandId, nextBrands);
+            return {
+              ...syncWorkspaceBrandMaterials(loaded.workspace, inferredBrandId)
+            };
+          });
           if (loaded.objectIndex) setObjectIndex(loaded.objectIndex);
         }
         void loadBackendBrands().then((brands) => {
-          if (!cancelled && brands.length) setBrandCatalog(brands);
-        }).catch(() => undefined);
-        void loadBackendAssets(loaded?.workspace.activeBrandId ?? activeBrandId).then((assets) => {
-          if (!cancelled && assets.length) {
+          if (!cancelled && brands.length) {
+            setBrandCatalog(brands);
             setWorkspace((current) => ({
-              ...current,
-              materials: mergeMaterials(current.materials, assets),
-              activeMaterialId: current.activeMaterialId || assets[0].id
+              ...syncWorkspaceBrandMaterials(current, inferBrandIdFromPrompt(current.prompt, current.activeBrandId, brands))
             }));
           }
         }).catch(() => undefined);
+        void loadBackendAssets(loaded?.workspace.activeBrandId ?? activeBrandId).then((assets) => {
+          if (!cancelled && assets.length) {
+            setWorkspace((current) => syncWorkspaceBrandMaterials({
+              ...current,
+              materials: mergeMaterials(current.materials, assets)
+            }, current.activeBrandId));
+          }
+        }).catch(() => undefined);
         void loadBackendHistory().then(setHistoryEntries).catch(() => undefined);
+        void loadBackendSqliteStatus().then(setSqliteStatus).catch(() => undefined);
         void searchBackendMemories(loaded?.workspace.prompt ?? prompt).then(setRelatedMemories).catch(() => undefined);
+        void loadBackendSkills().then((data) => {
+          if (!cancelled) {
+            if (data.skills.length) {
+              setWorkspace((current) => ({
+                ...current,
+                skills: data.skills
+              }));
+            }
+            setSkillStoreStatus({
+              piDir: data.filesystem?.piDir,
+              dataDir: data.filesystem?.dataDir,
+              onlineDisabled: data.onlineSearch?.disabled
+            });
+          }
+        }).catch(() => undefined);
         setStorageMode("filesystem-json");
       })
       .catch(() => {
@@ -1278,13 +1597,15 @@ function App() {
         return loadBackendHistory();
       })
       .then(setHistoryEntries)
+      .then(() => loadBackendSqliteStatus().then(setSqliteStatus).catch(() => undefined))
       .then(() => searchBackendMemories(workspace.prompt).then(setRelatedMemories).catch(() => undefined))
       .catch(() => setStorageMode(detectStorageState()));
   }, [backendLoaded, brandCatalog, storageMode, workspace]);
 
   function updateWorkspace(updater: (current: WorkGraphWorkspace) => WorkGraphWorkspace) {
     setWorkspace((current) => {
-      const next = updater(current);
+      const updated = updater(current);
+      const next = syncWorkspaceBrandMaterials(updated, inferBrandIdFromPrompt(updated.prompt, updated.activeBrandId, brandCatalog));
       const goal = next.prompt !== next.goal.rawInput || next.activeBrandId !== next.goal.brandId
         ? interpretGoal(next.prompt, next.activeBrandId, next.goal)
         : next.goal;
@@ -1312,6 +1633,49 @@ function App() {
 
   async function handleFiles(files: FileList | null) {
     if (!files?.length) return;
+    if (storageMode === "filesystem-json") {
+      try {
+        const uploaded = await Promise.all(Array.from(files).map((file) => uploadBackendAsset(file, activeBrandId)));
+        const uploadedMaterials = uploaded
+          .map((item) => item.asset)
+          .filter((asset): asset is Partial<Material> & Pick<Material, "id" | "title"> => Boolean(asset?.id && asset.title))
+          .map((asset) => ({
+            id: asset.id,
+            title: asset.title,
+            kind: asset.kind ?? "document",
+            token: asset.token ?? `$asset.${asset.id}`,
+            previewUrl: asset.previewUrl ?? "",
+            fileName: asset.fileName ?? `${asset.id}.asset`,
+            size: asset.size ?? 0,
+            createdAt: asset.createdAt ?? now(),
+            tags: asset.tags?.length ? asset.tags : ["upload"],
+            note: asset.note ?? "workgraph-os backend asset",
+            source: asset.source,
+            brandId: asset.brandId,
+            role: asset.role,
+            referencePath: asset.referencePath
+          } satisfies Material));
+        const latest = uploaded.find((item) => item.workspace)?.workspace;
+        if (latest) {
+          setWorkspace(normalizeWorkspacePayload(latest));
+        } else if (uploadedMaterials.length) {
+          updateWorkspace((current) => ({
+            ...current,
+            materials: mergeMaterials(current.materials, uploadedMaterials),
+            selectedIds: [...uploadedMaterials.map((item) => item.id), ...current.selectedIds.filter((id) => !uploadedMaterials.some((item) => item.id === id))],
+            activeMaterialId: uploadedMaterials[0].id
+          }));
+        }
+        const latestIndex = uploaded.find((item) => item.objectIndex)?.objectIndex;
+        if (latestIndex) setObjectIndex(latestIndex);
+        void loadBackendAssets(activeBrandId).then((assets) => {
+          if (assets.length) updateWorkspace((current) => ({ ...current, materials: mergeMaterials(current.materials, assets) }));
+        }).catch(() => undefined);
+        return;
+      } catch {
+        // Fall back to browser-local upload below if the backend is unavailable.
+      }
+    }
     const incoming = await Promise.all(Array.from(files).map(async (file, index) => {
       const previewUrl = file.type.startsWith("image/") || file.type.startsWith("video/") || file.type.startsWith("audio/")
         ? URL.createObjectURL(file)
@@ -1342,10 +1706,40 @@ function App() {
 
   function applySkill(template: SkillTemplate) {
     const refs = selectedMaterials.map((item) => item.token).join(" ") || "$local.asset";
+    const agent = template.output === "MP4" ? "@video" : "@imgen";
     updateWorkspace((current) => ({
       ...current,
-      prompt: `@imgen ${template.command} 使用 ${refs}，生成可预览素材结果 -> ${template.output}`
+      activeModelId: template.output === "MP4" && current.activeModelId === "vdamo-gpt-image-2" ? "yijiarj-grok-video-super" : current.activeModelId,
+      prompt: `${agent} ${template.command} 使用 ${refs}，生成可预览素材结果 -> ${template.output}`
     }));
+  }
+
+  function inspectSkill(template: SkillTemplate) {
+    setActiveSkillDetail(null);
+    setSkillOptimizePreview(null);
+    setSkillOptimizePrompt("");
+    if (storageMode !== "filesystem-json") return;
+    void loadBackendSkillDetail(template.id)
+      .then(setActiveSkillDetail)
+      .catch(() => undefined);
+  }
+
+  function previewSkillOptimization() {
+    if (!activeSkillDetail || !skillOptimizePrompt.trim()) return;
+    void previewBackendSkillOptimization(activeSkillDetail.skill.id, skillOptimizePrompt.trim())
+      .then(setSkillOptimizePreview)
+      .catch(() => undefined);
+  }
+
+  function applySkillOptimization() {
+    if (!activeSkillDetail || !skillOptimizePrompt.trim()) return;
+    void applyBackendSkillOptimization(activeSkillDetail.skill.id, skillOptimizePrompt.trim())
+      .then((data) => {
+        setSkillOptimizePreview(data);
+        if (data.detail) setActiveSkillDetail(data.detail);
+        if (data.objectIndex) setObjectIndex(data.objectIndex);
+      })
+      .catch(() => undefined);
   }
 
   function buildSkillFromSearchInput() {
@@ -1366,10 +1760,12 @@ function App() {
 
   function addSkillLocally(skill: SkillTemplate) {
     const refs = selectedMaterials.map((item) => item.token).join(" ") || "$local.asset";
+    const agent = skill.output === "MP4" ? "@video" : "@imgen";
     updateWorkspace((current) => ({
       ...current,
       skills: [skill, ...current.skills],
-      prompt: `@imgen ${skill.command} 使用 ${refs}，生成可预览素材结果 -> ${skill.output}`,
+      activeModelId: skill.output === "MP4" && current.activeModelId === "vdamo-gpt-image-2" ? "yijiarj-grok-video-super" : current.activeModelId,
+      prompt: `${agent} ${skill.command} 使用 ${refs}，生成可预览素材结果 -> ${skill.output}`,
       memories: [
         {
           id: `mem-${Date.now().toString(36)}`,
@@ -1409,9 +1805,11 @@ function App() {
           if (data.workspace) setWorkspace(normalizeWorkspacePayload(data.workspace));
           if (data.objectIndex) setObjectIndex(data.objectIndex);
           const refs = selectedMaterials.map((item) => item.token).join(" ") || "$local.asset";
+          const agent = (data.skill?.output ?? skill.output) === "MP4" ? "@video" : "@imgen";
           updateWorkspace((current) => ({
             ...current,
-            prompt: `@imgen ${data.skill?.command ?? skill.command} 使用 ${refs}，生成可预览素材结果 -> ${data.skill?.output ?? skill.output}`
+            activeModelId: (data.skill?.output ?? skill.output) === "MP4" && current.activeModelId === "vdamo-gpt-image-2" ? "yijiarj-grok-video-super" : current.activeModelId,
+            prompt: `${agent} ${data.skill?.command ?? skill.command} 使用 ${refs}，生成可预览素材结果 -> ${data.skill?.output ?? skill.output}`
           }));
           void loadBackendHistory().then(setHistoryEntries).catch(() => undefined);
           setSkillSearch("");
@@ -1424,19 +1822,75 @@ function App() {
     addSkillLocally(skill);
   }
 
+  function updateNode(nodeId: string, patch: Partial<WorkflowNode>) {
+    updateWorkspace((current) => {
+      const baseNodes = current.nodes.length ? current.nodes : generatedNodes;
+      return {
+        ...current,
+        nodes: baseNodes.map((node) => node.id === nodeId ? { ...node, ...patch } : node),
+        updatedAt: now()
+      };
+    });
+  }
+
   function updateActiveNodeBody(body: string) {
     if (!activeNode) return;
-    if (activeNode.id === "skill") {
-      updateWorkspace((current) => ({
-        ...current,
-        prompt: current.prompt.includes(activeNode.body) ? current.prompt.replace(activeNode.body, body) : `${current.prompt}\n${body}`
-      }));
-      return;
-    }
+    updateNode(activeNode.id, { body });
+  }
+
+  function setActiveNodeModel(modelId: string) {
+    if (!activeNode) return;
+    updateNode(activeNode.id, { modelId });
+    if (activeNode.type === "model") updateWorkspace((current) => ({ ...current, activeModelId: modelId }));
+  }
+
+  function setActiveNodeSkill(skillId: string) {
+    if (!activeNode) return;
+    const skill = skills.find((item) => item.id === skillId);
+    updateNode(activeNode.id, {
+      skillId,
+      title: skill ? `Skill · ${skill.command}` : activeNode.title,
+      body: skill?.description ?? activeNode.body
+    });
+  }
+
+  function setActiveNodeMaterial(materialId: string) {
+    if (!activeNode) return;
+    const nextIds = materialId ? [materialId] : [];
+    updateNode(activeNode.id, { materialIds: nextIds });
     updateWorkspace((current) => ({
       ...current,
-      prompt: `${current.prompt}\n节点 ${activeNode.title}: ${body}`.trim()
+      activeMaterialId: materialId || current.activeMaterialId,
+      selectedIds: materialId && !current.selectedIds.includes(materialId) ? [materialId, ...current.selectedIds] : current.selectedIds
     }));
+  }
+
+  function toggleActiveNodeDisabled() {
+    if (!activeNode) return;
+    updateNode(activeNode.id, {
+      disabled: !activeNode.disabled,
+      status: activeNode.disabled ? "ready" : "queued"
+    });
+  }
+
+  function deleteActiveNode() {
+    if (!activeNode || activeNode.type === "goal") return;
+    updateWorkspace((current) => {
+      const baseNodes = current.nodes.length ? current.nodes : generatedNodes;
+      const nextNodes = baseNodes.filter((node) => node.id !== activeNode.id);
+      setActiveNodeId(nextNodes[0]?.id ?? "goal");
+      return { ...current, nodes: nextNodes, updatedAt: now() };
+    });
+  }
+
+  function retryActiveNode() {
+    if (!activeNode) return;
+    updateNode(activeNode.id, {
+      disabled: false,
+      status: "ready",
+      retryCount: (activeNode.retryCount ?? 0) + 1
+    });
+    runWorkflow();
   }
 
   function applyNaturalLanguageChange(change: string) {
@@ -1446,8 +1900,10 @@ function App() {
       ...current,
       activeModelId: lower.includes("本地") || lower.includes("local")
         ? "local-flux"
+        : lower.includes("视频") || lower.includes("mp4") || lower.includes("video")
+          ? "yijiarj-grok-video-super"
         : lower.includes("最贵") || lower.includes("最好") || lower.includes("高质量")
-          ? "gpt-image"
+          ? "vdamo-gpt-image-2"
           : current.activeModelId,
       activeBrandId: lower.includes("dapot") ? "dapot" : lower.includes("xmanx") ? "xmanx" : current.activeBrandId,
       prompt: `${current.prompt}\n修改要求: ${change}`
@@ -1466,7 +1922,24 @@ function App() {
       materials: selectedMaterials.map((item) => item.token),
       createdAt
     };
-    const result = buildResultObject(job, workspace.workflow.id);
+    const promptRecord: PromptRecordObject = {
+      id: `prompt-${Date.now().toString(36)}`,
+      executionId: `local-${Date.now().toString(36)}`,
+      workflowId: workspace.workflow.id,
+      nodeId: activeNode.id,
+      nodeTitle: activeNode.title,
+      sourcePrompt: workspace.prompt,
+      nodePrompt: activeNode.body,
+      finalPrompt: `${workspace.prompt}\n\nBrand Context:\n${activeBrand.context ?? activeBrand.rules.join("\n")}\n\nNode:\n${activeNode.body}`,
+      brandId: activeBrandId,
+      brandContext: activeBrand.context ?? activeBrand.rules.join("\n"),
+      materialIds: selectedMaterials.map((item) => item.id),
+      skillId: activeSkill.id,
+      modelId: activeModelId,
+      output: job.output,
+      createdAt
+    };
+    const result = { ...buildResultObject(job, workspace.workflow.id), promptRecordId: promptRecord.id, promptRecord };
     updateWorkspace((current) => ({
       ...current,
       skills: current.skills.map((skill) => skill.id === activeSkill.id
@@ -1483,6 +1956,7 @@ function App() {
         : skill),
       jobs: [job, ...current.jobs],
       results: [result, ...current.results],
+      promptRecords: [promptRecord, ...current.promptRecords],
       memories: [
         {
           id: `mem-${Date.now().toString(36)}`,
@@ -1511,7 +1985,8 @@ function App() {
 
   function runWorkflow() {
     if (storageMode === "filesystem-json") {
-      void runBackendWorkflow(activeNode.id, activeNode.type === "goal" ? "workflow" : "node")
+      const runnableNode = activeNode.disabled ? nodes.find((node) => !node.disabled) ?? activeNode : activeNode;
+      void runBackendWorkflow(runnableNode.id, runnableNode.type === "goal" ? "workflow" : "node")
         .then((data) => {
           if (data.workspace) {
             setWorkspace(normalizeWorkspacePayload(data.workspace));
@@ -1584,6 +2059,7 @@ function App() {
       memoryId,
       sourceResultId: target.sourceResultId,
       sourceWorkflowId: workspace.workflow.id,
+      brandId: workspace.activeBrandId,
       createdAt: now()
     };
     const memoryObject = buildMemoryFromFeedback(feedbackObject, activeNode.title);
@@ -1599,12 +2075,43 @@ function App() {
       feedback: [feedbackObject, ...current.feedback],
       memories: [memoryObject, ...current.memories]
     }));
+    if (storageMode === "filesystem-json") {
+      void recordBackendFeedback(feedbackObject, workspace.activeBrandId)
+        .then((data) => {
+          if (data.workspace) setWorkspace(normalizeWorkspacePayload(data.workspace));
+          if (data.objectIndex) setObjectIndex(data.objectIndex);
+          if (data.brand?.id && data.brand.name) {
+            setBrandCatalog((current) => {
+              const normalizedBrand: BrandMemory = {
+                id: data.brand!.id!,
+                name: data.brand!.name!,
+                positioning: data.brand!.positioning ?? "",
+                colors: data.brand!.colors ?? "",
+                audience: data.brand!.audience ?? "",
+                rules: data.brand!.rules?.length ? data.brand!.rules : [],
+                context: data.brand!.context,
+                source: data.brand!.source,
+                forbiddenWords: data.brand!.forbiddenWords,
+                disliked: data.brand!.disliked
+              };
+              return current.some((brand) => brand.id === normalizedBrand.id)
+                ? current.map((brand) => brand.id === normalizedBrand.id ? normalizedBrand : brand)
+                : [normalizedBrand, ...current];
+            });
+          }
+          void loadBackendHistory().then(setHistoryEntries).catch(() => undefined);
+          void loadBackendSqliteStatus().then(setSqliteStatus).catch(() => undefined);
+          void searchBackendMemories(note).then(setRelatedMemories).catch(() => undefined);
+        })
+        .catch(() => undefined);
+    }
     setFeedbackNote("");
   }
 
   const visibleExecutionLog = workspace.executionLog
     .filter((entry) => !activeNode || entry.nodeId === activeNode.id || entry.workflowId === workspace.workflow.id)
     .slice(0, 8);
+  const piWebUrl = "http://localhost:30141/";
 
   return (
     <main className="pm-shell">
@@ -1617,16 +2124,22 @@ function App() {
           </div>
         </div>
         <div className="pm-status">
-          <span><Bot /> pi-web compatible</span>
+          <a className="pm-status-link" href={piWebUrl} target="_blank" rel="noreferrer"><Bot /> Pi Web</a>
           <span><Library /> {objectCount("asset", "assets")} assets</span>
           <span><Sparkles /> {objectCount("skill", "skills")} skills</span>
-          <span><RefreshCcw /> {objectCount("memory", "memories")} memories</span>
-          <span><Archive /> {storageMode === "filesystem-json" ? "filesystem JSON" : storageMode === "browser-local" ? "browser local store" : "memory only"}</span>
-          <span><CheckCircle2 /> WGOS local first</span>
+          <span><Archive /> {storageMode === "filesystem-json" ? "filesystem JSON" : storageMode === "browser-local" ? "browser local" : "memory"}</span>
         </div>
       </header>
 
       <aside className="pm-sidebar">
+        <nav className="pm-library-tabs" aria-label="Object library sections">
+          <button type="button" className={libraryView === "assets" ? "active" : ""} onClick={() => setLibraryView("assets")}><FileImage /> Assets</button>
+          <button type="button" className={libraryView === "objects" ? "active" : ""} onClick={() => setLibraryView("objects")}><Layers3 /> Objects</button>
+          <button type="button" className={libraryView === "skills" ? "active" : ""} onClick={() => setLibraryView("skills")}><Sparkles /> Skills</button>
+          <button type="button" className={libraryView === "settings" ? "active" : ""} onClick={() => setLibraryView("settings")}><Database /> Setup</button>
+        </nav>
+
+        {libraryView === "assets" ? (
         <section className="pm-panel">
           <div className="pm-panel-head">
             <strong>素材库</strong>
@@ -1650,17 +2163,60 @@ function App() {
             ))}
           </div>
         </section>
+        ) : null}
 
+        {libraryView === "skills" ? (
         <section className="pm-panel compact">
-          <div className="pm-panel-head"><strong>Skill 模板</strong><Sparkles /></div>
-          <label className="pm-search"><Search /><input value={skillSearch} onChange={(event) => setSkillSearch(event.target.value)} placeholder="一句话搜索 skill" /></label>
+          <div className="pm-panel-head"><strong>Pi Skill 管理</strong><Sparkles /></div>
+          <div className="pm-pi-bridge">
+            <strong>@agegr/pi-web</strong>
+            <small>Pi Web 负责项目选择、模型和 Skill 管理；WGOS 负责把目标、素材、品牌、结果和反馈组织成工作图谱。</small>
+            {skillStoreStatus.piDir ? <small>Pi skills: {skillStoreStatus.piDir}</small> : null}
+            {skillStoreStatus.dataDir ? <small>Data mirror: {skillStoreStatus.dataDir}</small> : null}
+            {skillStoreStatus.onlineDisabled ? <small>Online skill search: planned / disabled</small> : null}
+            <a href={piWebUrl} target="_blank" rel="noreferrer">打开 Pi Web Skills</a>
+          </div>
+          <label className="pm-search"><Search /><input value={skillSearch} onChange={(event) => setSkillSearch(event.target.value)} placeholder="搜索本地 / 在线 skill" /></label>
           {filteredSkills.map((template) => (
-            <button key={template.id} className="pm-skill" onClick={() => applySkill(template)}>
+            <button key={template.id} className={`pm-skill ${activeSkillDetail?.skill.id === template.id ? "selected" : ""}`} onClick={() => inspectSkill(template)} onDoubleClick={() => applySkill(template)}>
               {skillIcon(template.icon)}
-              <span><strong>{template.title}</strong><small>{template.description}</small></span>
+              <span>
+                <strong>{template.title}</strong>
+                <small>{template.command} · {template.source ?? "workspace"} · {template.skillMdPath}</small>
+                <small>{template.description}</small>
+              </span>
               <ChevronRight />
             </button>
           ))}
+          {activeSkillDetail ? (
+            <div className="pm-skill-detail">
+              <strong>{activeSkillDetail.skill.title}</strong>
+              <small>{activeSkillDetail.piDir}</small>
+              <div className="pm-file-tree">
+                {activeSkillDetail.tree.map((entry) => (
+                  <span key={entry.path}>{entry.type === "directory" ? "dir" : "file"} {entry.path}</span>
+                ))}
+              </div>
+              <div className="pm-skill-files">
+                {activeSkillDetail.files.map((file) => (
+                  <details key={file.path} open={file.path === "SKILL.md"}>
+                    <summary>{file.path}</summary>
+                    <pre>{file.content.slice(0, 1800)}</pre>
+                  </details>
+                ))}
+              </div>
+              <textarea value={skillOptimizePrompt} onChange={(event) => setSkillOptimizePrompt(event.target.value)} placeholder="用自然语言说明怎么优化这个 Skill。这里只生成计划和 diff 预览，不会静默覆盖文件。" />
+              <button type="button" onClick={previewSkillOptimization}><Wand2 /> 生成优化 diff 预览</button>
+              {skillOptimizePreview ? (
+                <div className="pm-diff-preview">
+                  <strong>{skillOptimizePreview.message}</strong>
+                  {skillOptimizePreview.diffPreview ? <pre>{skillOptimizePreview.diffPreview}</pre> : null}
+                  {skillOptimizePreview.applied ? <small>Applied {skillOptimizePreview.applied.previousVersion} {"->"} {skillOptimizePreview.applied.version}</small> : null}
+                  {skillOptimizePreview.status === "preview" ? <button type="button" onClick={applySkillOptimization}><CheckCircle2 /> 确认写入新版本</button> : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {skillSearch && !filteredSkills.length && (
             <div className="pm-create-skill">
               <strong>没有匹配 Skill</strong>
@@ -1670,7 +2226,9 @@ function App() {
             </div>
           )}
         </section>
+        ) : null}
 
+        {libraryView === "objects" ? (
         <section className="pm-panel compact">
           <div className="pm-panel-head"><strong>对象图谱</strong><Layers3 /></div>
           <div className="pm-goal-card">
@@ -1715,8 +2273,27 @@ function App() {
             ))}
             {!historyEntries.length ? <p className="pm-muted">保存到后端后会记录对象索引快照。</p> : null}
           </div>
+          <div className="pm-sqlite-status">
+            <div>
+              <strong>SQLite Export</strong>
+              <small>{sqliteStatus ? `${sqliteStatus.dialect} · ${sqliteStatus.migrationMode}` : "waiting for backend"}</small>
+            </div>
+            {sqliteStatus ? (
+              <>
+                <div className="pm-table-counts">
+                  {sqliteStatus.tables.map((table) => (
+                    <span key={table}>{table.replace(/^wgos_/, "")}<strong>{sqliteStatus.rowCounts[table] ?? 0}</strong></span>
+                  ))}
+                </div>
+                <p className="pm-muted">{sqliteStatus.rowCounts.wgos_execution_logs ?? 0} execution log rows ready for SQLite migration.</p>
+              </>
+            ) : <p className="pm-muted">连接 filesystem JSON 后会显示 SQLite 表和行数。</p>}
+          </div>
         </section>
+        ) : null}
 
+        {libraryView === "settings" ? (
+        <>
         <section className="pm-panel compact">
           <div className="pm-panel-head"><strong>品牌画布</strong><FolderOpen /></div>
           {brandCatalog.map((brand) => (
@@ -1746,6 +2323,16 @@ function App() {
             </button>
           ))}
         </section>
+        <section className="pm-panel compact">
+          <div className="pm-panel-head"><strong>Pi 底座状态</strong><Bot /></div>
+          <div className="pm-pi-bridge">
+            <strong>Pi Agent Web</strong>
+            <small>运行入口：npx @agegr/pi-web@latest；默认端口 30141。</small>
+            <a href={piWebUrl} target="_blank" rel="noreferrer">打开 Pi Web</a>
+          </div>
+        </section>
+        </>
+        ) : null}
       </aside>
 
       <section className="pm-canvas">
@@ -1764,10 +2351,10 @@ function App() {
           <path d="M1126 332 C1126 360 1126 370 1126 392" />
         </svg>
         {nodes.map((node) => (
-          <article key={node.id} className={`pm-node ${node.type} ${activeNodeId === node.id ? "active" : ""}`} style={{ left: node.x, top: node.y }} onClick={() => setActiveNodeId(node.id)}>
+          <article key={node.id} className={`pm-node ${node.type} ${activeNodeId === node.id ? "active" : ""} ${node.disabled ? "disabled" : ""}`} style={{ left: node.x, top: node.y }} onClick={() => setActiveNodeId(node.id)}>
             <div className="pm-node-title">
               <strong>{node.title}</strong>
-              <small>{node.status}</small>
+              <small>{node.disabled ? "disabled" : node.status}</small>
             </div>
             {node.materialIds?.length ? (
               <div className="pm-node-media">
@@ -1810,11 +2397,33 @@ function App() {
           {activeNode ? (
             <div className="pm-node-editor">
               <strong>{activeNode.title}</strong>
-              <small>{activeNode.type} · {activeNode.status}</small>
+              <small>{activeNode.type} · {activeNode.disabled ? "disabled" : activeNode.status} · retry {activeNode.retryCount ?? 0}</small>
               <textarea value={activeNode.body} onChange={(event) => updateActiveNodeBody(event.target.value)} />
+              <label>
+                Model
+                <select value={activeNode.modelId ?? activeModelId} onChange={(event) => setActiveNodeModel(event.target.value)}>
+                  {modelOptions.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+                </select>
+              </label>
+              <label>
+                Skill
+                <select value={activeNode.skillId ?? matchingSkill.id} onChange={(event) => setActiveNodeSkill(event.target.value)}>
+                  {skills.map((skill) => <option key={skill.id} value={skill.id}>{skill.command} · {skill.title}</option>)}
+                </select>
+              </label>
+              <label>
+                Asset
+                <select value={activeNode.materialIds?.[0] ?? ""} onChange={(event) => setActiveNodeMaterial(event.target.value)}>
+                  <option value="">No asset</option>
+                  {materials.map((material) => <option key={material.id} value={material.id}>{material.token} · {material.title}</option>)}
+                </select>
+              </label>
               <div className="pm-node-actions">
                 <button type="button" onClick={() => updateWorkspace((current) => ({ ...current, prompt: `${current.prompt}\n修改 ${activeNode.title}: ${activeNode.body}` }))}><Pencil /> 写入提示词</button>
                 <button type="button" onClick={runWorkflow}><Play /> 跑此节点</button>
+                <button type="button" onClick={retryActiveNode}><RefreshCcw /> 重试</button>
+                <button type="button" onClick={toggleActiveNodeDisabled}>{activeNode.disabled ? <CheckCircle2 /> : <Archive />} {activeNode.disabled ? "启用" : "禁用"}</button>
+                {activeNode.type !== "goal" ? <button type="button" onClick={deleteActiveNode}><Trash2 /> 删除</button> : null}
               </div>
             </div>
           ) : <p className="pm-muted">点击画布节点后编辑。</p>}
@@ -1904,6 +2513,15 @@ function App() {
               <div>
                 <strong>{result.title}</strong>
                 <small>v{result.version} · {result.kind} · {result.status} · {result.canSaveAsMaterial ? "can save as material" : "view only"}</small>
+                {(result.promptRecord ?? workspace.promptRecords.find((record) => record.id === result.promptRecordId)) ? (
+                  <small>
+                    PromptRecord {(result.promptRecord ?? workspace.promptRecords.find((record) => record.id === result.promptRecordId))?.id}
+                    {" · "}
+                    {(result.promptRecord ?? workspace.promptRecords.find((record) => record.id === result.promptRecordId))?.modelId}
+                    {" · "}
+                    {(result.promptRecord ?? workspace.promptRecords.find((record) => record.id === result.promptRecordId))?.skillId}
+                  </small>
+                ) : null}
               </div>
               {result.canSaveAsMaterial ? <button type="button" onClick={() => saveResultAsMaterial(result)}><Archive /> 存为素材</button> : null}
             </div>
@@ -1913,7 +2531,11 @@ function App() {
 
       <footer className="pm-composer">
         <button type="button" className="pm-new"><Plus /> 新素材</button>
-        <textarea value={prompt} onChange={(event) => updateWorkspace((current) => ({ ...current, prompt: event.target.value }))} />
+        <textarea value={prompt} onChange={(event) => updateWorkspace((current) => ({
+          ...current,
+          prompt: event.target.value,
+          activeModelId: selectModelForPrompt(event.target.value, current.activeModelId).id
+        }))} />
         <div className="pm-composer-side">
           <span>{ast.warnings.length ? ast.warnings.join(" / ") : `匹配 ${matchingSkill.title}`}</span>
           <button type="button" onClick={planWorkflow}><Wand2 /> 规划</button>

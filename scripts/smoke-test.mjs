@@ -1,5 +1,6 @@
-import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,6 +11,9 @@ const tempDir = await mkdtemp(path.join(tmpdir(), "sparkcanvas-smoke-"));
 const dataFile = path.join(tempDir, "sparkcanvas.json");
 const workGraphOsDataFile = path.join(tempDir, "workgraph-os.json");
 const workGraphOsHistoryFile = path.join(tempDir, "workgraph-os-history.json");
+const workGraphOsDbFile = path.join(tempDir, "data", "db", "workgraph-os.sqlite");
+const workGraphOsAssetDir = path.join(tempDir, "data", "assets");
+const workGraphOsBrandDir = path.join(tempDir, "data", "brands");
 const generatedDir = path.join(tempDir, "generated");
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 let token = "";
@@ -23,8 +27,15 @@ const server = spawn("node", ["dist/server.js"], {
     SPARKCANVAS_DATA_FILE: dataFile,
     WORKGRAPH_OS_DATA_FILE: workGraphOsDataFile,
     WORKGRAPH_OS_HISTORY_FILE: workGraphOsHistoryFile,
+    WORKGRAPH_OS_DB_FILE: workGraphOsDbFile,
+    WORKGRAPH_OS_PI_DIR: path.join(tempDir, ".pi"),
+    WORKGRAPH_OS_SKILL_DIR: path.join(tempDir, "data", "skills"),
+    WORKGRAPH_OS_ASSET_DIR: workGraphOsAssetDir,
+    WORKGRAPH_OS_BRAND_DIR: workGraphOsBrandDir,
     SPARKCANVAS_GENERATED_DIR: generatedDir,
     SPARKCANVAS_DISABLE_IMAGE_GEN: "1",
+    VIDEO_GEN_BASE_URL: "https://api.yijiarj.cn/v1",
+    VIDEO_GEN_KEY: "smoke-real-yijia-key-must-stay-blocked",
     SPARKCANVAS_PUBLIC_BASE_URL: "http://127.0.0.1:1234"
   },
   stdio: ["ignore", "pipe", "pipe"]
@@ -65,6 +76,20 @@ async function uploadAssetImage(params) {
     body: png
   });
   if (!response.ok) throw new Error(`POST /assets/upload failed: ${response.status} ${await response.text()}`);
+  return response.json();
+}
+
+async function uploadWorkGraphAsset(params, body, contentType) {
+  const query = new URLSearchParams(params);
+  const response = await fetch(`${baseUrl}/workgraph-os/assets/upload?${query.toString()}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": contentType,
+      Authorization: `Bearer ${token}`
+    },
+    body
+  });
+  if (!response.ok) throw new Error(`POST /workgraph-os/assets/upload failed: ${response.status} ${await response.text()}`);
   return response.json();
 }
 
@@ -146,7 +171,7 @@ try {
   const unauthorized = await fetch(`${baseUrl}/workspace`);
   assert(unauthorized.status === 401, "workspace should require a demo token");
   const unauthorizedWorkGraph = await fetch(`${baseUrl}/workgraph-os/workspace`);
-  assert(unauthorizedWorkGraph.status === 401, "WorkGraph OS workspace should require a token");
+  assert(unauthorizedWorkGraph.status === 200, "local WorkGraph OS workspace should be available to pnpm dev without a token");
 
   const wrongLogin = await fetch(`${baseUrl}/auth/login`, {
     method: "POST",
@@ -190,11 +215,18 @@ try {
   assert(initialWorkGraph.storage?.mode === "filesystem-json", "WorkGraph OS should use filesystem JSON storage through the backend");
   assert(initialWorkGraph.workspace === null, "new WorkGraph OS storage should start empty in isolated smoke data dir");
   const workGraphBrands = await request("/workgraph-os/brands");
-  assert(workGraphBrands.source === "sparkcanvas-brand-db", "WorkGraph OS should read brands from the SparkCanvas brand database");
+  assert(workGraphBrands.source === "brand-store", "WorkGraph OS should read brands through the filesystem-backed Brand Store");
+  const dapotBrandStoreFile = workGraphBrands.storage?.files?.find((file) => file.includes("brand-dapot") || file.includes("brand_dapot"));
+  assert(workGraphBrands.storage?.dir === workGraphOsBrandDir && dapotBrandStoreFile, "WorkGraph OS Brand Store should write DAPOT into data/brands");
   assert(workGraphBrands.brands?.some((brand) => brand.id === "brand_xmanx" && String(brand.context).includes("$copy.brand_name")), "WorkGraph OS brand API should expose compiled brand context");
+  assert(workGraphBrands.brands?.some((brand) => brand.id === "brand_dapot" && String(brand.context).includes("Eat the World in One Hot Pot")), "WorkGraph OS brand API should expose DAPOT brand memory");
+  const dapotBrandFile = await readFile(dapotBrandStoreFile, "utf8");
+  assert(dapotBrandFile.includes("Eat the World in One Hot Pot") && dapotBrandFile.includes("DAPOT"), "DAPOT brand context should be persisted to data/brands");
   const workGraphAssets = await request("/workgraph-os/assets?brandId=brand_xmanx");
   assert(workGraphAssets.source === "sparkcanvas-asset-store", "WorkGraph OS should read assets from the SparkCanvas asset store");
   assert(workGraphAssets.assets?.some((asset) => asset.source === "sparkcanvas-asset-store" && String(asset.token).startsWith("$")), "WorkGraph OS asset API should expose tokenized material objects");
+  const workGraphDapotAssets = await request("/workgraph-os/assets?brandId=brand_dapot");
+  assert(workGraphDapotAssets.assets?.some((asset) => asset.token === "$dapot.logo"), "WorkGraph OS asset API should expose DAPOT tokenized materials");
   const workGraphPayload = {
     version: 1,
     goal: {
@@ -329,10 +361,121 @@ try {
   assert(memoryObjects.objects.length === 1 && memoryObjects.objects[0].id === "memory:mem-smoke", "WorkGraph OS object index should support type filtering");
   const reusableMemories = await request("/workgraph-os/memories?q=reuse&reusable=true");
   assert(reusableMemories.source === "workgraph-memory-store" && reusableMemories.memories?.some((memory) => memory.id === "mem-smoke"), "WorkGraph OS memory store should retrieve reusable memories by query");
+  const uploadedWorkGraphAsset = await uploadWorkGraphAsset({
+    filename: "dapot-menu.svg",
+    title: "DAPOT menu SVG",
+    mime: "image/svg+xml",
+    brandId: "brand_dapot",
+    tags: "svg,menu,dapot"
+  }, Buffer.from("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"120\" height=\"80\"><text x=\"8\" y=\"40\">DAPOT 299</text></svg>"), "image/svg+xml");
+  assert(uploadedWorkGraphAsset.source === "workgraph-asset-store", "WorkGraph OS asset upload should use the WorkGraph asset store");
+  assert(uploadedWorkGraphAsset.asset?.kind === "image" && uploadedWorkGraphAsset.asset?.brandId === "brand_dapot", "uploaded WorkGraph asset should retain kind and brand ownership");
+  assert(uploadedWorkGraphAsset.storage?.relativePath?.includes("image/"), "uploaded WorkGraph asset should be stored under data/assets image folder");
+  await access(uploadedWorkGraphAsset.storage.absolutePath);
+  assert(String(uploadedWorkGraphAsset.asset?.thumbnailUrl).includes(".thumb.svg") && String(uploadedWorkGraphAsset.asset?.versionPath).includes(".versions") && String(uploadedWorkGraphAsset.asset?.usagePath).includes(".usage.jsonl"), "uploaded WorkGraph asset should expose thumbnail, version and usage metadata");
+  await access(uploadedWorkGraphAsset.asset.thumbnailPath);
+  await access(uploadedWorkGraphAsset.asset.versionPath);
+  await access(uploadedWorkGraphAsset.asset.usagePath);
+  assert(uploadedWorkGraphAsset.workspace?.activeMaterialId === uploadedWorkGraphAsset.asset.id, "uploaded WorkGraph asset should become the active material in the workspace");
+  assert(uploadedWorkGraphAsset.objectIndex?.objects?.some((item) => item.id === `asset:${uploadedWorkGraphAsset.asset.id}`), "uploaded WorkGraph asset should appear in the object index");
+  const uploadedWorkGraphAssets = await request("/workgraph-os/assets?brandId=brand_dapot&q=menu");
+  assert(uploadedWorkGraphAssets.assets?.some((asset) => asset.id === uploadedWorkGraphAsset.asset.id && String(asset.dataPath).includes("data/assets")), "WorkGraph asset search should return uploaded data/assets material");
+  const workspaceWithUploadedAssetNode = {
+    ...uploadedWorkGraphAsset.workspace,
+    nodes: uploadedWorkGraphAsset.workspace.nodes.map((node) => node.id === "node-smoke" ? { ...node, materialIds: [uploadedWorkGraphAsset.asset.id] } : node),
+    selectedIds: [uploadedWorkGraphAsset.asset.id],
+    activeMaterialId: uploadedWorkGraphAsset.asset.id
+  };
+  await request("/workgraph-os/workspace", { method: "PUT", body: JSON.stringify(workspaceWithUploadedAssetNode) });
+  const uploadedAssetRunBeforeFeedback = await request("/workgraph-os/run", { method: "POST", body: JSON.stringify({ nodeId: "node-smoke", mode: "node" }) });
+  assert(uploadedAssetRunBeforeFeedback.workspace?.results?.[0]?.materialIds?.includes(uploadedWorkGraphAsset.asset.id), "pre-feedback node run should create a ResultObject linked to the uploaded asset");
+  const brandLearningFeedback = await request("/workgraph-os/feedback", {
+    method: "POST",
+    body: JSON.stringify({
+      targetId: uploadedAssetRunBeforeFeedback.execution.resultId,
+      targetType: "result",
+      rating: "needs_revision",
+      action: "avoid",
+      note: "这个太廉价，不适合 DAPOT",
+      brandId: "brand_dapot",
+      sourceResultId: uploadedAssetRunBeforeFeedback.execution.resultId,
+      sourceWorkflowId: "workflow-smoke"
+    })
+  });
+  assert(brandLearningFeedback.source === "workgraph-feedback-store", "WorkGraph OS feedback endpoint should persist feedback objects");
+  assert(brandLearningFeedback.appliedLearning?.brandForbiddenWords?.some((item) => String(item).includes("这个太廉价")), "negative DAPOT feedback should update brand forbidden rules");
+  assert(brandLearningFeedback.appliedLearning?.modelPolicyId && brandLearningFeedback.workspace?.modelPolicies?.some((item) => item.id === brandLearningFeedback.appliedLearning.modelPolicyId && item.strategy && item.modelId), "negative feedback should create a traceable ModelPolicy learning object");
+  assert(brandLearningFeedback.appliedLearning?.assetIds?.includes(uploadedWorkGraphAsset.asset.id), "negative feedback should link affected AssetObjects");
+  assert(brandLearningFeedback.workspace?.results?.some((result) => result.id === uploadedAssetRunBeforeFeedback.execution.resultId && result.feedbackIds?.includes(brandLearningFeedback.feedback.id) && result.trace?.feedbackIds?.includes(brandLearningFeedback.feedback.id)), "feedback should be linked back onto the affected ResultObject trace");
+  assert(brandLearningFeedback.workspace?.materials?.some((asset) => asset.id === uploadedWorkGraphAsset.asset.id && asset.tags?.includes("feedback-avoid")), "negative feedback should tag affected AssetObjects in the workspace material list");
+  assert(readFileSync(uploadedWorkGraphAsset.asset.usagePath, "utf8").includes(`"feedbackId":"${brandLearningFeedback.feedback.id}"`), "negative feedback should append AssetObject usage history");
+  const feedbackTaggedAssets = await request("/workgraph-os/assets?brandId=brand_dapot&q=feedback-avoid");
+  assert(feedbackTaggedAssets.assets?.some((asset) => asset.id === uploadedWorkGraphAsset.asset.id), "Asset search should find feedback-tagged assets");
+  const rerunAfterModelPolicyFeedback = await request("/workgraph-os/run", { method: "POST", body: JSON.stringify({ nodeId: "node-smoke", mode: "node" }) });
+  assert(rerunAfterModelPolicyFeedback.routingDecision?.strategy === "high_quality", "negative ModelPolicy feedback should upgrade the next matching node run strategy");
+  assert(String(rerunAfterModelPolicyFeedback.routingDecision?.reason).includes("feedback model policy upgraded strategy"), "routing decision should explain that feedback changed the strategy");
+  assert(brandLearningFeedback.memory?.reusable === true && String(brandLearningFeedback.memory?.body).includes("这个太廉价"), "negative brand feedback should create reusable memory");
+  const updatedDapotBrands = await request("/workgraph-os/brands");
+  const updatedDapot = updatedDapotBrands.brands?.find((brand) => brand.id === "brand_dapot");
+  assert(String(updatedDapot?.context).includes("这个太廉价"), "future DAPOT brand context should include learned forbidden feedback");
+  const learnedDapotBrandFile = await readFile(dapotBrandStoreFile, "utf8");
+  assert(learnedDapotBrandFile.includes("这个太廉价"), "DAPOT learned feedback should be synced into data/brands");
+  const learnedMemories = await request("/workgraph-os/memories?q=廉价&reusable=true");
+  assert(learnedMemories.memories?.some((memory) => String(memory.body).includes("这个太廉价")), "WorkGraph OS memory search should retrieve learned negative feedback");
   const smokeAssetObject = await request("/workgraph-os/objects/asset/mat-smoke");
   assert(smokeAssetObject.title === "Smoke asset", "WorkGraph OS object detail should return the requested object");
   const workGraphSkills = await request("/workgraph-os/skills");
   assert(workGraphSkills.source === "workgraph-skill-store" && workGraphSkills.skills?.some((skill) => skill.id === "skill-smoke"), "WorkGraph OS skill store should list workspace skills");
+  assert(workGraphSkills.filesystem?.piDir?.includes(".pi") && workGraphSkills.filesystem?.dataDir?.includes("skills"), "WorkGraph OS skill store should expose Pi and data skill directories");
+  assert(workGraphSkills.onlineSearch?.disabled === true, "online Skill search should be explicitly planned/disabled instead of a fake action");
+  const smokeSkillDetail = await request("/workgraph-os/skills/skill-smoke");
+  assert(smokeSkillDetail.source === "pi-adapter" && smokeSkillDetail.tree?.some((entry) => entry.path === "SKILL.md"), "Pi adapter should materialize and expose the SKILL.md file tree");
+  assert(smokeSkillDetail.files?.some((file) => file.path === "skill.json" && file.content.includes("/smoke")), "Pi adapter should expose editable skill.json content");
+  assert(smokeSkillDetail.files?.some((file) => file.path === "examples/input.json"), "Pi adapter should expose skill example input");
+  const skillOptimizePreview = await request("/workgraph-os/skills/skill-smoke/optimize", {
+    method: "POST",
+    body: JSON.stringify({ prompt: "把 DAPOT TikTok 视频输出验收标准写清楚" })
+  });
+  assert(skillOptimizePreview.status === "preview" && skillOptimizePreview.writesFiles === false && skillOptimizePreview.diffPreview.includes("Proposed Optimization"), "Skill optimization should generate a reviewable diff preview without silent writes");
+  const skillOptimizeApply = await request("/workgraph-os/skills/skill-smoke/optimize/apply", {
+    method: "POST",
+    body: JSON.stringify({ prompt: "把 DAPOT TikTok 视频输出验收标准写清楚" })
+  });
+  assert(skillOptimizeApply.status === "applied" && skillOptimizeApply.writesFiles === true, "Skill optimization apply should write files only after confirmation");
+  assert(skillOptimizeApply.applied?.previousVersion && skillOptimizeApply.applied?.version !== skillOptimizeApply.applied.previousVersion, "Skill optimization apply should increment skill version metadata");
+  const optimizedSkillDetail = await request("/workgraph-os/skills/skill-smoke");
+  assert(optimizedSkillDetail.files?.some((file) => file.path === "SKILL.md" && file.content.includes("DAPOT TikTok 视频输出验收标准")), "applied Skill optimization should update SKILL.md");
+  assert(optimizedSkillDetail.files?.some((file) => file.path === "skill.json" && file.content.includes("optimizationHistory")), "applied Skill optimization should update skill.json history");
+  assert(optimizedSkillDetail.tree?.some((entry) => entry.path === "versions" && entry.children?.length), "applied Skill optimization should create a version snapshot");
+  assert(optimizedSkillDetail.tree?.some((entry) => entry.path === "logs" && entry.children?.some((child) => child.path.includes("optimization-applied"))), "applied Skill optimization should write an optimization log");
+  const skillFileSave = await request("/workgraph-os/skills/skill-smoke/files", {
+    method: "PUT",
+    body: JSON.stringify({
+      path: "resources/guide.md",
+      content: "# Smoke Skill Guide\n\nManual edit from WorkGraph Studio smoke.\n",
+      reason: "smoke manual file edit"
+    })
+  });
+  assert(skillFileSave.status === "saved" && skillFileSave.writesFiles === true && skillFileSave.snapshotAt, "Skill file save should write only through reviewed save with a version snapshot");
+  const fileSavedSkillDetail = await request("/workgraph-os/skills/skill-smoke");
+  assert(fileSavedSkillDetail.files?.some((file) => file.path === "resources/guide.md" && file.content.includes("Manual edit from WorkGraph Studio smoke")), "Skill file save should update the requested editable file");
+  assert(fileSavedSkillDetail.tree?.some((entry) => entry.path === "logs" && entry.children?.some((child) => child.path.includes("file-edited"))), "Skill file save should write a file-edited log");
+  const copiedSkill = await request("/workgraph-os/skills/skill-smoke/copy", {
+    method: "POST",
+    body: JSON.stringify({ title: "Smoke copied skill", command: "/smoke-copy" })
+  });
+  assert(copiedSkill.status === "copied" && copiedSkill.skill?.command === "/smoke-copy", "Skill copy should create a new local Skill with a separate command");
+  assert(copiedSkill.workspace?.skills?.some((skill) => skill.id === copiedSkill.skill.id && skill.evolution?.copiedFromSkillId === "skill-smoke"), "Skill copy should persist copiedFromSkillId in evolution metadata");
+  assert(copiedSkill.detail?.tree?.some((entry) => entry.path === "logs" && entry.children?.some((child) => child.path.includes("skill-copied"))), "Skill copy should write a skill-copied log");
+  const skillTest = await request(`/workgraph-os/skills/${copiedSkill.skill.id}/test`, {
+    method: "POST",
+    body: JSON.stringify({ prompt: "测试 DAPOT TikTok 视频 Skill，本地 dry run，不请求视频接口", nodeId: "node-smoke" })
+  });
+  assert(skillTest.source === "workgraph-skill-runtime" && skillTest.status === "done" && skillTest.preview.includes("Preview"), "Skill test should run through the local Skill runtime and return a preview");
+  assert(skillTest.skill?.evolution?.runCount === 1 && skillTest.skill?.evolution?.successCount === 1, "Skill test should update run and success counters");
+  assert(skillTest.skill?.evolution?.history?.some((entry) => entry.type === "test" && entry.testId === skillTest.testId), "Skill test should persist usage history on the Skill");
+  const testedSkillDetail = await request(`/workgraph-os/skills/${copiedSkill.skill.id}`);
+  assert(testedSkillDetail.tree?.some((entry) => entry.path === "logs" && entry.children?.some((child) => child.path.includes("skill-tested"))), "Skill test should write a skill-tested log");
   const createdWorkGraphSkill = await request("/workgraph-os/skills", {
     method: "POST",
     body: JSON.stringify({
@@ -346,54 +489,107 @@ try {
   });
   assert(createdWorkGraphSkill.skill?.source === "workgraph-skill-store" && createdWorkGraphSkill.skill?.skillMdPath?.includes("smoke-created"), "WorkGraph OS skill store should create normalized Skill Objects");
   assert(createdWorkGraphSkill.workspace?.skills?.some((skill) => skill.command === "/smoke-created"), "WorkGraph OS skill store should persist created skills into the workspace");
-  assert(createdWorkGraphSkill.objectIndex?.counts?.skill === 2, "WorkGraph OS skill store should update the skill object index");
+  assert(createdWorkGraphSkill.objectIndex?.counts?.skill >= 3 && createdWorkGraphSkill.objectIndex?.objects?.some((item) => item.id === `skill:${createdWorkGraphSkill.skill.id}`), "WorkGraph OS skill store should update the skill object index");
+  const createdSkillDetail = await request(`/workgraph-os/skills/${createdWorkGraphSkill.skill.id}`);
+  assert(createdSkillDetail.files?.some((file) => file.path === "SKILL.md" && file.content.includes("/smoke-created")), "created WorkGraph Skill should be written into .pi/skills and mirrored for inspection");
   const workGraphRun = await request("/workgraph-os/run", { method: "POST", body: JSON.stringify({ nodeId: "node-smoke", mode: "node" }) });
-  assert(workGraphRun.execution?.executor === "workgraph-os-backend", "WorkGraph OS should run nodes through the backend executor");
-  assert(workGraphRun.routingDecision?.selectedModelId === "imgen", "WorkGraph OS backend executor should return a model routing decision");
+  assert(workGraphRun.execution?.executor === "workgraph-skill-runtime", "WorkGraph OS should run nodes through the local Skill runtime");
+  assert(typeof workGraphRun.routingDecision?.selectedModelId === "string" && workGraphRun.routingDecision.selectedModelId.length > 0, "WorkGraph OS Skill runtime should return a model routing decision");
   assert(String(workGraphRun.routingDecision?.reason).includes("skill") || String(workGraphRun.routingDecision?.reason).includes("node"), "WorkGraph OS routing decision should explain node/model selection");
-  assert(workGraphRun.workspace?.jobs?.[0]?.executor === "workgraph-os-backend", "WorkGraph OS backend executor should persist job objects");
-  assert(workGraphRun.workspace?.jobs?.[0]?.routingDecision?.selectedModelId === "imgen", "WorkGraph OS backend executor should persist job routing decisions");
-  assert(workGraphRun.workspace?.results?.[0]?.sourceJobId === workGraphRun.execution?.jobId, "WorkGraph OS backend executor should persist linked result objects");
-  assert(workGraphRun.workspace?.results?.[0]?.routingDecision?.route === "/v1/responses image_generation", "WorkGraph OS backend executor should persist result routing decisions");
-  assert(workGraphRun.executionLog?.length === 4 && workGraphRun.executionLog.some((entry) => entry.step === "route"), "WorkGraph OS backend executor should return node execution log entries");
-  assert(workGraphRun.workspace?.executionLog?.[0]?.executionId === workGraphRun.execution?.id, "WorkGraph OS backend executor should persist execution logs in the workspace");
-  assert(workGraphRun.workspace?.memories?.[0]?.sourceId === "workflow-smoke", "WorkGraph OS backend executor should persist run memory objects");
-  assert(workGraphRun.objectIndex?.counts?.result === 2, "WorkGraph OS backend executor should update the result object index");
+  assert(workGraphRun.executionLog?.some((entry) => entry.step === "execute" && entry.payload?.previewOnly === false), "non-video WorkGraph execution should keep a non-preview execution log");
+  assert(workGraphRun.workspace?.jobs?.[0]?.executor === "workgraph-skill-runtime", "WorkGraph OS Skill runtime should persist job objects");
+  assert(workGraphRun.workspace?.jobs?.[0]?.routingDecision?.selectedModelId === workGraphRun.routingDecision.selectedModelId, "WorkGraph OS Skill runtime should persist job routing decisions");
+  assert(workGraphRun.workspace?.results?.[0]?.sourceJobId === workGraphRun.execution?.jobId, "WorkGraph OS Skill runtime should persist linked result objects");
+  assert(workGraphRun.workspace?.results?.[0]?.routingDecision?.route === "/v1/responses image_generation", "WorkGraph OS Skill runtime should persist result routing decisions");
+  assert(workGraphRun.workspace?.results?.[0]?.brandId === "brand_dapot" && workGraphRun.workspace?.results?.[0]?.skillId === "skill-smoke" && workGraphRun.workspace?.results?.[0]?.modelId === workGraphRun.routingDecision.selectedModelId, "ResultObject should directly trace Brand, Skill and Model objects");
+  assert(workGraphRun.workspace?.results?.[0]?.trace?.promptRecordId === workGraphRun.promptRecord.id && workGraphRun.workspace?.results?.[0]?.trace?.executionId === workGraphRun.execution.id, "ResultObject trace should link prompt record and execution log scope");
+  assert(workGraphRun.piSession?.sessionJson && existsSync(workGraphRun.piSession.sessionJson), "WorkGraph OS Skill runtime should write Pi session records under .pi/sessions");
+  assert(workGraphRun.workspace?.results?.[0]?.trace?.piSessionId === workGraphRun.piSession.id, "ResultObject trace should link the Pi session id");
+  assert(workGraphRun.promptRecord?.id && workGraphRun.workspace?.promptRecords?.[0]?.id === workGraphRun.promptRecord.id, "WorkGraph OS Skill runtime should create and persist PromptRecord objects");
+  assert(workGraphRun.workspace?.results?.[0]?.promptRecordId === workGraphRun.promptRecord.id, "ResultObject should link to the PromptRecord used for generation");
+  assert(workGraphRun.artifacts?.resultJson && workGraphRun.artifacts?.preview && workGraphRun.artifacts?.promptJson && workGraphRun.artifacts?.logsJsonl, "WorkGraph OS run should return data/results, data/outputs and data/logs artifact paths");
+  assert(existsSync(workGraphRun.artifacts.resultJson) && existsSync(workGraphRun.artifacts.preview), "WorkGraph OS run should write ResultObject and preview files to the local data directory");
+  assert(existsSync(workGraphRun.artifacts.promptJson) && existsSync(workGraphRun.artifacts.logsJsonl), "WorkGraph OS run should write PromptRecord and ExecutionLog files to the local data directory");
+  assert(String(workGraphRun.workspace?.results?.[0]?.artifactPaths?.resultJson).includes("data") && String(workGraphRun.workspace?.results?.[0]?.artifactPaths?.logsJsonl).includes("logs"), "ResultObject should persist local artifact paths for traceability");
+  assert(readFileSync(workGraphRun.artifacts.preview, "utf8").includes("Preview"), "WorkGraph OS preview artifact should contain the generated preview body");
+  assert(readFileSync(workGraphRun.artifacts.logsJsonl, "utf8").includes(workGraphRun.execution.id), "WorkGraph OS log artifact should contain execution-scoped log lines");
+  assert(readFileSync(workGraphRun.piSession.sessionJson, "utf8").includes(workGraphRun.execution.id) && readFileSync(workGraphRun.piSession.sessionJson, "utf8").includes(workGraphRun.execution.resultId), "Pi session artifact should persist execution and result ids");
+  assert(readFileSync(uploadedWorkGraphAsset.asset.usagePath, "utf8").includes("node-run") && readFileSync(uploadedWorkGraphAsset.asset.usagePath, "utf8").includes(workGraphRun.execution.id), "WorkGraph OS asset usage file should record node run history");
+  assert(String(workGraphRun.promptRecord.finalPrompt).includes("Brand Context") && String(workGraphRun.promptRecord.brandContext).includes("DAPOT"), "PromptRecord should preserve final prompt and DAPOT brand context");
+  assert(workGraphRun.promptRecord.skillId === "skill-smoke" && workGraphRun.promptRecord.modelId === "imgen", "PromptRecord should preserve Skill and Model traceability");
+  assert(workGraphRun.promptRecord.modelStrategy === "high_quality" && workGraphRun.workspace?.results?.[0]?.modelStrategy === "high_quality", "PromptRecord and ResultObject should preserve feedback-upgraded model strategy traceability");
+  assert(String(workGraphRun.routingDecision?.reason).includes("feedback model policy upgraded strategy"), "later node runs should explain feedback-upgraded model strategy routing");
+  assert(readFileSync(workGraphRun.artifacts.promptJson, "utf8").includes('"modelStrategy": "high_quality"'), "PromptRecord artifact should include the feedback-upgraded model strategy");
+  assert(workGraphRun.executionLog?.length >= 8 && workGraphRun.executionLog.some((entry) => entry.step === "route") && workGraphRun.executionLog.some((entry) => entry.step === "skill"), "WorkGraph OS Skill runtime should return node and runtime execution log entries");
+  assert(workGraphRun.workspace?.executionLog?.[0]?.executionId === workGraphRun.execution?.id, "WorkGraph OS Skill runtime should persist execution logs in the workspace");
+  assert(workGraphRun.workspace?.memories?.[0]?.sourceId === "workflow-smoke", "WorkGraph OS Skill runtime should persist run memory objects");
+  assert(workGraphRun.objectIndex?.counts?.result >= 2 && workGraphRun.objectIndex?.objects?.some((item) => item.id === `result:${workGraphRun.execution.resultId}`), "WorkGraph OS Skill runtime should update the result object index");
   const workGraphLogs = await request(`/workgraph-os/logs?executionId=${workGraphRun.execution.id}`);
-  assert(workGraphLogs.source === "workgraph-log-store" && workGraphLogs.logs?.length === 4, "WorkGraph OS log store should query execution logs by execution id");
+  assert(workGraphLogs.source === "workgraph-log-store" && workGraphLogs.logs?.length >= 8, "WorkGraph OS log store should query execution logs by execution id");
   assert(workGraphLogs.logs.some((entry) => entry.step === "execute" && entry.payload?.jobId === workGraphRun.execution.jobId), "WorkGraph OS log store should retain node executor payloads");
+  assert(workGraphLogs.logs.some((entry) => entry.step === "preview" && String(entry.message).includes("first-stage preview")), "WorkGraph OS log store should retain Skill runtime preview payloads");
   const workGraphHistory = await request("/workgraph-os/history");
-  assert(workGraphHistory.entries?.length === 3, "WorkGraph OS history should include save, skill-create and run snapshots");
-  assert(workGraphHistory.entries[0].counts?.result === 2, "WorkGraph OS run history should retain updated result counts");
+  assert(workGraphHistory.entries?.length >= 4, "WorkGraph OS history should include save, feedback, skill-create and run snapshots");
+  assert(workGraphHistory.entries[0].counts?.result >= 2, "WorkGraph OS run history should retain updated result counts");
   const workGraphHistoryByType = await request("/workgraph-os/history?type=memory");
-  assert(workGraphHistoryByType.entries?.length === 3, "WorkGraph OS history should support type filtering");
+  assert(workGraphHistoryByType.entries?.length >= 4, "WorkGraph OS history should support type filtering");
   const workGraphHistoryDetail = await request(`/workgraph-os/history/${workGraphHistory.entries[0].id}`);
-  assert(workGraphHistoryDetail.objects?.some((item) => item.id === `result:${workGraphRun.execution.resultId}`), "WorkGraph OS history detail should retain backend executor result objects");
+  assert(workGraphHistoryDetail.objects?.some((item) => item.id === `result:${workGraphRun.execution.resultId}`), "WorkGraph OS history detail should retain Skill runtime result objects");
   const workGraphSqliteSchema = await request("/workgraph-os/sqlite/schema");
   assert(workGraphSqliteSchema.ready === true && workGraphSqliteSchema.dialect === "sqlite", "WorkGraph OS SQLite schema should report export readiness");
-  assert(workGraphSqliteSchema.tables.includes("wgos_objects") && workGraphSqliteSchema.tables.includes("wgos_edges") && workGraphSqliteSchema.tables.includes("wgos_history"), "WorkGraph OS SQLite schema should expose object, edge and history tables");
+  assert(workGraphSqliteSchema.migrationMode === "native-sqlite-sync" && workGraphSqliteSchema.storage === "native-sqlite", "WorkGraph OS SQLite schema should report native SQLite persistence");
+  assert(workGraphSqliteSchema.dbFile === workGraphOsDbFile, "WorkGraph OS SQLite schema should expose the active local database file");
+  assert(workGraphSqliteSchema.tables.includes("wgos_objects") && workGraphSqliteSchema.tables.includes("wgos_edges") && workGraphSqliteSchema.tables.includes("wgos_history") && workGraphSqliteSchema.tables.includes("wgos_execution_logs"), "WorkGraph OS SQLite schema should expose object, edge, history and execution log tables");
   const workGraphSqliteExport = await request("/workgraph-os/sqlite/export");
   const sqliteObjects = workGraphSqliteExport.tables.find((table) => table.name === "wgos_objects");
   const sqliteEdges = workGraphSqliteExport.tables.find((table) => table.name === "wgos_edges");
   const sqliteHistory = workGraphSqliteExport.tables.find((table) => table.name === "wgos_history");
+  const sqliteExecutionLogs = workGraphSqliteExport.tables.find((table) => table.name === "wgos_execution_logs");
   assert(sqliteObjects?.rows?.some((row) => row.id === "asset:mat-smoke"), "WorkGraph OS SQLite export should include indexed asset rows");
+  assert(sqliteObjects?.rows?.some((row) => row.id === `asset:${uploadedWorkGraphAsset.asset.id}` && String(row.payload_json).includes("data/assets")), "WorkGraph OS SQLite export should include uploaded data/assets rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "goal:goal-smoke" && String(row.payload_json).includes("successCriteria")), "WorkGraph OS SQLite export should include structured goal payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "skill:skill-smoke" && String(row.payload_json).includes("skillMdPath")), "WorkGraph OS SQLite export should include standardized skill payload rows");
   assert(sqliteObjects?.rows?.some((row) => String(row.payload_json).includes("/smoke-created") && String(row.payload_json).includes("workgraph-skill-store")), "WorkGraph OS SQLite export should include skill-store created skill payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "model:imgen" && String(row.payload_json).includes("routingPolicy")), "WorkGraph OS SQLite export should include model routing payload rows");
+  assert(sqliteObjects?.rows?.some((row) => String(row.id).startsWith("model_policy:") && String(row.payload_json).includes("这个太廉价") && String(row.payload_json).includes("model_policy")), "WorkGraph OS SQLite export should include feedback-derived ModelPolicy rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "workflow:workflow-smoke" && String(row.payload_json).includes("reusable")), "WorkGraph OS SQLite export should include structured workflow payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "result:result-smoke" && String(row.payload_json).includes("canSaveAsMaterial")), "WorkGraph OS SQLite export should include structured result payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "feedback:fb-smoke" && String(row.payload_json).includes("memoryId")), "WorkGraph OS SQLite export should include linked feedback payload rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === "memory:mem-smoke" && String(row.payload_json).includes("sourceType")), "WorkGraph OS SQLite export should include structured memory payload rows");
-  assert(sqliteObjects?.rows?.some((row) => row.id === `result:${workGraphRun.execution.resultId}` && String(row.payload_json).includes("workgraph-os-backend")), "WorkGraph OS SQLite export should include backend executor result rows");
+  assert(sqliteObjects?.rows?.some((row) => row.id === `result:${workGraphRun.execution.resultId}` && String(row.payload_json).includes("workgraph-skill-runtime")), "WorkGraph OS SQLite export should include Skill runtime result rows");
   assert(sqliteObjects?.rows?.some((row) => row.id === `result:${workGraphRun.execution.resultId}` && String(row.payload_json).includes("routingDecision")), "WorkGraph OS SQLite export should include result routing decision payload rows");
+  assert(sqliteObjects?.rows?.some((row) => row.id === `result:${workGraphRun.execution.resultId}` && String(row.payload_json).includes('"modelStrategy":"high_quality"')), "WorkGraph OS SQLite export should include feedback-upgraded ResultObject model strategy payloads");
+  assert(sqliteObjects?.rows?.some((row) => row.id === `prompt:${workGraphRun.promptRecord.id}` && String(row.payload_json).includes("finalPrompt")), "WorkGraph OS SQLite export should include PromptRecord payload rows");
+  assert(sqliteObjects?.rows?.some((row) => row.id === `prompt:${workGraphRun.promptRecord.id}` && String(row.payload_json).includes('"modelStrategy":"high_quality"')), "WorkGraph OS SQLite export should include feedback-upgraded PromptRecord model strategy payloads");
   assert(sqliteObjects?.rows?.some((row) => row.id === "node:node-smoke"), "WorkGraph OS SQLite export should include persisted node rows");
-  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:workflow-smoke" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include workflow-to-asset graph edges");
-  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "node:node-smoke" && row.to_object_id === "asset:mat-smoke" && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include node-to-asset graph edges");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:workflow-smoke" && row.to_object_id === `asset:${uploadedWorkGraphAsset.asset.id}` && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include workflow-to-asset graph edges");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "node:node-smoke" && row.to_object_id === `asset:${uploadedWorkGraphAsset.asset.id}` && row.relation === "uses_asset"), "WorkGraph OS SQLite export should include node-to-asset graph edges");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "feedback:fb-smoke" && row.to_object_id === "result:result-smoke" && row.relation === "comments_on"), "WorkGraph OS SQLite export should include feedback-to-result graph edges");
   assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "memory:mem-smoke" && row.to_object_id === "feedback:fb-smoke" && row.relation === "remembers"), "WorkGraph OS SQLite export should include memory-to-feedback graph edges");
-  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:workflow-smoke" && row.to_object_id === `result:${workGraphRun.execution.resultId}` && row.relation === "produces_result"), "WorkGraph OS SQLite export should include backend executor workflow-to-result edges");
+  assert(sqliteEdges?.rows?.some((row) => String(row.from_object_id).startsWith("model_policy:") && row.to_object_id === `feedback:${brandLearningFeedback.feedback.id}` && row.relation === "remembers"), "WorkGraph OS SQLite export should link ModelPolicy learning to feedback");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === "workflow:workflow-smoke" && row.to_object_id === `result:${workGraphRun.execution.resultId}` && row.relation === "produces_result"), "WorkGraph OS SQLite export should include Skill runtime workflow-to-result edges");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === `result:${workGraphRun.execution.resultId}` && row.to_object_id === `prompt:${workGraphRun.promptRecord.id}` && row.relation === "uses_prompt"), "WorkGraph OS SQLite export should link ResultObject to PromptRecord");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === `result:${workGraphRun.execution.resultId}` && row.to_object_id === "brand:brand_dapot" && row.relation === "uses_brand"), "WorkGraph OS SQLite export should link ResultObject to Brand");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === `result:${workGraphRun.execution.resultId}` && row.to_object_id === "skill:skill-smoke" && row.relation === "uses_skill"), "WorkGraph OS SQLite export should link ResultObject to Skill");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === `result:${workGraphRun.execution.resultId}` && row.to_object_id === "model:imgen" && row.relation === "uses_model"), "WorkGraph OS SQLite export should link ResultObject to Model");
+  assert(sqliteEdges?.rows?.some((row) => row.from_object_id === `feedback:${brandLearningFeedback.feedback.id}` && row.to_object_id === `result:${uploadedAssetRunBeforeFeedback.execution.resultId}` && row.relation === "comments_on"), "WorkGraph OS SQLite export should link feedback back to affected ResultObject");
   assert(sqliteHistory?.rows?.some((row) => row.id === workGraphHistory.entries[0].id), "WorkGraph OS SQLite export should include history rows");
+  assert(sqliteExecutionLogs?.rows?.some((row) => row.execution_id === workGraphRun.execution.id && row.step === "execute" && String(row.payload_json).includes(workGraphRun.execution.jobId)), "WorkGraph OS SQLite export should include executor log rows with payloads");
+  const sqliteDbCheck = spawnSync("sqlite3", [workGraphOsDbFile, `SELECT type || ':' || id FROM wgos_objects WHERE id IN ('goal:goal-smoke', 'skill:skill-smoke', 'node:node-smoke') ORDER BY id; SELECT relation FROM wgos_edges WHERE from_object_id = 'workflow:workflow-smoke' AND to_object_id = 'asset:${uploadedWorkGraphAsset.asset.id}';`], { encoding: "utf8" });
+  assert(sqliteDbCheck.status === 0, `WorkGraph OS native SQLite database should be queryable: ${sqliteDbCheck.stderr}`);
+  assert(sqliteDbCheck.stdout.includes("goal:goal:goal-smoke") && sqliteDbCheck.stdout.includes("skill:skill:skill-smoke") && sqliteDbCheck.stdout.includes("node:node:node-smoke"), "WorkGraph OS native SQLite database should persist core object rows");
+  assert(sqliteDbCheck.stdout.includes("uses_asset"), "WorkGraph OS native SQLite database should persist graph edge rows");
+  const planAfterAssetFeedback = await request("/workgraph-os/plan", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "给 DAPOT 做一条泰国年轻女性喜欢的新店开业 TikTok 视频",
+      brandId: "brand_dapot"
+    })
+  });
+  assert(!planAfterAssetFeedback.workspace?.selectedIds?.includes(uploadedWorkGraphAsset.asset.id), "planner should avoid previously rejected AssetObjects when auto-selecting materials");
+  assert(!planAfterAssetFeedback.workspace?.nodes?.some((node) => node.id === "asset-retriever" && node.materialIds?.includes(uploadedWorkGraphAsset.asset.id)), "asset retriever should not bind feedback-avoid assets into new graph plans");
+  assert(planAfterAssetFeedback.plan?.avoidedAssetIds?.includes(uploadedWorkGraphAsset.asset.id), "planner should explain which feedback-avoid AssetObjects were skipped");
+  assert(planAfterAssetFeedback.workspace?.nodes?.some((node) => node.id === "asset-retriever" && String(node.body).includes("feedback-avoid") && String(node.body).includes(uploadedWorkGraphAsset.asset.id)), "asset retriever should explain feedback-avoid asset filtering in the graph");
   const workGraphPlan = await request("/workgraph-os/plan", {
     method: "POST",
     body: JSON.stringify({
@@ -407,9 +603,36 @@ try {
   assert(typeof workGraphPlan.plan?.createdSkillId === "string" && workGraphPlan.plan.createdSkillId.startsWith("skill-candidate-"), "WorkGraph OS planner should create candidate Skill Objects when no existing skill matches");
   assert(workGraphPlan.routingDecision?.selectedModelId === "imgen", "WorkGraph OS planner should include model routing decisions");
   assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "skill-search"), "WorkGraph OS planner should persist skill search nodes into the workspace");
+  assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "brand-context" && node.type === "brand_context"), "WorkGraph OS planner should use canonical brand_context node types");
+  assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "asset-retriever" && node.type === "asset_search"), "WorkGraph OS planner should use canonical asset_search node types");
+  assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "model-router" && node.type === "model_select"), "WorkGraph OS planner should use canonical model_select node types");
+  assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "prompt-builder" && node.type === "prompt_generate" && String(node.body).includes("PromptRecord")), "WorkGraph OS planner should include a canonical prompt_generate node");
+  assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "workflow-runner" && node.type === "skill_execute"), "WorkGraph OS planner should use canonical skill_execute node types");
+  assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "result-generator" && node.type === "image_generate"), "WorkGraph OS planner should include a canonical image_generate node before preview");
+  assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "output" && node.type === "preview"), "WorkGraph OS planner should use canonical preview node types");
+  assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "human-review" && node.type === "human_review"), "WorkGraph OS planner should include a canonical human_review node");
+  assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "review-memory" && node.type === "feedback"), "WorkGraph OS planner should use canonical feedback node types");
+  assert(workGraphPlan.workspace?.nodes?.some((node) => node.id === "archive" && node.type === "archive" && String(node.body).includes("SQLite")), "WorkGraph OS planner should include a canonical archive node");
   assert(workGraphPlan.workspace?.skills?.some((skill) => skill.id === workGraphPlan.plan.createdSkillId && skill.evolution?.status === "candidate"), "WorkGraph OS planner should persist candidate skills into the Skill Store");
   assert(workGraphPlan.objectIndex?.objects?.some((item) => item.id === `skill:${workGraphPlan.plan.createdSkillId}` && item.payload?.source === "workgraph-workflow-planner"), "WorkGraph OS planner should index planner-created Skill Objects");
   assert(workGraphPlan.objectIndex?.counts?.node >= 8, "WorkGraph OS planner should update the persisted node object index");
+  const dapotVideoPlan = await request("/workgraph-os/plan", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: "给 DAPOT 做一条开业 TikTok 短视频 -> MP4",
+      brandId: "dapot",
+      activeModelId: "vdamo-gpt-image-2"
+    })
+  });
+  assert(dapotVideoPlan.plan?.brandId === "brand_dapot", "WorkGraph OS planner should resolve short brand keys like dapot to the DAPOT brand record");
+  assert(dapotVideoPlan.routingDecision?.selectedModelId === "yijiarj-grok-video-super", "WorkGraph OS planner should route MP4 outputs to the yijiarj video model");
+  assert(dapotVideoPlan.routingDecision?.route === "/v1/videos", "WorkGraph OS video planner should use the yijiarj video route");
+  assert(dapotVideoPlan.workspace?.nodes?.some((node) => node.id === "brand-context" && String(node.body).includes("DAPOT")), "WorkGraph OS planner should persist DAPOT brand context into video workflows");
+  assert(dapotVideoPlan.workspace?.nodes?.some((node) => node.id === "result-generator" && node.type === "video_generate" && String(node.body).includes("不请求付费视频接口")), "WorkGraph OS video planner should create a preview-only video_generate control node");
+  const dapotVideoRun = await request("/workgraph-os/run", { method: "POST", body: JSON.stringify({ nodeId: "workflow-runner", mode: "node" }) });
+  assert(dapotVideoRun.routingDecision?.selectedModelId === "yijiarj-grok-video-super", "WorkGraph OS video runtime should preserve yijiarj routing decisions without paid generation");
+  assert(dapotVideoRun.executionLog?.some((entry) => entry.step === "execute" && String(entry.message).includes("Preview-only") && String(entry.message).includes("no paid yijia request") && entry.payload?.previewOnly === true), "WorkGraph OS video execution log should clearly say preview-only and no paid yijia request");
+  assert(!dapotVideoRun.executionLog?.some((entry) => entry.step === "execute" && String(entry.message).includes("Executed") && String(entry.message).includes("/v1/videos")), "WorkGraph OS video execution log must not look like it called the paid /v1/videos API");
 
   const initial = await request("/workspace");
   assert(initial.brands.some((brand) => brand.id === "brand_xmanx" && brand.active), "XMANX should be the active default brand");
@@ -428,8 +651,9 @@ try {
   assert(!("apiKey" in aiStatus.imageGeneration), "AI status must not expose secrets");
   assert(aiStatus.publicReference?.productionReady === false, "local smoke should mark public reference URLs as not production-ready by default");
   assert(typeof aiStatus.publicReference?.message === "string" && aiStatus.publicReference.message.length > 0, "AI status should explain public reference readiness");
-  assert(aiStatus.launchReadiness?.productionReady === false, "local smoke should block launch readiness when video/public reference config is missing");
-  assert(aiStatus.launchReadiness?.checks?.some((item) => item.id === "video-api" && item.ready === false), "launch readiness should require yijiarj video API configuration");
+  assert(aiStatus.launchReadiness?.productionReady === false, "local smoke should block launch readiness when public reference config is missing");
+  assert(aiStatus.launchReadiness?.checks?.some((item) => item.id === "video-api" && item.ready === false), "local smoke should disable paid yijiarj video generation by default");
+  assert(aiStatus.launchReadiness?.checks?.some((item) => item.id === "video-api" && String(item.message).includes("SPARKCANVAS_ALLOW_PAID_VIDEO_GEN=1")), "AI status should explain the paid yijiarj opt-in guard");
   assert(aiStatus.launchReadiness?.checks?.some((item) => item.id === "public-reference" && item.ready === false), "launch readiness should require public input_reference publishing");
   const aiDiagnostics = await request("/ai/diagnostics");
   assert(aiDiagnostics.runtime.endpoint.includes("/images/generations"), "AI diagnostics should expose the VDAMO image API endpoint");

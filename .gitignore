@@ -1,5 +1,7 @@
 node_modules
 dist
+.next
+tsconfig.tsbuildinfo
 frontend/public/generated/
 .env
 .env.*
@@ -7,8 +9,12 @@ auth.json
 config/auth.json
 backend/data/*.json
 backend/data/
+data/
+.pi/
 frontend/tsconfig.tsbuildinfo
+apps/workgraph-os/tsconfig.tsbuildinfo
 npm-debug.log*
 .DS_Store
 .project-doctor/
 *.local.md
+output/

@@ -1,13 +1,42 @@
 import cors from "cors";
 import express from "express";
 import type { ErrorRequestHandler, NextFunction, Request, Response } from "express";
+import { assetExtFromInput, assetKindFromMime, isPreviewableImageAsset, storeAssetBuffer } from "@sparkcanvas/asset-store";
+import { syncBrandRecords } from "@sparkcanvas/brand-store";
+import { workGraphCreateSql } from "@sparkcanvas/database";
+import { buildWorkGraphFeedbackMemory, learnFromWorkGraphFeedback } from "@sparkcanvas/memory-engine";
+import { routeWorkGraphModel, workGraphModelCatalog as buildWorkGraphModelCatalog } from "@sparkcanvas/model-router";
+import {
+  applyPiSkillOptimization,
+  buildPiSkillDetail,
+  buildPiExecutionContext,
+  ensurePiAdapterSystem,
+  ensurePiSkillFiles,
+  listPiSessionRecords,
+  piSkillFolderName,
+  piSkillRelativePath,
+  readPiSessionRecord,
+  writePiSessionRecord,
+  scanPiSkillDir,
+  safePiSkillRelativePath,
+  appendPiSkillLog,
+  listPiWebModels,
+  probePiWebBridge,
+  resolvePiWebBridgeMode,
+  runPiWebSession,
+  type PiWebBridgeConfig
+} from "@sparkcanvas/pi-adapter";
+import { runWorkGraphSkill, evaluateWorkGraphSkillEvolution } from "@sparkcanvas/skill-runtime";
+import { planWorkGraphWorkflow, workGraphOutputForPrompt as workflowOutputForPrompt, workGraphPromptTokens as workflowPromptTokens } from "@sparkcanvas/workflow-engine";
 import PDFDocument from "pdfkit";
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
-import { spawn } from "node:child_process";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { createWriteStream, existsSync, readFileSync, renameSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { createWriteStream, existsSync, readFileSync, renameSync, watch as fsWatch } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { extname } from "node:path";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
@@ -471,18 +500,21 @@ type WorkGraphOsWorkspace = {
   nodes: unknown[];
   activeBrandId: string;
   activeModelId: string;
+  activeNodeId?: string;
   selectedIds: string[];
   prompt: string;
   activeMaterialId: string;
   jobs: unknown[];
   results: unknown[];
+  promptRecords?: unknown[];
+  modelPolicies?: unknown[];
   feedback: unknown[];
   memories: unknown[];
   executionLog: unknown[];
   updatedAt: string;
 };
 
-type WorkGraphOsObjectType = "goal" | "asset" | "brand" | "skill" | "model" | "workflow" | "node" | "result" | "feedback" | "memory";
+type WorkGraphOsObjectType = "goal" | "asset" | "brand" | "skill" | "model" | "model_policy" | "workflow" | "node" | "result" | "prompt" | "feedback" | "memory";
 
 type WorkGraphOsObject = {
   id: string;
@@ -508,7 +540,7 @@ type WorkGraphOsEdge = {
   id: string;
   fromObjectId: string;
   toObjectId: string;
-  relation: "uses_brand" | "uses_model" | "uses_asset" | "produces_result" | "comments_on" | "remembers";
+  relation: "uses_brand" | "uses_model" | "uses_asset" | "uses_skill" | "uses_node" | "uses_prompt" | "produces_result" | "comments_on" | "remembers";
   updatedAt: string;
   payload: unknown;
 };
@@ -523,15 +555,26 @@ type WorkGraphOsExecution = {
   skillId: string;
   jobId: string;
   resultId: string;
-  status: "done";
-  executor: "workgraph-os-backend";
+  status: string;
+  executor: "workgraph-os-backend" | "workgraph-skill-runtime" | "pi-web";
+  simulated: boolean;
+  bridge: WorkGraphOsBridgeInfo;
   createdAt: string;
+};
+
+type WorkGraphOsBridgeInfo = {
+  mode: "pi-web" | "simulated";
+  reachable: boolean;
+  baseUrl: string;
+  reason: string;
+  piSessionId: string;
 };
 
 type WorkGraphOsRoutingDecision = {
   id: string;
   nodeId: string;
   nodeType: string;
+  strategy: string;
   requestedModelId: string;
   selectedModelId: string;
   selectedCapability: "image" | "video" | "text" | "local";
@@ -539,6 +582,19 @@ type WorkGraphOsRoutingDecision = {
   route: string;
   reason: string;
   createdAt: string;
+};
+
+type WorkGraphOsSkillFileTree = {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size?: number;
+  children?: WorkGraphOsSkillFileTree[];
+};
+
+type WorkGraphOsSkillFile = {
+  path: string;
+  content: string;
 };
 
 type WorkGraphOsSqliteTable = {
@@ -550,7 +606,8 @@ type WorkGraphOsSqliteTable = {
 type WorkGraphOsSqliteExport = {
   dialect: "sqlite";
   generatedAt: string;
-  migrationMode: "json-export";
+  migrationMode: "native-sqlite-sync" | "json-export";
+  dbFile?: string;
   tables: WorkGraphOsSqliteTable[];
 };
 
@@ -570,6 +627,25 @@ const dataFile = process.env.SPARKCANVAS_DATA_FILE ?? path.join(dataDir, "sparkc
 const workGraphOsDataFile = process.env.WORKGRAPH_OS_DATA_FILE ?? path.join(dataDir, "workgraph-os.json");
 const workGraphOsHistoryFile = process.env.WORKGRAPH_OS_HISTORY_FILE ?? path.join(dataDir, "workgraph-os-history.json");
 const projectRoot = path.resolve(__dirname, "../..");
+const workGraphOsDbFile = process.env.WORKGRAPH_OS_DB_FILE ?? path.join(projectRoot, "data", "db", "workgraph-os.sqlite");
+const workGraphOsBaseDataDir = path.dirname(workGraphOsDataFile);
+const workGraphOsPiDir = process.env.WORKGRAPH_OS_PI_DIR ?? path.join(projectRoot, ".pi");
+const workGraphOsGoalDataDir = process.env.WORKGRAPH_OS_GOAL_DIR ?? path.join(workGraphOsBaseDataDir, "goals");
+const workGraphOsSkillDataDir = process.env.WORKGRAPH_OS_SKILL_DIR ?? path.join(projectRoot, "data", "skills");
+const workGraphOsAssetDataDir = process.env.WORKGRAPH_OS_ASSET_DIR ?? path.join(projectRoot, "data", "assets");
+const workGraphOsBrandDataDir = process.env.WORKGRAPH_OS_BRAND_DIR ?? path.join(projectRoot, "data", "brands");
+const workGraphOsResultDataDir = process.env.WORKGRAPH_OS_RESULT_DIR ?? path.join(projectRoot, "data", "results");
+const workGraphOsOutputDataDir = process.env.WORKGRAPH_OS_OUTPUT_DIR ?? path.join(projectRoot, "data", "outputs");
+const workGraphOsOutputWatchDir = process.env.WGOS_OUTPUT_WATCH_DIR ?? workGraphOsOutputDataDir;
+const workGraphOsOutputWatchEnabled = (process.env.WGOS_OUTPUT_WATCH ?? "on").trim().toLowerCase() !== "off";
+const workGraphOsLogDataDir = process.env.WORKGRAPH_OS_LOG_DIR ?? path.join(projectRoot, "data", "logs");
+const workGraphOsWorkflowDataDir = process.env.WORKGRAPH_OS_WORKFLOW_DIR ?? path.join(projectRoot, "data", "workflows");
+const workGraphOsNodeDataDir = process.env.WORKGRAPH_OS_NODE_DIR ?? path.join(projectRoot, "data", "nodes");
+const workGraphOsPromptDataDir = process.env.WORKGRAPH_OS_PROMPT_DIR ?? path.join(projectRoot, "data", "prompts");
+const workGraphOsFeedbackDataDir = process.env.WORKGRAPH_OS_FEEDBACK_DIR ?? path.join(projectRoot, "data", "feedback");
+const workGraphOsMemoryDataDir = process.env.WORKGRAPH_OS_MEMORY_DIR ?? path.join(projectRoot, "data", "memory");
+const workGraphOsModelDataDir = process.env.WORKGRAPH_OS_MODEL_DIR ?? path.join(projectRoot, "data", "models");
+const workGraphOsSnapshotFile = process.env.WORKGRAPH_OS_SNAPSHOT_FILE ?? path.join(workGraphOsBaseDataDir, "workgraph-os-object-snapshots.json");
 const frontendPublicDir = path.join(projectRoot, "frontend", "public");
 const generatedDir = process.env.SPARKCANVAS_GENERATED_DIR ?? path.join(frontendPublicDir, "generated");
 const brandUploadDir = path.join(generatedDir, "brand-assets");
@@ -614,10 +690,10 @@ const models = orderModelsByDefault([
   { id: "vdamo-gemini-3-flash-preview", provider: "vdamo-google", group: "google", model: "gemini-3-flash-preview", name: "VDAMO · Gemini 3 Flash Preview", type: "text", costMultiplier: 1, reasoningEffort: "medium", route: "/v1/chat/completions", description: "VDAMO Google 分组预览文本模型" },
   { id: "vdamo-gemini-3-pro-preview", provider: "vdamo-google", group: "google", model: "gemini-3-pro-preview", name: "VDAMO · Gemini 3 Pro Preview", type: "text", costMultiplier: 1, reasoningEffort: "high", route: "/v1/chat/completions", description: "VDAMO Google 分组预览文本模型" },
   { id: "vdamo-gemini-3-1-pro-preview", provider: "vdamo-google", group: "google", model: "gemini-3.1-pro-preview", name: "VDAMO · Gemini 3.1 Pro Preview", type: "text", costMultiplier: 1, reasoningEffort: "high", route: "/v1/chat/completions", description: "VDAMO Google 分组预览文本模型" },
-  { id: "yijiarj-grok-video-super", provider: "yijiarj", model: "grok-imagine-1.0-video-super", name: "yijiarj · grok video super", type: "video", costMultiplier: 4, unitCostCny: 0.38, reasoningEffort: "medium", description: "最低成本视频模型；yijiarj /v1/videos；参考图必须传 input_reference 链接；竖屏用 size=720x1280；约 ¥0.38/次，模型池可能临时无可用账号" },
-  { id: "yijiarj-grok-video-720p", provider: "yijiarj", model: "grok-imagine-1.0-video-super-720p", name: "yijiarj · grok video 720p", type: "video", costMultiplier: 4, unitCostCny: 0.58, reasoningEffort: "medium", description: "yijiarj /v1/videos；参考图必须传 input_reference 链接；竖屏用 size=720x1280；约 ¥0.58/次" },
-  { id: "yijiarj-veo-3-1-fast", provider: "yijiarj", model: "veo_3_1-fast", name: "yijiarj · veo_3_1-fast", type: "video", costMultiplier: 4, unitCostCny: 0.437, reasoningEffort: "medium", description: "VEO 文生/图生；传图时 ad 分组只支持横屏，自动使用 size=1920x1080；链接约 6 小时过期，完成后需下载本地；约 ¥0.437/次" },
-  { id: "yijiarj-veo-3-1-fast-fl", provider: "yijiarj", model: "veo_3_1-fast-fl", name: "yijiarj · veo_3_1-fast-fl", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "VEO 首尾帧模型；不支持纯文生，必须传 input_reference，支持多图用 | 分隔" }
+  { id: "yijiarj-grok-video-super", provider: "yijiarj", model: "grok-imagine-1.0-video-super", name: "yijiarj · grok video super", type: "video", costMultiplier: 4, unitCostCny: 0.38, reasoningEffort: "medium", description: "最低成本视频模型；yijiarj /v1/videos；付费生成默认禁用，必须显式设置 SPARKCANVAS_ALLOW_PAID_VIDEO_GEN=1；参考图必须传 input_reference 链接；竖屏用 size=720x1280；约 ¥0.38/次，模型池可能临时无可用账号" },
+  { id: "yijiarj-grok-video-720p", provider: "yijiarj", model: "grok-imagine-1.0-video-super-720p", name: "yijiarj · grok video 720p", type: "video", costMultiplier: 4, unitCostCny: 0.58, reasoningEffort: "medium", description: "yijiarj /v1/videos；付费生成默认禁用，必须显式设置 SPARKCANVAS_ALLOW_PAID_VIDEO_GEN=1；参考图必须传 input_reference 链接；竖屏用 size=720x1280；约 ¥0.58/次" },
+  { id: "yijiarj-veo-3-1-fast", provider: "yijiarj", model: "veo_3_1-fast", name: "yijiarj · veo_3_1-fast", type: "video", costMultiplier: 4, unitCostCny: 0.437, reasoningEffort: "medium", description: "VEO 文生/图生；付费生成默认禁用，必须显式设置 SPARKCANVAS_ALLOW_PAID_VIDEO_GEN=1；传图时 ad 分组只支持横屏，自动使用 size=1920x1080；链接约 6 小时过期，完成后需下载本地；约 ¥0.437/次" },
+  { id: "yijiarj-veo-3-1-fast-fl", provider: "yijiarj", model: "veo_3_1-fast-fl", name: "yijiarj · veo_3_1-fast-fl", type: "video", costMultiplier: 4, reasoningEffort: "medium", description: "VEO 首尾帧模型；付费生成默认禁用，必须显式设置 SPARKCANVAS_ALLOW_PAID_VIDEO_GEN=1；不支持纯文生，必须传 input_reference，支持多图用 | 分隔" }
 ]);
 
 function orderModelsByDefault<T extends { id: string; type: string; enabled?: boolean }>(items: T[]) {
@@ -751,11 +827,14 @@ const workGraphOsWorkspaceSchema = z.object({
   nodes: z.array(z.unknown()).default([]),
   activeBrandId: z.string().default("dapot"),
   activeModelId: z.string().default("imgen"),
+  activeNodeId: z.string().default(""),
   selectedIds: z.array(z.string()).default([]),
   prompt: z.string().default(""),
   activeMaterialId: z.string().default(""),
   jobs: z.array(z.unknown()).default([]),
   results: z.array(z.unknown()).default([]),
+  promptRecords: z.array(z.unknown()).default([]),
+  modelPolicies: z.array(z.unknown()).default([]),
   feedback: z.array(z.unknown()).default([]),
   memories: z.array(z.unknown()).default([]),
   executionLog: z.array(z.unknown()).default([]),
@@ -765,7 +844,12 @@ const workGraphOsWorkspaceSchema = z.object({
 const workGraphOsRunSchema = z.object({
   nodeId: z.string().optional(),
   mode: z.enum(["workflow", "node"]).default("node"),
-  note: z.string().optional()
+  note: z.string().optional(),
+  // Per-run pi-web bridge override. Defaults to the server WGOS_PIWEB_ENABLED
+  // mode; "off" forces a simulated, no-cost run (used by smoke and preview-only).
+  bridge: z.enum(["auto", "on", "off"]).optional(),
+  // Number of output variants to produce for side-by-side comparison (1-4).
+  variants: z.number().int().min(1).max(4).optional()
 });
 
 const workGraphOsPlanSchema = z.object({
@@ -773,6 +857,19 @@ const workGraphOsPlanSchema = z.object({
   brandId: z.string().optional(),
   activeModelId: z.string().optional(),
   selectedIds: z.array(z.string()).optional()
+});
+
+const workGraphOsFeedbackSchema = z.object({
+  id: z.string().optional(),
+  targetId: z.string().min(1),
+  targetType: z.enum(["workflow", "skill", "result", "model", "brand", "node", "asset"]),
+  rating: z.enum(["accepted", "needs_revision", "failed"]).default("needs_revision"),
+  action: z.enum(["reuse", "revise", "avoid"]).optional(),
+  note: z.string().min(1),
+  memoryId: z.string().optional(),
+  sourceResultId: z.string().optional(),
+  sourceWorkflowId: z.string().optional(),
+  brandId: z.string().optional()
 });
 
 const workGraphOsSkillInputSchema = z.object({
@@ -786,6 +883,31 @@ const workGraphOsSkillInputSchema = z.object({
   skillMdPath: z.string().optional()
 });
 
+const workGraphOsSkillOptimizeSchema = z.object({
+  prompt: z.string().min(1),
+  files: z.array(z.string()).optional()
+});
+
+const workGraphOsSkillOptimizeApplySchema = z.object({
+  prompt: z.string().min(1)
+});
+
+const workGraphOsSkillCopySchema = z.object({
+  title: z.string().optional(),
+  command: z.string().optional()
+});
+
+const workGraphOsSkillTestSchema = z.object({
+  prompt: z.string().optional(),
+  nodeId: z.string().optional()
+});
+
+const workGraphOsSkillFileSaveSchema = z.object({
+  path: z.enum(["SKILL.md", "skill.json", "resources/guide.md", "examples/input.json", "examples/output.json"]),
+  content: z.string(),
+  reason: z.string().optional()
+});
+
 let db: Db = undefined as unknown as Db;
 let persistDbQueue = Promise.resolve();
 const runningTimers = new Map<string, NodeJS.Timeout>();
@@ -793,6 +915,25 @@ const autoCoreNodeIds = new Set(["input-image", "brand", "prompt", "output", "mo
 
 function now() {
   return new Date().toISOString();
+}
+
+function workGraphPiAdapterConfig() {
+  return {
+    piDir: workGraphOsPiDir,
+    skillDataDir: workGraphOsSkillDataDir,
+    now
+  };
+}
+
+function workGraphPiWebConfig(): PiWebBridgeConfig {
+  return {
+    baseUrl: process.env.WGOS_PIWEB_BASE_URL ?? "http://localhost:30141",
+    mode: resolvePiWebBridgeMode(process.env.WGOS_PIWEB_ENABLED),
+    timeoutMs: Number(process.env.WGOS_PIWEB_TIMEOUT_MS ?? 120000) || 120000,
+    cwd: process.env.WGOS_PIWEB_CWD ?? projectRoot,
+    provider: process.env.WGOS_PIWEB_PROVIDER || undefined,
+    modelId: process.env.WGOS_PIWEB_MODEL || undefined
+  };
 }
 
 function isEmptyAutoWorkflowFrame(frame: CanvasFrame) {
@@ -803,24 +944,33 @@ function isEmptyAutoWorkflowFrame(frame: CanvasFrame) {
 
 function defaultBrandDetails(brand: Partial<Brand> & Pick<Brand, "id" | "name" | "logoText" | "primaryColor" | "accentColor" | "tone" | "market">): Brand {
   const isXmanx = brand.id === "brand_xmanx" || brand.name.toLowerCase().includes("xmanx");
-  const slogan = isXmanx ? "AI-native brand operations for xmanx.com" : `${brand.name} reusable AI brand kit`;
-  const industry = isXmanx ? "AI commerce, brand operation, product launch creative" : "commercial content and ecommerce creative";
-  const targetAudience = isXmanx ? "xmanx.com 运营、设计、投放和品牌维护团队" : "brand operators, designers and campaign teams";
+  const isDapot = brand.id === "brand_dapot" || /\bdapot\b|da pot/i.test(brand.name);
+  const slogan = isXmanx ? "AI-native brand operations for xmanx.com" : isDapot ? "Eat the World in One Hot Pot" : `${brand.name} reusable AI brand kit`;
+  const industry = isXmanx ? "AI commerce, brand operation, product launch creative" : isDapot ? "new-generation Thai hot pot buffet and social dining" : "commercial content and ecommerce creative";
+  const targetAudience = isXmanx ? "xmanx.com 运营、设计、投放和品牌维护团队" : isDapot ? "泰国年轻女性、朋友聚餐用户、爱拍照且重视干净可信门店体验的顾客" : "brand operators, designers and campaign teams";
   const brandStory = isXmanx
     ? "XMANX 将品牌资产、商品素材、IP 形象和投放场景沉淀为可复用的 AI 工作流，帮助团队快速生成一致的电商视觉、社媒内容和维护素材。"
+    : isDapot
+      ? "DAPOT 是 CHINDA HOTPOT 旗下年轻化自助火锅品牌，主打 299/399/499 套餐、饮料甜品与自助酱料台，适合开业、短视频和门店屏幕推广。"
     : `${brand.name} 需要把品牌识别、素材角色和营销语气整理为可重复调用的 AI 生成上下文。`;
-  const ipName = isXmanx ? "XM Navigator" : `${brand.logoText} Brand IP`;
+  const ipName = isXmanx ? "XM Navigator" : isDapot ? "Dapot Buddy" : `${brand.logoText} Brand IP`;
   const ipDescription = isXmanx
     ? "冷静、直接、懂电商增长的品牌助理 IP，可出现在教程、片尾和运营物料中。"
+    : isDapot
+      ? "高质量 3D 卡通女性虚拟店长，棕色头发、小金牛角、黑色 DAPOT 制服和红围裙，服务感温暖但画面干净。"
     : "可在海报、短视频、说明卡和品牌维护素材中复用的品牌角色。";
   const logoUsage = isXmanx
     ? "优先使用黑底白字或黑橙组合，Logo 保持安全边距，不压住商品主体，片尾或角标露出。"
+    : isDapot
+      ? "DAPOT Logo 必须清晰出现在红、黑、白或暖色餐厅背景上，不拉伸、不模糊、不遮挡、不随意改色。"
     : "Logo 应保持清晰、安全边距和品牌色一致，可用于角标、片尾、包装与背景水印。";
   const visualStyle = isXmanx
     ? "黑白基础、橙色强调，清晰商品层级，少装饰，偏高效商业视觉；适合主图、社媒海报、品牌维护画布。"
+    : isDapot
+      ? "red-black-gold young clean trustworthy restaurant visuals, appetizing hot pot closeups, social dining energy, clear logo and low text density"
     : brand.tone;
-  const sceneKeywords = isXmanx ? ["studio product hero", "ecommerce launch", "clean black-orange set", "AI workflow dashboard"] : ["product hero", "lifestyle scene", "social campaign"];
-  const forbiddenWords = isXmanx ? ["cheap", "low quality", "fake logo", "cluttered layout"] : ["off-brand color", "blurred logo", "messy composition"];
+  const sceneKeywords = isXmanx ? ["studio product hero", "ecommerce launch", "clean black-orange set", "AI workflow dashboard"] : isDapot ? ["Thai hot pot buffet", "clean restaurant", "sauce station", "friends dining", "opening campaign"] : ["product hero", "lifestyle scene", "social campaign"];
+  const forbiddenWords = isXmanx ? ["cheap", "low quality", "fake logo", "cluttered layout"] : isDapot ? ["cheap collage", "dirty restaurant", "too much text", "blurred logo", "off-brand color"] : ["off-brand color", "blurred logo", "messy composition"];
   const assetRoles: BrandAssetRole[] = isXmanx ? [
     { role: "logo", title: "XMANX Logo", description: "黑白/黑橙 Logo，用于角标、片尾和品牌水印。", color: brand.primaryColor },
     { role: "ip", title: "XM Navigator", description: "品牌助理 IP，负责解释 AI 工作流、活动和维护建议。", color: brand.accentColor },
@@ -828,6 +978,12 @@ function defaultBrandDetails(brand: Partial<Brand> & Pick<Brand, "id" | "name" |
     { role: "model", title: "固定 AI 模特", description: "用于服装、穿搭、生活方式和社媒场景的可复用模特设定。", color: "#111827" },
     { role: "storefront", title: "xmanx.com 店铺视觉", description: "页面首屏、活动 banner、店铺入口和品牌专区素材。", color: "#f8fafc" },
     { role: "environment", title: "黑橙商业场景", description: "干净棚拍、运动街区、科技电商操作台等背景。", color: "#334155" }
+  ] : isDapot ? [
+    { role: "logo", title: "DAPOT Logo", description: "红黑金餐饮品牌 Logo，用于角标、片尾、菜单和门店画面。", color: brand.primaryColor },
+    { role: "ip", title: "Dapot Buddy", description: "年轻、干净、可信的虚拟店长 IP。", color: brand.accentColor },
+    { role: "product", title: "Hot Pot Buffet Product", description: "火锅锅底、肉类、菜品、饮料甜品与套餐卖点。", color: brand.primaryColor },
+    { role: "menu", title: "Buffet Menu 299 399 499", description: "299/399/499 自助火锅套餐、饮料甜品和酱料台。", color: brand.accentColor },
+    { role: "environment", title: "Clean Hot Pot Restaurant", description: "年轻干净的门店环境、聚餐桌面和开业氛围。", color: "#1f2937" }
   ] : [
     { role: "logo", title: `${brand.name} Logo`, description: "透明底 Logo 和品牌角标。", color: brand.primaryColor },
     { role: "product", title: "商品参考", description: "主商品、包装、卖点和材质参考。", color: brand.accentColor },
@@ -868,6 +1024,17 @@ function createSeedDb(): Db {
       updatedAt: timestamp
     } as Brand,
     {
+      id: "brand_dapot",
+      name: "DAPOT",
+      logoText: "DP",
+      primaryColor: "#E60012",
+      accentColor: "#FFB400",
+      tone: "red-black-gold young clean trustworthy Thai hot pot buffet visuals",
+      market: "DAPOT under CHINDA HOTPOT, opening campaigns, TikTok videos, restaurant screens",
+      active: false,
+      updatedAt: timestamp
+    } as Brand,
+    {
       id: "brand_boost",
       name: "BoostHub Studio",
       logoText: "BH",
@@ -900,7 +1067,12 @@ function createSeedDb(): Db {
       createAsset("黑橙首发运动鞋", "product", "brand_xmanx", "#f97316", "product · launch hero", "/brand-assets/optimized/xmanx-product.jpg"),
       createAsset("XM Navigator IP", "model", "brand_xmanx", "#f97316", "IP · brand assistant", "/brand-assets/optimized/xmanx-ip.jpg"),
       createAsset("固定 AI 模特", "model", "brand_xmanx", "#111827", "model · urban sport", "/brand-assets/optimized/xmanx-model.jpg"),
-      createAsset("xmanx.com 店铺视觉", "upload", "brand_xmanx", "#f8fafc", "storefront · campaign landing", "/brand-assets/optimized/xmanx-storefront.jpg")
+      createAsset("xmanx.com 店铺视觉", "upload", "brand_xmanx", "#f8fafc", "storefront · campaign landing", "/brand-assets/optimized/xmanx-storefront.jpg"),
+      createAsset("DAPOT Logo", "logo", "brand_dapot", "#E60012", "$dapot.logo · red black gold restaurant logo", "/brand-assets/generated/xmanx-logo.png"),
+      createAsset("Dapot Buddy IP", "model", "brand_dapot", "#FFB400", "$dapot.ip · young clean virtual store manager", "/brand-assets/generated/xmanx-ip.png"),
+      createAsset("DAPOT Hot Pot Buffet", "product", "brand_dapot", "#E60012", "$dapot.product · hot pot buffet product image", "/brand-assets/generated/xmanx-product.png"),
+      createAsset("DAPOT Buffet Menu 299 399 499", "upload", "brand_dapot", "#FFB400", "$dapot.menu.buffet · self-service buffet menu sets 299 399 499 drinks desserts sauce station", "/brand-assets/generated/xmanx-product.png"),
+      createAsset("DAPOT Clean Restaurant", "upload", "brand_dapot", "#1f2937", "$dapot.environment · clean young hot pot restaurant opening scene", "/brand-assets/generated/xmanx-storefront.png")
     ],
     frames: [],
     tasks: []
@@ -1131,6 +1303,21 @@ function brandKey(brand: Brand) {
 function findBrandByKey(key: string) {
   const normalized = normalizeKey(key);
   return db.brands.find((brand) => brandKey(brand) === normalized || normalizeKey(brand.name) === normalized || brand.id === key);
+}
+
+function resolveWorkGraphBrandId(brandId: string | undefined, prompt = "") {
+  const explicit = brandId ? findBrandByKey(brandId) ?? findBrandByKey(brandId.replace(/^brand_/, "")) : undefined;
+  if (explicit) return explicit.id;
+  const inferred = prompt ? inferBrandFromPrompt(prompt) : undefined;
+  if (inferred) return inferred.id;
+  return brandId ?? activeBrand()?.id ?? "brand_xmanx";
+}
+
+function resolveReferenceBrand(ref: ParsedAssetRef, currentBrand?: Brand) {
+  if (ref.explicitBrand && currentBrand && brandReferenceKeys(currentBrand).includes(normalizeKey(ref.brandKey))) {
+    return currentBrand;
+  }
+  return ref.explicitBrand ? findBrandByKey(ref.brandKey) : currentBrand;
 }
 
 function escapeRegExp(value: string) {
@@ -1519,7 +1706,7 @@ function buildBrandPackageValue(brand: Brand) {
 
 function buildResolverBindings(refs: ParsedAssetRef[], currentBrand?: Brand): ResolverBinding[] {
   return refs.map((ref) => {
-    const brand = ref.explicitBrand ? findBrandByKey(ref.brandKey) : currentBrand;
+    const brand = resolveReferenceBrand(ref, currentBrand);
     const pathSegments = ref.path ? ref.path.split(".").filter(Boolean) : [];
     const warnings: string[] = [];
     if (!brand) {
@@ -1585,7 +1772,9 @@ function buildResolverBindings(refs: ParsedAssetRef[], currentBrand?: Brand): Re
       };
     }
 
-    const asset = db.assets.find((item) => item.brandId === brand.id && item.imageUrl && assetMatchesPath(item, ref.path));
+    const assets = db.assets.filter((item) => item.brandId === brand.id && item.imageUrl);
+    const asset = assets.find((item) => stripKnownBrandPrefix(assetReferencePath(item)) === stripKnownBrandPrefix(ref.path))
+      ?? assets.find((item) => assetMatchesPath(item, ref.path));
     if (!asset?.imageUrl) {
       warnings.push(`未找到图片资源 $${ref.fullKey}`);
       return {
@@ -1663,7 +1852,7 @@ function resolvePromptAssets(prompt: string, currentBrand?: Brand): ResolvedProm
   let expandedPrompt = prompt;
 
   for (const ref of refs) {
-    const brand = ref.explicitBrand ? findBrandByKey(ref.brandKey) : currentBrand;
+    const brand = resolveReferenceBrand(ref, currentBrand);
     if (!brand) {
       warnings.push(ref.explicitBrand ? `未找到品牌 ${ref.brandKey}` : `当前项目未绑定品牌，无法解析 ${ref.raw}`);
       continue;
@@ -1689,7 +1878,9 @@ function resolvePromptAssets(prompt: string, currentBrand?: Brand): ResolvedProm
       continue;
     }
 
-    const asset = db.assets.find((item) => item.brandId === brand.id && item.imageUrl && assetMatchesPath(item, ref.path));
+    const assets = db.assets.filter((item) => item.brandId === brand.id && item.imageUrl);
+    const asset = assets.find((item) => stripKnownBrandPrefix(assetReferencePath(item)) === stripKnownBrandPrefix(ref.path))
+      ?? assets.find((item) => assetMatchesPath(item, ref.path));
     if (!asset?.imageUrl) {
       warnings.push(`未找到图片资源 $${ref.fullKey}`);
       continue;
@@ -1863,6 +2054,21 @@ async function migrateDb() {
     changed = true;
   }
 
+  if (!db.brands.some((brand) => brand.id === "brand_dapot")) {
+    db.brands.push(defaultBrandDetails({
+      id: "brand_dapot",
+      name: "DAPOT",
+      logoText: "DP",
+      primaryColor: "#E60012",
+      accentColor: "#FFB400",
+      tone: "red-black-gold young clean trustworthy Thai hot pot buffet visuals",
+      market: "DAPOT under CHINDA HOTPOT, opening campaigns, TikTok videos, restaurant screens",
+      active: false,
+      updatedAt: timestamp
+    }));
+    changed = true;
+  }
+
   const requiredXmanxAssets: Array<Pick<Asset, "title" | "type" | "brandId" | "color" | "meta" | "imageUrl">> = [
     { title: "XMANX Logo 透明底", type: "logo", brandId: "brand_xmanx", color: "#111827", meta: "XM · transparent", imageUrl: "/brand-assets/generated/xmanx-logo.png" },
     { title: "黑橙首发运动鞋", type: "product", brandId: "brand_xmanx", color: "#f97316", meta: "product · launch hero", imageUrl: "/brand-assets/generated/xmanx-product.png" },
@@ -1874,6 +2080,26 @@ async function migrateDb() {
     const existing = db.assets.find((asset) => asset.title === required.title);
     if (existing) {
       if (existing.imageUrl !== required.imageUrl || existing.meta !== required.meta || existing.type !== required.type) {
+        Object.assign(existing, required);
+        changed = true;
+      }
+    } else {
+      db.assets.unshift(createAsset(required.title, required.type, required.brandId, required.color, required.meta, required.imageUrl));
+      changed = true;
+    }
+  }
+
+  const requiredDapotAssets: Array<Pick<Asset, "title" | "type" | "brandId" | "color" | "meta" | "imageUrl">> = [
+    { title: "DAPOT Logo", type: "logo", brandId: "brand_dapot", color: "#E60012", meta: "$dapot.logo · red black gold restaurant logo", imageUrl: "/brand-assets/generated/xmanx-logo.png" },
+    { title: "Dapot Buddy IP", type: "model", brandId: "brand_dapot", color: "#FFB400", meta: "$dapot.ip · young clean virtual store manager", imageUrl: "/brand-assets/generated/xmanx-ip.png" },
+    { title: "DAPOT Hot Pot Buffet", type: "product", brandId: "brand_dapot", color: "#E60012", meta: "$dapot.product · hot pot buffet product image", imageUrl: "/brand-assets/generated/xmanx-product.png" },
+    { title: "DAPOT Buffet Menu 299 399 499", type: "upload", brandId: "brand_dapot", color: "#FFB400", meta: "$dapot.menu.buffet · self-service buffet menu sets 299 399 499 drinks desserts sauce station", imageUrl: "/brand-assets/generated/xmanx-product.png" },
+    { title: "DAPOT Clean Restaurant", type: "upload", brandId: "brand_dapot", color: "#1f2937", meta: "$dapot.environment · clean young hot pot restaurant opening scene", imageUrl: "/brand-assets/generated/xmanx-storefront.png" }
+  ];
+  for (const required of requiredDapotAssets) {
+    const existing = db.assets.find((asset) => asset.title === required.title);
+    if (existing) {
+      if (existing.imageUrl !== required.imageUrl || existing.meta !== required.meta || existing.type !== required.type || existing.brandId !== required.brandId) {
         Object.assign(existing, required);
         changed = true;
       }
@@ -2112,12 +2338,16 @@ async function readWorkGraphOsWorkspace() {
 }
 
 async function writeWorkGraphOsWorkspace(workspace: WorkGraphOsWorkspace) {
+  const syncedWorkspace = syncNodeModelPolicies(workspace);
   await mkdir(path.dirname(workGraphOsDataFile), { recursive: true });
-  const payload = JSON.stringify(workspace, null, 2);
-  const tmpFile = `${workGraphOsDataFile}.${process.pid}.${Date.now()}.tmp`;
+  const payload = JSON.stringify(syncedWorkspace, null, 2);
+  const tmpFile = `${workGraphOsDataFile}.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.tmp`;
   await writeFile(tmpFile, payload);
   if (existsSync(workGraphOsDataFile)) renameSync(workGraphOsDataFile, `${workGraphOsDataFile}.bak`);
   renameSync(tmpFile, workGraphOsDataFile);
+  await syncWorkGraphOsObjectSnapshots(syncedWorkspace);
+  await syncWorkGraphOsSqlite(buildWorkGraphOsSqliteExport(syncedWorkspace, await readWorkGraphOsHistory()));
+  return syncedWorkspace;
 }
 
 async function readWorkGraphOsHistory() {
@@ -2132,10 +2362,77 @@ async function readWorkGraphOsHistory() {
 async function writeWorkGraphOsHistory(entries: WorkGraphOsHistoryEntry[]) {
   await mkdir(path.dirname(workGraphOsHistoryFile), { recursive: true });
   const payload = JSON.stringify(entries.slice(0, 100), null, 2);
-  const tmpFile = `${workGraphOsHistoryFile}.${process.pid}.${Date.now()}.tmp`;
+  const tmpFile = `${workGraphOsHistoryFile}.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.tmp`;
   await writeFile(tmpFile, payload);
   if (existsSync(workGraphOsHistoryFile)) renameSync(workGraphOsHistoryFile, `${workGraphOsHistoryFile}.bak`);
   renameSync(tmpFile, workGraphOsHistoryFile);
+  await syncWorkGraphOsSqlite(buildWorkGraphOsSqliteExport(await readWorkGraphOsWorkspace(), entries.slice(0, 100)));
+}
+
+async function writeJsonAtomic(filePath: string, value: unknown) {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const payload = `${JSON.stringify(value, null, 2)}\n`;
+  const tmpFile = `${filePath}.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.tmp`;
+  await writeFile(tmpFile, payload);
+  renameSync(tmpFile, filePath);
+}
+
+async function writeTextAtomic(filePath: string, value: string) {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const tmpFile = `${filePath}.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.tmp`;
+  await writeFile(tmpFile, value.endsWith("\n") ? value : `${value}\n`);
+  renameSync(tmpFile, filePath);
+}
+
+async function persistWorkGraphRunArtifacts(run: ReturnType<typeof buildWorkGraphOsExecution>) {
+  const createdAt = objectString(run.result, "createdAt", now()).replace(/[:.]/g, "-");
+  const resultId = objectString(run.result, "id", run.execution.resultId);
+  const executionId = run.execution.id;
+  const baseName = `${createdAt}-${safeWorkGraphRelativePath(resultId) || "result"}`;
+  const resultDir = path.join(workGraphOsResultDataDir, baseName);
+  const outputDir = path.join(workGraphOsOutputDataDir, baseName);
+  const logDir = path.join(workGraphOsLogDataDir, executionId);
+  const previewPath = path.join(outputDir, "preview.md");
+  const resultPath = path.join(resultDir, "result.json");
+  const promptPath = path.join(resultDir, "prompt.json");
+  const logsPath = path.join(logDir, "logs.jsonl");
+  const manifestPath = path.join(resultDir, "manifest.json");
+  const artifactPaths = {
+    resultDir,
+    outputDir,
+    logDir,
+    resultJson: resultPath,
+    preview: previewPath,
+    promptJson: promptPath,
+    logsJsonl: logsPath,
+    manifest: manifestPath
+  };
+  const resultWithArtifacts = {
+    ...(run.result as Record<string, unknown>),
+    artifactPaths,
+    piSessionId: objectString(run, "piSessionId", ""),
+    trace: {
+      ...(objectField(run.result, "trace") && typeof objectField(run.result, "trace") === "object" ? objectField(run.result, "trace") as Record<string, unknown> : {}),
+      piSessionId: objectString(run, "piSessionId", "")
+    }
+  };
+  const manifest = {
+    id: resultId,
+    executionId,
+    workflowId: run.execution.workflowId,
+    nodeId: run.execution.nodeId,
+    skillId: run.execution.skillId,
+    modelId: run.execution.modelId,
+    promptRecordId: objectString(run.promptRecord, "id", ""),
+    createdAt: objectString(run.result, "createdAt", now()),
+    files: artifactPaths
+  };
+  await writeJsonAtomic(resultPath, resultWithArtifacts);
+  await writeJsonAtomic(promptPath, run.promptRecord);
+  await writeJsonAtomic(manifestPath, manifest);
+  await writeTextAtomic(previewPath, objectString(run.result, "output", objectString(run.result, "preview", "")));
+  await writeTextAtomic(logsPath, run.executionLog.map((entry) => JSON.stringify(entry)).join("\n"));
+  return { artifactPaths, result: resultWithArtifacts };
 }
 
 function objectField(input: unknown, key: string) {
@@ -2183,103 +2480,152 @@ function workGraphFindSkillForNode(workspace: WorkGraphOsWorkspace, node: unknow
 }
 
 function workGraphModelCatalog(workspace: WorkGraphOsWorkspace) {
-  const activeModel = workspace.activeModelId || "imgen";
-  return [
-    {
-      id: "gpt-image",
-      kind: "image",
-      status: activeModel === "gpt-image" ? "fallback" : "fallback",
-      capabilities: ["image", "reference_image"],
-      fallbackModelIds: ["imgen"],
-      nodeAffinity: ["output", "compose"],
-      route: "/v1/images/generations"
-    },
-    {
-      id: "imgen",
-      kind: "image",
-      status: "ready",
-      capabilities: ["image", "reference_image", "composition"],
-      fallbackModelIds: ["gpt-image", "local-flux"],
-      nodeAffinity: ["skill", "compose", "output"],
-      route: "/v1/responses image_generation"
-    },
-    {
-      id: "kling",
-      kind: "video",
-      status: "fallback",
-      capabilities: ["video", "reference_image"],
-      fallbackModelIds: ["imgen"],
-      nodeAffinity: ["video"],
-      route: "/v1/videos"
-    },
-    {
-      id: "local-flux",
-      kind: "local",
-      status: "offline",
-      capabilities: ["image", "local"],
-      fallbackModelIds: ["imgen"],
-      nodeAffinity: ["compose", "output"],
-      route: "ollama/local-image"
-    },
-    {
-      id: activeModel,
-      kind: workGraphResultKind(workGraphDefaultOutput(workspace, {})) === "video" ? "video" : "image",
-      status: "ready",
-      capabilities: ["image", "reference_image", "composition"],
-      fallbackModelIds: ["imgen"],
-      nodeAffinity: ["skill", "compose", "output", "video"],
-      route: "workspace-active-model"
+  return buildWorkGraphModelCatalog(workspace.activeModelId || "imgen", workGraphDefaultOutput(workspace, {}));
+}
+
+function workGraphFeedbackModelStrategy(workspace: WorkGraphOsWorkspace, node: unknown, output: string) {
+  const nodeId = objectString(node, "id", "");
+  const resultKind = workGraphResultKind(output);
+  const relatedPolicy = (workspace.modelPolicies ?? []).find((item) => {
+    const action = objectString(item, "action", "");
+    const avoid = Boolean(objectField(item, "avoid"));
+    if (!avoid && action !== "avoid") return false;
+    const targetType = objectString(item, "targetType", "");
+    const targetId = objectString(item, "targetId", "");
+    if (targetType === "node" && targetId === nodeId) return true;
+    if (targetType === "result") {
+      const result = workspace.results.find((candidate) => objectString(candidate, "id", "") === targetId);
+      if (result && objectString(result, "nodeId", "") === nodeId) return true;
+      return !nodeId && workGraphResultKind(objectString(result, "output", objectString(result, "kind", ""))) === resultKind;
     }
-  ].filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index);
+    return false;
+  });
+  if (!relatedPolicy) return "";
+  return resultKind === "video" ? "final_output" : "high_quality";
 }
 
 function buildWorkGraphModelRoutingDecision(workspace: WorkGraphOsWorkspace, node: unknown, output: string): WorkGraphOsRoutingDecision {
-  const createdAt = now();
-  const nodeId = objectString(node, "id", "workflow");
-  const nodeType = objectString(node, "type", "workflow");
-  const outputKind = workGraphResultKind(output);
-  const requiredCapability = outputKind === "video" ? "video" : outputKind === "document" || outputKind === "archive" ? "text" : "image";
-  const models = workGraphModelCatalog(workspace);
-  const requested = models.find((item) => item.id === workspace.activeModelId);
-  const activeMatches = requested
-    && requested.status === "ready"
-    && requested.capabilities.includes(requiredCapability)
-    && requested.nodeAffinity.includes(nodeType);
-  const selected = activeMatches
-    ? requested
-    : models.find((item) => item.status === "ready" && item.capabilities.includes(requiredCapability) && item.nodeAffinity.includes(nodeType))
-      ?? models.find((item) => item.status === "ready" && item.capabilities.includes(requiredCapability))
-      ?? requested
-      ?? models[0];
+  const explicitStrategy = objectString(node, "modelStrategy", "");
+  const feedbackStrategy = explicitStrategy ? "" : workGraphFeedbackModelStrategy(workspace, node, output);
+  const decision = routeWorkGraphModel({
+    activeModelId: objectString(node, "modelId", "") || workspace.activeModelId || "imgen",
+    output,
+    node: {
+      id: objectString(node, "id", "workflow"),
+      type: objectString(node, "type", "skill_execute"),
+      modelStrategy: explicitStrategy || feedbackStrategy
+    },
+    now,
+    idFactory: () => `route-${Date.now().toString(36)}-${nanoid(6)}`
+  });
+  return feedbackStrategy
+    ? {
+        ...decision,
+        reason: `${decision.reason}; feedback model policy upgraded strategy to ${feedbackStrategy}`
+      }
+    : decision;
+}
+
+function modelProviderFromRoute(decision: WorkGraphOsRoutingDecision) {
+  if (decision.route.includes("ollama") || decision.selectedCapability === "local") return "ollama";
+  if (/gemini|google/i.test(decision.selectedModelId)) return "google";
+  if (/claude|anthropic/i.test(decision.selectedModelId)) return "anthropic";
+  if (/flux/i.test(decision.selectedModelId)) return "local_flux";
+  if (decision.route.includes("/v1/videos") || decision.selectedCapability === "video") return "custom";
+  if (/gpt|openai|imgen|vdamo/i.test(decision.selectedModelId)) return "openai";
+  return "custom";
+}
+
+function workGraphModelPolicyFromDecision(input: {
+  decision: WorkGraphOsRoutingDecision;
+  node?: unknown;
+  targetType?: string;
+  targetId?: string;
+  feedbackId?: string;
+  note?: string;
+  updatedAt: string;
+}) {
+  const nodeId = objectString(input.node, "id", input.decision.nodeId);
+  const id = nodeId ? `node-${nodeId}` : input.decision.id;
   return {
-    id: `route-${Date.now().toString(36)}-${nanoid(6)}`,
+    id,
+    type: "model_policy",
     nodeId,
-    nodeType,
-    requestedModelId: workspace.activeModelId,
-    selectedModelId: selected.id,
-    selectedCapability: requiredCapability === "text" ? "text" : selected.kind === "local" ? "local" : requiredCapability,
-    fallbackModelIds: selected.fallbackModelIds,
-    route: selected.route,
-    reason: activeMatches
-      ? `active model ${workspace.activeModelId} matches ${nodeType}/${requiredCapability}`
-      : `selected ${selected.id} for ${nodeType}/${requiredCapability}; active ${workspace.activeModelId} did not fully match capability, status, or node affinity`,
-    createdAt
+    nodeType: objectString(input.node, "type", input.decision.nodeType),
+    targetType: input.targetType ?? "node",
+    targetId: input.targetId ?? nodeId,
+    feedbackId: input.feedbackId ?? "",
+    action: input.feedbackId ? "learned" : "route",
+    strategy: input.decision.strategy,
+    provider: modelProviderFromRoute(input.decision),
+    modelId: input.decision.selectedModelId,
+    requestedModelId: input.decision.requestedModelId,
+    fallbackModelIds: input.decision.fallbackModelIds,
+    route: input.decision.route,
+    routingDecisionId: input.decision.id,
+    note: input.note ?? input.decision.reason,
+    avoid: false,
+    updatedAt: input.updatedAt
+  };
+}
+
+function syncNodeModelPolicies(workspace: WorkGraphOsWorkspace) {
+  const updatedAt = workspace.updatedAt || now();
+  const nodePolicies = workspace.nodes.map((node) => {
+    const output = workGraphDefaultOutput(workspace, node);
+    const decision = buildWorkGraphModelRoutingDecision(workspace, node, output);
+    return workGraphModelPolicyFromDecision({ decision, node, updatedAt });
+  });
+  const nodePolicyIds = new Set(nodePolicies.map((policy) => objectString(policy, "id", "")));
+  return {
+    ...workspace,
+    modelPolicies: [
+      ...nodePolicies,
+      ...(workspace.modelPolicies ?? []).filter((item) => !nodePolicyIds.has(objectString(item, "id", "")))
+    ].slice(0, 200)
+  };
+}
+
+function workGraphSkillEvolution(skill: unknown) {
+  const evolution = objectField(skill, "evolution");
+  const runCount = Number(objectField(evolution, "runCount") ?? 0);
+  const successCount = Number(objectField(evolution, "successCount") ?? 0);
+  const failureCount = Number(objectField(evolution, "failureCount") ?? 0);
+  return {
+    ...(evolution && typeof evolution === "object" ? evolution as Record<string, unknown> : {}),
+    status: objectString(evolution, "status", "created"),
+    runCount: Number.isFinite(runCount) ? runCount : 0,
+    successCount: Number.isFinite(successCount) ? successCount : 0,
+    failureCount: Number.isFinite(failureCount) ? failureCount : 0,
+    testPlan: objectStringArray(evolution, "testPlan").length ? objectStringArray(evolution, "testPlan") : ["run generated skill", "verify result object", "save reusable SKILL.md"],
+    history: Array.isArray(objectField(evolution, "history")) ? objectField(evolution, "history") as unknown[] : []
+  };
+}
+
+function withWorkGraphSkillEvolution(skill: unknown, entry: Record<string, unknown>, status: "active" | "failed" = "active") {
+  const current = workGraphSkillEvolution(skill);
+  const nextEntry = { id: `skill-history-${Date.now().toString(36)}-${nanoid(6)}`, createdAt: now(), ...entry };
+  const success = entry.status !== "failed";
+  return {
+    ...(skill as Record<string, unknown>),
+    evolution: {
+      ...current,
+      status,
+      runCount: current.runCount + 1,
+      successCount: current.successCount + (success ? 1 : 0),
+      failureCount: current.failureCount + (success ? 0 : 1),
+      lastRunAt: nextEntry.createdAt,
+      history: [nextEntry, ...current.history].slice(0, 50)
+    }
   };
 }
 
 function workGraphOutputForPrompt(prompt: string) {
-  if (/视频|video|mp4|短片|reel/i.test(prompt)) return "MP4";
-  if (/pdf|文档|deck|slides|ppt/i.test(prompt)) return "PDF";
-  if (/zip|archive|打包/i.test(prompt)) return "ZIP";
-  return "PNG";
+  return workflowOutputForPrompt(prompt);
 }
 
 function workGraphPromptTokens(prompt: string) {
-  return prompt
-    .toLowerCase()
-    .split(/[^a-z0-9\u4e00-\u9fa5]+/i)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 1);
+  return workflowPromptTokens(prompt);
 }
 
 function workGraphSkillScore(skill: unknown, prompt: string) {
@@ -2358,24 +2704,105 @@ function buildWorkGraphCandidateSkill(prompt: string, output: string, createdAt:
   });
 }
 
-function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<typeof workGraphOsPlanSchema>) {
+function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<typeof workGraphOsPlanSchema>, availableSkills?: unknown[]) {
   const createdAt = now();
   const prompt = (input.prompt ?? workspace.prompt).trim() || workspace.prompt || "Generate a reusable brand workflow";
-  const activeBrandId = input.brandId ?? workspace.activeBrandId;
+  const activeBrandId = resolveWorkGraphBrandId(input.brandId ?? workspace.activeBrandId, prompt);
   const activeModelId = input.activeModelId ?? workspace.activeModelId;
   const selectedBrand = findBrand(activeBrandId);
   const brandPayload = workGraphBrandPayload(selectedBrand, activeBrandId);
-  const brandAssetIds = db.assets
+  const isAvoidedAsset = (assetId: string) => {
+    const material = workspace.materials.find((item) => objectString(item, "id", "") === assetId);
+    const dbAsset = db.assets.find((asset) => asset.id === assetId);
+    return objectStringArray(material, "tags").includes("feedback-avoid")
+      || Boolean(dbAsset && workGraphAssetPayload(dbAsset).tags.includes("feedback-avoid"));
+  };
+  const brandAssets = db.assets
     .filter((asset) => asset.brandId === brandPayload.id && !asset.type.startsWith("generated_"))
+    .slice(0, 12);
+  const brandAssetIds = brandAssets
+    .filter((asset) => !workGraphAssetPayload(asset).tags.includes("feedback-avoid"))
     .slice(0, 6)
     .map((asset) => asset.id);
+  const visibleBrandMaterials = brandAssets
+    .map((asset) => workGraphAssetPayload(asset))
+    .filter((asset) => !workspace.materials.some((item) => objectString(item, "id", "") === asset.id));
   const selectedIds = input.selectedIds?.length
-    ? input.selectedIds
-    : workspace.selectedIds.length
-      ? workspace.selectedIds
+    ? input.selectedIds.filter((id) => !isAvoidedAsset(id))
+    : workspace.selectedIds.filter((id) => !isAvoidedAsset(id)).length
+      ? workspace.selectedIds.filter((id) => !isAvoidedAsset(id))
       : brandAssetIds;
+  const candidateAssetIds = Array.from(new Set([
+    ...(input.selectedIds ?? []),
+    ...workspace.selectedIds,
+    ...db.assets
+      .filter((asset) => asset.brandId === brandPayload.id && !asset.type.startsWith("generated_"))
+      .map((asset) => asset.id)
+  ].filter(Boolean)));
+  const avoidedAssetIds = candidateAssetIds.filter((id) => isAvoidedAsset(id));
+  const avoidedAssetNote = avoidedAssetIds.length
+    ? `已跳过 ${avoidedAssetIds.length} 个 feedback-avoid Asset Object：${avoidedAssetIds.slice(0, 4).join(", ")}`
+    : "";
+  {
+    const plannerWorkspace: WorkGraphOsWorkspace = { ...workspace, prompt, activeBrandId: brandPayload.id, activeModelId, selectedIds };
+    const skillCatalog = availableSkills?.length ? availableSkills.map((skill, index) => workGraphNormalizeSkill(skill, index)) : workGraphSkillCatalog(workspace);
+    const planned = planWorkGraphWorkflow({
+      prompt,
+      brand: {
+        id: brandPayload.id,
+        name: brandPayload.name,
+        positioning: brandPayload.positioning,
+        rules: brandPayload.rules
+      },
+      activeModelId,
+      selectedIds,
+      skills: skillCatalog,
+      createdAt,
+      idFactory: (prefix) => `${prefix}-${Date.now().toString(36)}-${nanoid(6)}`,
+      slug: workGraphSlug,
+      normalizeSkill: (skill, index = 0) => workGraphNormalizeSkill(skill, index),
+      skillScore: workGraphSkillScore,
+      goalBase: workGraphGoalPayload(plannerWorkspace),
+      workflowBase: {
+        ...workGraphWorkflowPayload(plannerWorkspace),
+        id: objectString(workspace.workflow, "id", "workflow-active")
+      },
+      existingSkills: workspace.skills,
+      existingJobsCount: workspace.jobs.length
+    });
+    const plannedNodes = planned.nodes.map((node) => node.id === "asset-retriever" && avoidedAssetNote
+      ? { ...node, body: `${node.body}\n${avoidedAssetNote}` }
+      : node);
+    const nextWorkspace: WorkGraphOsWorkspace = {
+      ...workspace,
+      prompt,
+      activeBrandId: brandPayload.id,
+      activeModelId,
+      selectedIds,
+      activeMaterialId: workspace.activeMaterialId || selectedIds[0] || "",
+      goal: planned.goal,
+      workflow: planned.workflow,
+      materials: [...workspace.materials, ...visibleBrandMaterials],
+      skills: planned.skills,
+      nodes: plannedNodes,
+      memories: [planned.memory, ...workspace.memories],
+      updatedAt: createdAt
+    };
+    return {
+      plan: {
+        ...planned.plan,
+        source: "workgraph-workflow-planner",
+        avoidedAssetIds,
+        assetSelectionReason: avoidedAssetNote || "未发现 feedback-avoid Asset Object。"
+      },
+      workspace: nextWorkspace,
+      routingDecision: planned.routingDecision,
+      memory: planned.memory
+    };
+  }
   const output = workGraphOutputForPrompt(prompt);
-  const skillCatalog = workGraphSkillCatalog(workspace);
+  const safeAvailableSkills = availableSkills ?? [];
+  const skillCatalog = safeAvailableSkills.length ? safeAvailableSkills.map((skill, index) => workGraphNormalizeSkill(skill, index)) : workGraphSkillCatalog(workspace);
   const matchedSkill = skillCatalog
     .map((skill) => ({ skill, score: workGraphSkillScore(skill, prompt) }))
     .sort((left, right) => right.score - left.score)[0];
@@ -2389,12 +2816,24 @@ function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<ty
     ? [candidateSkill, ...workspace.skills.filter((skill) => objectString(skill, "id", "") !== objectString(candidateSkill, "id", ""))]
     : workspace.skills;
   const plannerWorkspace: WorkGraphOsWorkspace = { ...workspace, prompt, activeBrandId: brandPayload.id, activeModelId, selectedIds };
-  const outputType = workGraphResultKind(output) === "video" ? "video" : workGraphResultKind(output) === "document" || workGraphResultKind(output) === "archive" ? "file" : "output";
+  const generateNodeType = workGraphResultKind(output) === "video"
+    ? "video_generate"
+    : workGraphResultKind(output) === "image"
+      ? "image_generate"
+      : workGraphResultKind(output) === "document" || workGraphResultKind(output) === "archive"
+        ? "export"
+        : "text_generate";
+  const paidVideoLocked = workGraphResultKind(output) === "video" && shouldBlockPaidVideoGeneration(defaultVideoGenBaseUrl);
+  const videoGuardNote = paidVideoLocked
+    ? "付费视频生成已锁定；当前只生成本地预览计划，不请求 yijia。需要真实生成时显式设置 SPARKCANVAS_ALLOW_PAID_VIDEO_GEN=1。"
+    : "";
   const outputNode = workGraphPlannerNode({
     id: "output",
     title: `Result Preview · ${output}`,
-    type: outputType,
-    body: `生成 ${output}，保留 Result Object、预览地址、版本和可回写素材库状态。`,
+    type: "preview",
+    body: paidVideoLocked
+      ? `生成 ${output} 本地预览计划，保留 Result Object、版本和可回写素材库状态。${videoGuardNote}`
+      : `生成 ${output}，保留 Result Object、预览地址、版本和可回写素材库状态。`,
     x: 1010,
     y: 198,
     materialIds: selectedIds
@@ -2412,7 +2851,7 @@ function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<ty
     workGraphPlannerNode({
       id: "brand-context",
       title: `Brand Context · ${brandPayload.name}`,
-      type: "brand",
+      type: "brand_context",
       body: `${brandPayload.positioning}\n${brandPayload.rules.slice(0, 3).join("\n")}`.trim(),
       x: 355,
       y: 52
@@ -2420,10 +2859,10 @@ function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<ty
     workGraphPlannerNode({
       id: "asset-retriever",
       title: "Asset Retriever",
-      type: "material",
+      type: "asset_search",
       body: selectedIds.length
-        ? `读取 ${selectedIds.length} 个 Asset Object：${selectedIds.slice(0, 4).join(", ")}`
-        : "未选择素材；运行前需要上传或从品牌库选择 Asset Object。",
+        ? [`读取 ${selectedIds.length} 个 Asset Object：${selectedIds.slice(0, 4).join(", ")}`, avoidedAssetNote].filter(Boolean).join("\n")
+        : ["未选择素材；运行前需要上传或从品牌库选择 Asset Object。", avoidedAssetNote].filter(Boolean).join("\n"),
       x: 88,
       y: 252,
       materialIds: selectedIds,
@@ -2432,7 +2871,7 @@ function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<ty
     workGraphPlannerNode({
       id: "skill-search",
       title: "Skill Search",
-      type: "skill",
+      type: "skill_search",
       body: matchedExistingSkill
         ? `匹配 ${skillTitle} ${skillCommand}，优先复用已有 SKILL.md 能力。`
         : "没有匹配到现有 Skill；进入 Skill Creator 自动生成候选 Skill Object。",
@@ -2443,7 +2882,7 @@ function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<ty
     workGraphPlannerNode({
       id: "skill-create",
       title: "Skill Creator",
-      type: "skill",
+      type: "skill_create",
       body: matchedExistingSkill
         ? "已有 Skill 可覆盖当前目标；如失败再沉淀新的 SKILL.md、测试样例和回退模型。"
         : `已创建候选 Skill ${skillCommand}：输入品牌上下文、Asset Object、输出 ${output}。`,
@@ -2454,27 +2893,66 @@ function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<ty
     workGraphPlannerNode({
       id: "model-router",
       title: `Model Router · ${routingDecision.selectedModelId}`,
-      type: "model",
-      body: routingDecision.reason,
+      type: "model_select",
+      body: [routingDecision.reason, videoGuardNote].filter(Boolean).join("\n"),
       x: 690,
       y: 72
     }),
     workGraphPlannerNode({
+      id: "prompt-builder",
+      title: "Prompt Builder",
+      type: "prompt_generate",
+      body: "合并 Goal、Brand Context、Asset Object、Skill 约束和 ModelPolicy，生成可追溯 PromptRecord。",
+      x: 690,
+      y: 190,
+      materialIds: selectedIds
+    }),
+    workGraphPlannerNode({
       id: "workflow-runner",
       title: "Workflow Runner",
-      type: outputType === "video" ? "video" : "compose",
-      body: `执行 ${skillCommand || "候选 skill"}，通过 ${routingDecision.route} 生成 ${output}。`,
+      type: "skill_execute",
+      body: paidVideoLocked
+        ? `执行 ${skillCommand || "候选 skill"}，生成 ${output} 本地预览计划；不请求 ${routingDecision.route}。`
+        : `执行 ${skillCommand || "候选 skill"}，通过 ${routingDecision.route} 生成 ${output}。`,
       x: 690,
+      y: 270,
+      materialIds: selectedIds
+    }),
+    workGraphPlannerNode({
+      id: "result-generator",
+      title: `Generate ${output}`,
+      type: generateNodeType,
+      body: paidVideoLocked
+        ? `生成 ${output} 可预览方案、分镜、文案和画面提示词；第一阶段不请求付费视频接口。`
+        : `生成 ${output} Result Object，并写入本地结果、输出和日志目录。`,
+      x: 880,
       y: 270,
       materialIds: selectedIds
     }),
     outputNode,
     workGraphPlannerNode({
+      id: "human-review",
+      title: "Human Review",
+      type: "human_review",
+      body: "用户检查 ResultObject、PromptRecord、日志和素材引用；可接管节点或写反馈。",
+      x: 1180,
+      y: 250,
+      materialIds: selectedIds
+    }),
+    workGraphPlannerNode({
       id: "review-memory",
       title: "Feedback Memory",
-      type: "review",
+      type: "feedback",
       body: "记录接受/修改原因，生成 Feedback Object 与 Memory Object，反哺下一次规划。",
       x: 1010,
+      y: 392
+    }),
+    workGraphPlannerNode({
+      id: "archive",
+      title: "Archive",
+      type: "archive",
+      body: "归档 Result、PromptRecord、ExecutionLog、Skill 版本和反馈记忆到 data 目录与 SQLite。",
+      x: 1180,
       y: 392
     })
   ];
@@ -2545,6 +3023,8 @@ function buildWorkGraphOsPlan(workspace: WorkGraphOsWorkspace, input: z.infer<ty
       output,
       nodeIds: nodes.map((node) => node.id),
       selectedMaterialIds: selectedIds,
+      avoidedAssetIds,
+      assetSelectionReason: avoidedAssetNote || "未发现 feedback-avoid Asset Object。",
       skillId,
       createdSkillId: candidateSkill ? objectString(candidateSkill, "id", "") : "",
       routingDecision,
@@ -2570,21 +3050,152 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
   const output = workGraphDefaultOutput(workspace, node);
   const routingDecision = buildWorkGraphModelRoutingDecision(workspace, node, output);
   const materialIds = objectStringArray(node, "materialIds").length ? objectStringArray(node, "materialIds") : workspace.selectedIds;
+  const nodePrompt = objectString(node, "body", "").trim();
+  const effectivePrompt = nodePrompt || workspace.prompt;
   const jobId = `job-${Date.now().toString(36)}-${nanoid(6)}`;
   const resultId = `result-${Date.now().toString(36)}-${nanoid(6)}`;
   const executionId = `wgos-run-${Date.now().toString(36)}-${nanoid(6)}`;
+  const promptRecordId = `prompt-${Date.now().toString(36)}-${nanoid(6)}`;
+  const resolvedBrandId = resolveWorkGraphBrandId(workspace.activeBrandId, workspace.prompt);
+  const brandPayload = workGraphBrandPayload(findBrand(resolvedBrandId), resolvedBrandId);
+  const selectedAssets = materialIds.map((id) => {
+    const dbAsset = db.assets.find((asset) => asset.id === id);
+    if (dbAsset) return workGraphAssetPayload(dbAsset);
+    const material = workspace.materials.find((item) => objectString(item, "id", "") === id);
+    return material ?? { id };
+  });
+  const nodeParams = objectField(node, "params") && typeof objectField(node, "params") === "object"
+    ? objectField(node, "params") as Record<string, unknown>
+    : {};
+  // Resolve selected materials to real local filesystem paths so pi can read
+  // them. `dataPath` is the absolute path under data/assets written on upload.
+  const inputFiles = selectedAssets
+    .map((asset) => ({
+      token: objectString(asset, "token", objectString(asset, "id", "")),
+      path: objectString(asset, "dataPath", objectString(asset, "localPath", ""))
+    }))
+    .filter((entry) => entry.path && existsSync(entry.path));
+  const promptRecord = {
+    id: promptRecordId,
+    executionId,
+    workflowId,
+    nodeId,
+    nodeTitle,
+    sourcePrompt: effectivePrompt,
+    workspacePrompt: workspace.prompt,
+    nodePrompt,
+    finalPrompt: [
+      effectivePrompt,
+      "",
+      "Brand Context:",
+      brandPayload.context,
+      "",
+      `Node: ${nodeTitle}`,
+      nodePrompt,
+      "",
+      inputFiles.length ? "Input Files:" : "",
+      ...inputFiles.map((entry) => `- ${entry.token || "asset"}: ${entry.path}`),
+      inputFiles.length ? "" : "",
+      `Output: ${output}`
+    ].filter(Boolean).join("\n"),
+    brandId: brandPayload.id,
+    brandContext: brandPayload.context,
+    materialIds,
+    inputFiles,
+    assets: selectedAssets,
+    skillId,
+    skill: skill ? workGraphNormalizeSkill(skill) : null,
+    modelId: routingDecision.selectedModelId,
+    requestedModelId: routingDecision.requestedModelId,
+    modelStrategy: routingDecision.strategy,
+    modelPolicy: routingDecision,
+    nodeParams,
+    output,
+    createdAt
+  };
+  const runtime = runWorkGraphSkill({
+    mode: input.mode,
+    prompt: effectivePrompt,
+    output,
+    node: {
+      id: nodeId,
+      title: nodeTitle,
+      type: objectString(node, "type", "skill_execute"),
+      body: [
+        nodePrompt,
+        Object.keys(nodeParams).length ? `\nNode Parameters:\n${JSON.stringify(nodeParams, null, 2)}` : ""
+      ].filter(Boolean).join("\n")
+    },
+    workflowId,
+    skill: skill ? {
+      id: skillId,
+      title: objectString(skill, "title", "Skill"),
+      command: objectString(skill, "command", ""),
+      output: objectString(skill, "output", output),
+      skillMdPath: objectString(skill, "skillMdPath", ""),
+      runtime: objectString(skill, "runtime", "pi-skill")
+    } : null,
+    modelPolicy: routingDecision,
+    brand: {
+      id: brandPayload.id,
+      name: brandPayload.name,
+      context: brandPayload.context
+    },
+    assets: selectedAssets.map((asset) => ({
+      id: objectString(asset, "id", ""),
+      title: objectString(asset, "title", ""),
+      kind: objectString(asset, "kind", objectString(asset, "type", "")),
+      type: objectString(asset, "type", ""),
+      token: objectString(asset, "token", ""),
+      referencePath: objectString(asset, "referencePath", ""),
+      tags: objectStringArray(asset, "tags")
+    })),
+    materialIds,
+    nodeParams,
+    now
+  });
+  const piContext = {
+    source: "pi-adapter",
+    goal: effectivePrompt,
+    workspaceGoal: workspace.prompt,
+    workflowId,
+    node: {
+      id: nodeId,
+      title: nodeTitle,
+      type: objectString(node, "type", "skill_execute"),
+      body: objectString(node, "body", ""),
+      params: nodeParams
+    },
+    brand: brandPayload,
+    assets: selectedAssets,
+    skill: skill ? workGraphNormalizeSkill(skill) : null,
+    modelPolicy: routingDecision,
+    promptRecord,
+    localPaths: {
+      piDir: workGraphOsPiDir,
+      skillDir: skill ? path.join(workGraphOsPiDir, "skills", piSkillFolderName(skill)) : path.join(workGraphOsPiDir, "skills"),
+      mirrorSkillDir: skill ? path.join(workGraphOsSkillDataDir, piSkillFolderName(skill)) : workGraphOsSkillDataDir,
+      sessionsDir: path.join(workGraphOsPiDir, "sessions")
+    }
+  };
   const job = {
     id: jobId,
     title: input.mode === "workflow" ? "Backend workflow run" : `Run ${nodeTitle}`,
-    status: "done",
-    output,
+    status: runtime.status,
+    output: runtime.output,
+    preview: runtime.preview,
     materials: materialIds,
     nodeId,
     workflowId,
     skillId,
     modelId: routingDecision.selectedModelId,
+    requestedModelId: routingDecision.requestedModelId,
+    modelStrategy: routingDecision.strategy,
+    promptRecordId,
     routingDecision,
-    executor: "workgraph-os-backend",
+    executor: runtime.executor,
+    simulated: true,
+    bridge: { mode: "simulated", reachable: false, baseUrl: "", reason: "pi-web bridge not yet applied", piSessionId: "" },
     note: input.note ?? "",
     createdAt,
     completedAt: createdAt
@@ -2592,18 +3203,45 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
   const result = {
     id: resultId,
     title: `${nodeTitle} result`,
+    goalId: objectString(workGraphGoalPayload(workspace), "id", "active"),
     workflowId,
     nodeId,
+    nodeTitle,
     kind: workGraphResultKind(output),
     status: "preview",
     version: workspace.results.filter((item) => objectString(item, "nodeId", "") === nodeId).length + 1,
-    output,
+    output: runtime.preview,
     previewUrl: workGraphResultKind(output) === "image" ? "/brand-assets/generated/xmanx-product.png" : "",
     sourceJobId: jobId,
+    executionId,
+    promptRecordId,
+    brandId: brandPayload.id,
     materialIds,
+    skillId,
+    modelId: routingDecision.selectedModelId,
+    requestedModelId: routingDecision.requestedModelId,
     canSaveAsMaterial: true,
-    executor: "workgraph-os-backend",
+    executor: runtime.executor,
+    simulated: true,
+    bridge: { mode: "simulated", reachable: false, baseUrl: "", reason: "pi-web bridge not yet applied", piSessionId: "" },
     routingDecision,
+    modelStrategy: routingDecision.strategy,
+    nodeParams,
+    promptRecord,
+    trace: {
+      goalId: objectString(workGraphGoalPayload(workspace), "id", "active"),
+      workflowId,
+      nodeId,
+      brandId: brandPayload.id,
+      materialIds,
+      skillId,
+      modelId: routingDecision.selectedModelId,
+      nodeParams,
+      piContext,
+      promptRecordId,
+      executionId,
+      feedbackIds: [] as string[]
+    },
     createdAt,
     updatedAt: createdAt
   };
@@ -2617,9 +3255,20 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
     targetId: resultId,
     confidence: 0.6,
     reusable: false,
-    body: `${job.title} -> ${output} via ${skillId} and ${routingDecision.selectedModelId}: ${routingDecision.reason}`,
+    body: `${job.title} -> ${runtime.output} via ${skillId} and ${routingDecision.selectedModelId}: ${routingDecision.reason}`,
     createdAt
   };
+  const runtimeLogEntries = runtime.logs.map((entry, index) => ({
+    id: `${executionId}-runtime-${index + 1}`,
+    executionId,
+    step: entry.step,
+    status: "done",
+    nodeId,
+    workflowId,
+    message: entry.message,
+    payload: entry.payload,
+    createdAt
+  }));
   const executionLog = [
     {
       id: `${executionId}-plan`,
@@ -2629,7 +3278,7 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
       nodeId,
       workflowId,
       message: `Resolved node ${nodeTitle} with output ${output}.`,
-      payload: { mode: input.mode, materialIds },
+      payload: { mode: input.mode, materialIds, promptRecordId },
       createdAt
     },
     {
@@ -2650,10 +3299,13 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
       status: "done",
       nodeId,
       workflowId,
-      message: `Executed ${skillId} through ${routingDecision.route}.`,
-      payload: { skillId, modelId: routingDecision.selectedModelId, jobId },
+      message: output === "MP4"
+        ? `Preview-only execution for ${skillId}; no paid yijia request was sent.`
+        : `Executed ${skillId} through ${routingDecision.route}.`,
+      payload: { skillId, modelId: routingDecision.selectedModelId, jobId, promptRecordId, previewOnly: output === "MP4" },
       createdAt
     },
+    ...runtimeLogEntries,
     {
       id: `${executionId}-result`,
       executionId,
@@ -2662,7 +3314,7 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
       nodeId,
       workflowId,
       message: `Created Result Object ${resultId}.`,
-      payload: { resultId, output, kind: workGraphResultKind(output) },
+      payload: { resultId, promptRecordId, output, kind: workGraphResultKind(output) },
       createdAt
     }
   ];
@@ -2679,8 +3331,20 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
     ...workspace,
     workflow,
     nodes: workspace.nodes.map((item) => objectString(item, "id", "") === nodeId ? { ...(item as Record<string, unknown>), status: "done" } : item),
+    skills: workspace.skills.map((item) => objectString(item, "id", "") === skillId ? withWorkGraphSkillEvolution(item, {
+      type: "run",
+      status: runtime.status,
+      executionId,
+      nodeId,
+      workflowId,
+      resultId,
+      jobId,
+      modelId: routingDecision.selectedModelId,
+      output
+    }) : item),
     jobs: [job, ...workspace.jobs],
     results: [result, ...workspace.results],
+    promptRecords: [promptRecord, ...(workspace.promptRecords ?? [])].slice(0, 500),
     memories: [memory, ...workspace.memories],
     executionLog: [...executionLog, ...(workspace.executionLog ?? [])].slice(0, 500),
     updatedAt: createdAt
@@ -2696,10 +3360,12 @@ function buildWorkGraphOsExecution(workspace: WorkGraphOsWorkspace, input: z.inf
     jobId,
     resultId,
     status: "done",
-    executor: "workgraph-os-backend",
+    executor: runtime.executor,
+    simulated: true,
+    bridge: { mode: "simulated", reachable: false, baseUrl: "", reason: "pi-web bridge not yet applied", piSessionId: "" },
     createdAt
   };
-  return { execution, workspace: nextWorkspace, job, result, memory, routingDecision, executionLog };
+  return { execution, workspace: nextWorkspace, job, result, memory, promptRecord, routingDecision, executionLog, piSessionId: `pi-session-${executionId}` };
 }
 
 function workGraphObject(
@@ -2789,6 +3455,39 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
     }, updatedAt, "derived"),
     workGraphObject("workflow", "active", workflowPayload.title, `${workflowPayload.status} · ${workflowPayload.runCount} run(s) · ${workspace.selectedIds.length} selected asset(s)`, workflowPayload, updatedAt, workspace.workflow ? "workspace" : "derived")
   ];
+  const pushUniqueObject = (object: WorkGraphOsObject) => {
+    if (!objects.some((item) => item.id === object.id)) objects.push(object);
+  };
+  const referencedBrandIds = Array.from(new Set([
+    workspace.activeBrandId,
+    ...workspace.results.map((item) => objectString(item, "brandId", "") || objectString(objectField(item, "trace"), "brandId", "")),
+    ...(workspace.promptRecords ?? []).map((item) => objectString(item, "brandId", "")),
+    ...workspace.feedback.map((item) => objectString(item, "brandId", ""))
+  ].filter(Boolean)));
+  referencedBrandIds.forEach((brandId) => {
+    const payload = workGraphBrandPayload(findBrand(brandId), brandId);
+    pushUniqueObject(workGraphObject("brand", brandId, payload.name, `${payload.source} · ${payload.positioning}`, payload, updatedAt, "derived"));
+  });
+  const modelCatalog = workGraphModelCatalog(workspace);
+  const referencedModelIds = Array.from(new Set([
+    workspace.activeModelId,
+    ...workspace.results.map((item) => objectString(item, "modelId", "") || objectString(objectField(item, "trace"), "modelId", "") || objectString(objectField(item, "routingDecision"), "selectedModelId", "")),
+    ...(workspace.promptRecords ?? []).map((item) => objectString(item, "modelId", "")),
+    ...(workspace.modelPolicies ?? []).map((item) => objectString(item, "modelId", ""))
+  ].filter(Boolean)));
+  referencedModelIds.forEach((modelId) => {
+    const model = modelCatalog.find((item) => item.id === modelId);
+    pushUniqueObject(workGraphObject("model", modelId, `Model ${modelId}`, `Referenced model strategy: ${modelId}`, {
+      id: modelId,
+      activeModelId: modelId,
+      routingPolicy: "referenced by Result, PromptRecord or ModelPolicy",
+      status: model?.status ?? "referenced",
+      capabilities: model?.capabilities ?? [],
+      fallbackModelIds: model?.fallbackModelIds ?? [],
+      nodeAffinity: model?.nodeAffinity ?? [],
+      route: model?.route ?? ""
+    }, updatedAt, "derived"));
+  });
   workspace.materials.forEach((item, index) => {
     objects.push(workGraphObject("asset", `asset-${index}`, objectString(item, "title", `Asset ${index + 1}`), objectString(item, "token", objectString(item, "fileName", "")), item, objectString(item, "createdAt", updatedAt)));
   });
@@ -2817,6 +3516,21 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
     const kind = objectString(item, "kind", "result");
     objects.push(workGraphObject("result", `result-${index}`, objectString(item, "title", `Result ${index + 1}`), `${kind} v${version} · ${objectString(item, "status", "unknown")} -> ${objectString(item, "output", "")}`, item, objectString(item, "createdAt", updatedAt)));
   });
+  (workspace.promptRecords ?? []).forEach((item, index) => {
+    const modelId = objectString(item, "modelId", "");
+    const skillId = objectString(item, "skillId", "");
+    const nodeId = objectString(item, "nodeId", "");
+    const summary = [`node:${nodeId}`, skillId ? `skill:${skillId}` : "", modelId ? `model:${modelId}` : "", objectString(item, "output", "")].filter(Boolean).join(" · ");
+    objects.push(workGraphObject("prompt", `prompt-${index}`, `PromptRecord · ${nodeId || index + 1}`, summary, item, objectString(item, "createdAt", updatedAt)));
+  });
+  (workspace.modelPolicies ?? []).forEach((item, index) => {
+    const modelId = objectString(item, "modelId", "");
+    const strategy = objectString(item, "strategy", "");
+    const targetType = objectString(item, "targetType", "");
+    const targetId = objectString(item, "targetId", "");
+    const summary = [strategy, modelId ? `model:${modelId}` : "", targetType && targetId ? `${targetType}:${targetId}` : "", objectString(item, "note", "")].filter(Boolean).join(" · ");
+    objects.push(workGraphObject("model_policy", `model-policy-${index}`, `ModelPolicy · ${strategy || modelId || index + 1}`, summary, item, objectString(item, "updatedAt", updatedAt)));
+  });
   workspace.feedback.forEach((item, index) => {
     const rating = objectString(item, "rating", `Feedback ${index + 1}`);
     const action = objectString(item, "action", "");
@@ -2842,6 +3556,90 @@ function buildWorkGraphOsObjectIndex(workspace: WorkGraphOsWorkspace | null) {
   return { counts, objects };
 }
 
+function workGraphObjectSnapshotDir(type: WorkGraphOsObjectType) {
+  switch (type) {
+    case "asset":
+      return workGraphOsAssetDataDir;
+    case "brand":
+      return workGraphOsBrandDataDir;
+    case "skill":
+      return workGraphOsSkillDataDir;
+    case "workflow":
+      return workGraphOsWorkflowDataDir;
+    case "node":
+      return workGraphOsNodeDataDir;
+    case "result":
+      return workGraphOsResultDataDir;
+    case "prompt":
+      return workGraphOsPromptDataDir;
+    case "feedback":
+      return workGraphOsFeedbackDataDir;
+    case "memory":
+      return workGraphOsMemoryDataDir;
+    case "model":
+    case "model_policy":
+      return workGraphOsModelDataDir;
+    case "goal":
+    default:
+      return workGraphOsGoalDataDir;
+  }
+}
+
+async function syncWorkGraphOsObjectSnapshots(workspace: WorkGraphOsWorkspace | null) {
+  if (!workspace) return;
+  const { counts, objects } = buildWorkGraphOsObjectIndex(workspace);
+  const grouped = objects.reduce<Record<string, WorkGraphOsObject[]>>((acc, object) => {
+    acc[object.type] = [...(acc[object.type] ?? []), object];
+    return acc;
+  }, {});
+  const dirTypes = Object.keys(grouped).reduce<Record<string, string[]>>((acc, type) => {
+    const dir = workGraphObjectSnapshotDir(type as WorkGraphOsObjectType);
+    acc[dir] = [...(acc[dir] ?? []), type];
+    return acc;
+  }, {});
+  await Promise.all(Object.entries(grouped).map(async ([type, items]) => {
+    const dir = workGraphObjectSnapshotDir(type as WorkGraphOsObjectType);
+    const indexName = (dirTypes[dir]?.length ?? 0) > 1 ? `_${type}-index.json` : "_index.json";
+    await mkdir(dir, { recursive: true });
+    await writeJsonAtomic(path.join(dir, indexName), {
+      type,
+      count: items.length,
+      updatedAt: workspace.updatedAt,
+      objects: items.map((item) => ({
+        id: item.id,
+        title: item.title,
+        summary: item.summary,
+        source: item.source,
+        updatedAt: item.updatedAt,
+        file: `${safeWorkGraphRelativePath(item.id.replace(":", "-")) || "object"}.json`
+      }))
+    });
+    await Promise.all(items.map((item) => writeJsonAtomic(
+      path.join(dir, `${safeWorkGraphRelativePath(item.id.replace(":", "-")) || "object"}.json`),
+      item
+    )));
+  }));
+  await writeJsonAtomic(workGraphOsSnapshotFile, {
+    updatedAt: workspace.updatedAt,
+    counts,
+    directories: {
+      goals: workGraphOsGoalDataDir,
+      assets: workGraphOsAssetDataDir,
+      brands: workGraphOsBrandDataDir,
+      skills: workGraphOsSkillDataDir,
+      models: workGraphOsModelDataDir,
+      workflows: workGraphOsWorkflowDataDir,
+      nodes: workGraphOsNodeDataDir,
+      results: workGraphOsResultDataDir,
+      feedback: workGraphOsFeedbackDataDir,
+      memory: workGraphOsMemoryDataDir,
+      prompts: workGraphOsPromptDataDir,
+      logs: workGraphOsLogDataDir,
+      db: path.dirname(workGraphOsDbFile)
+    }
+  });
+}
+
 function buildWorkGraphOsEdges(workspace: WorkGraphOsWorkspace | null, objects: WorkGraphOsObject[]) {
   if (!workspace) return [] as WorkGraphOsEdge[];
   const updatedAt = workspace.updatedAt || now();
@@ -2851,8 +3649,10 @@ function buildWorkGraphOsEdges(workspace: WorkGraphOsWorkspace | null, objects: 
   const edges: WorkGraphOsEdge[] = [];
   const pushEdge = (fromObjectId: string, toObjectId: string, relation: WorkGraphOsEdge["relation"], payload: unknown = {}) => {
     if (!objectIds.has(fromObjectId) || !objectIds.has(toObjectId)) return;
+    const id = `${fromObjectId}->${relation}->${toObjectId}`;
+    if (edges.some((edge) => edge.id === id)) return;
     edges.push({
-      id: `${fromObjectId}->${relation}->${toObjectId}`,
+      id,
       fromObjectId,
       toObjectId,
       relation,
@@ -2880,6 +3680,42 @@ function buildWorkGraphOsEdges(workspace: WorkGraphOsWorkspace | null, objects: 
   resultItems.forEach((item, index) => {
     const id = objectString(item, "id", `result-${index}`);
     pushEdge(workflowObjectId, `result:${id}`, "produces_result", item);
+    const promptRecordId = objectString(item, "promptRecordId", "");
+    if (promptRecordId) pushEdge(`result:${id}`, `prompt:${promptRecordId}`, "uses_prompt", item);
+    const trace = objectField(item, "trace");
+    const brandId = objectString(item, "brandId", "") || objectString(trace, "brandId", "");
+    const skillId = objectString(item, "skillId", "") || objectString(trace, "skillId", "");
+    const modelId = objectString(item, "modelId", "") || objectString(trace, "modelId", "");
+    const nodeId = objectString(item, "nodeId", "") || objectString(trace, "nodeId", "");
+    if (brandId) pushEdge(`result:${id}`, `brand:${brandId}`, "uses_brand", item);
+    if (skillId) pushEdge(`result:${id}`, `skill:${skillId}`, "uses_skill", item);
+    if (modelId) pushEdge(`result:${id}`, `model:${modelId}`, "uses_model", item);
+    if (nodeId) pushEdge(`result:${id}`, `node:${nodeId}`, "uses_node", item);
+    objectStringArray(item, "materialIds").forEach((materialId) => pushEdge(`result:${id}`, `asset:${materialId}`, "uses_asset", item));
+    Array.from(new Set([...objectStringArray(item, "feedbackIds"), ...objectStringArray(trace, "feedbackIds")]))
+      .forEach((feedbackId) => pushEdge(`feedback:${feedbackId}`, `result:${id}`, "comments_on", item));
+  });
+  (workspace.promptRecords ?? []).forEach((item, index) => {
+    const id = objectString(item, "id", `prompt-${index}`);
+    const nodeId = objectString(item, "nodeId", "");
+    const skillId = objectString(item, "skillId", "");
+    const modelId = objectString(item, "modelId", "");
+    const brandId = objectString(item, "brandId", "");
+    if (nodeId) pushEdge(`prompt:${id}`, `node:${nodeId}`, "uses_node", item);
+    if (skillId) pushEdge(`prompt:${id}`, `skill:${skillId}`, "uses_skill", item);
+    if (modelId) pushEdge(`prompt:${id}`, `model:${modelId}`, "uses_model", item);
+    if (brandId) pushEdge(`prompt:${id}`, `brand:${brandId}`, "uses_brand", item);
+    objectStringArray(item, "materialIds").forEach((materialId) => pushEdge(`prompt:${id}`, `asset:${materialId}`, "uses_asset", item));
+  });
+  (workspace.modelPolicies ?? []).forEach((item, index) => {
+    const id = objectString(item, "id", `model-policy-${index}`);
+    const modelId = objectString(item, "modelId", "");
+    const targetType = objectString(item, "targetType", "");
+    const targetId = objectString(item, "targetId", "");
+    const feedbackId = objectString(item, "feedbackId", "");
+    if (modelId) pushEdge(`model_policy:${id}`, `model:${modelId}`, "uses_model", item);
+    if (targetType && targetId) pushEdge(`model_policy:${id}`, `${targetType}:${targetId}`, "comments_on", item);
+    if (feedbackId) pushEdge(`model_policy:${id}`, `feedback:${feedbackId}`, "remembers", item);
   });
   workspace.feedback.forEach((item, index) => {
     const id = objectString(item, "id", `feedback-${index}`);
@@ -2900,18 +3736,130 @@ function sqliteJson(value: unknown) {
   return JSON.stringify(value ?? null);
 }
 
+function sqliteSqlString(value: string) {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function sqliteSqlValue(value: unknown) {
+  if (value === null || value === undefined) return "NULL";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NULL";
+  if (typeof value === "boolean") return value ? "1" : "0";
+  return sqliteSqlString(String(value));
+}
+
+function buildWorkGraphOsSqliteScript(exportPayload: WorkGraphOsSqliteExport) {
+  const lines = [
+    "PRAGMA journal_mode=WAL;",
+    "PRAGMA foreign_keys=ON;",
+    "BEGIN IMMEDIATE;"
+  ];
+  exportPayload.tables.forEach((table) => {
+    lines.push(table.createSql);
+    lines.push(`DELETE FROM ${table.name};`);
+    table.rows.forEach((row) => {
+      const keys = Object.keys(row);
+      const columns = keys.map((key) => `"${key}"`).join(", ");
+      const values = keys.map((key) => sqliteSqlValue(row[key])).join(", ");
+      lines.push(`INSERT INTO ${table.name} (${columns}) VALUES (${values});`);
+    });
+  });
+  lines.push("COMMIT;");
+  return `${lines.join("\n")}\n`;
+}
+
+// SQLite write path. JSON remains the authoritative store; SQLite is a mirror.
+// The writer is resolved once (sqlite3 CLI -> node:sqlite -> json-only) so a
+// deploy host without the sqlite3 binary degrades gracefully instead of failing
+// every workspace save / run / history append.
+type WorkGraphSqliteWriter = "sqlite3-cli" | "node-sqlite" | "json-only";
+const workGraphOsSqliteState: { writer: WorkGraphSqliteWriter | null; lastSyncedAt: string; lastError: string } = {
+  writer: null,
+  lastSyncedAt: "",
+  lastError: ""
+};
+
+function resolveWorkGraphSqliteWriter(): WorkGraphSqliteWriter {
+  if (workGraphOsSqliteState.writer) return workGraphOsSqliteState.writer;
+  const override = (process.env.WGOS_SQLITE_WRITER ?? "").trim().toLowerCase();
+  if (override === "off" || override === "json-only") return (workGraphOsSqliteState.writer = "json-only");
+  if (override === "node" || override === "node-sqlite") return (workGraphOsSqliteState.writer = "node-sqlite");
+  if (override !== "cli" && override !== "sqlite3-cli") {
+    // Auto-detect when not forced.
+    const cli = spawnSync("sqlite3", ["-version"], { encoding: "utf8" });
+    if (cli.status === 0) return (workGraphOsSqliteState.writer = "sqlite3-cli");
+    try {
+      // node:sqlite ships with Node >= 22; require synchronously to detect it.
+      createRequire(import.meta.url)("node:sqlite");
+      return (workGraphOsSqliteState.writer = "node-sqlite");
+    } catch {
+      return (workGraphOsSqliteState.writer = "json-only");
+    }
+  }
+  const cli = spawnSync("sqlite3", ["-version"], { encoding: "utf8" });
+  return (workGraphOsSqliteState.writer = cli.status === 0 ? "sqlite3-cli" : "json-only");
+}
+
+async function syncWorkGraphOsSqlite(exportPayload: WorkGraphOsSqliteExport) {
+  await mkdir(path.dirname(workGraphOsDbFile), { recursive: true });
+  const script = buildWorkGraphOsSqliteScript(exportPayload);
+  const writer = resolveWorkGraphSqliteWriter();
+  try {
+    if (writer === "sqlite3-cli") {
+      const sqlite = spawnSync("sqlite3", [workGraphOsDbFile], { input: script, encoding: "utf8", maxBuffer: 1024 * 1024 * 10 });
+      if (sqlite.status !== 0) throw new Error(`sqlite3 CLI sync failed: ${(sqlite.stderr || sqlite.stdout || "unknown error").trim()}`);
+    } else if (writer === "node-sqlite") {
+      const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (path: string) => { exec(sql: string): void; close(): void } };
+      const database = new DatabaseSync(workGraphOsDbFile);
+      try {
+        database.exec(script);
+      } finally {
+        database.close();
+      }
+    } else {
+      // json-only: SQLite tooling unavailable; JSON store is already persisted.
+      workGraphOsSqliteState.lastError = "sqlite3 CLI and node:sqlite unavailable; JSON remains authoritative";
+      return;
+    }
+    workGraphOsSqliteState.lastSyncedAt = now();
+    workGraphOsSqliteState.lastError = "";
+  } catch (error) {
+    // Never fail the calling save/run: the JSON store is authoritative.
+    workGraphOsSqliteState.lastError = (error as Error).message;
+    console.warn(`WorkGraph SQLite sync (${writer}) failed; JSON remains authoritative: ${(error as Error).message}`);
+  }
+}
+
+function workGraphOsExecutionLogRows(workspace: WorkGraphOsWorkspace | null) {
+  return (workspace?.executionLog ?? []).map((entry, index) => {
+    const id = objectString(entry, "id", `execution-log-${index}`);
+    return {
+      id,
+      execution_id: objectString(entry, "executionId", ""),
+      step: objectString(entry, "step", ""),
+      status: objectString(entry, "status", ""),
+      node_id: objectString(entry, "nodeId", ""),
+      workflow_id: objectString(entry, "workflowId", ""),
+      message: objectString(entry, "message", ""),
+      created_at: objectString(entry, "createdAt", workspace?.updatedAt || ""),
+      payload_json: sqliteJson(objectField(entry, "payload") ?? entry)
+    };
+  });
+}
+
 function buildWorkGraphOsSqliteExport(workspace: WorkGraphOsWorkspace | null, history: WorkGraphOsHistoryEntry[]): WorkGraphOsSqliteExport {
   const { objects } = buildWorkGraphOsObjectIndex(workspace);
   const edges = buildWorkGraphOsEdges(workspace, objects);
+  const executionLogRows = workGraphOsExecutionLogRows(workspace);
   const updatedAt = workspace?.updatedAt || now();
   return {
     dialect: "sqlite",
     generatedAt: now(),
-    migrationMode: "json-export",
+    migrationMode: "native-sqlite-sync",
+    dbFile: workGraphOsDbFile,
     tables: [
       {
         name: "wgos_workspaces",
-        createSql: "CREATE TABLE IF NOT EXISTS wgos_workspaces (id TEXT PRIMARY KEY, version INTEGER NOT NULL, active_brand_id TEXT NOT NULL, active_model_id TEXT NOT NULL, prompt TEXT NOT NULL, active_material_id TEXT NOT NULL, updated_at TEXT NOT NULL, payload_json TEXT NOT NULL);",
+        createSql: workGraphCreateSql("wgos_workspaces"),
         rows: workspace ? [{
           id: "active",
           version: workspace.version,
@@ -2925,7 +3873,7 @@ function buildWorkGraphOsSqliteExport(workspace: WorkGraphOsWorkspace | null, hi
       },
       {
         name: "wgos_objects",
-        createSql: "CREATE TABLE IF NOT EXISTS wgos_objects (id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL, source TEXT NOT NULL, updated_at TEXT NOT NULL, payload_json TEXT NOT NULL);",
+        createSql: workGraphCreateSql("wgos_objects"),
         rows: objects.map((object) => ({
           id: object.id,
           type: object.type,
@@ -2938,7 +3886,7 @@ function buildWorkGraphOsSqliteExport(workspace: WorkGraphOsWorkspace | null, hi
       },
       {
         name: "wgos_edges",
-        createSql: "CREATE TABLE IF NOT EXISTS wgos_edges (id TEXT PRIMARY KEY, from_object_id TEXT NOT NULL, to_object_id TEXT NOT NULL, relation TEXT NOT NULL, updated_at TEXT NOT NULL, payload_json TEXT NOT NULL);",
+        createSql: workGraphCreateSql("wgos_edges"),
         rows: edges.map((edge) => ({
           id: edge.id,
           from_object_id: edge.fromObjectId,
@@ -2950,7 +3898,7 @@ function buildWorkGraphOsSqliteExport(workspace: WorkGraphOsWorkspace | null, hi
       },
       {
         name: "wgos_history",
-        createSql: "CREATE TABLE IF NOT EXISTS wgos_history (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, reason TEXT NOT NULL, prompt TEXT NOT NULL, counts_json TEXT NOT NULL, object_ids_json TEXT NOT NULL, objects_json TEXT NOT NULL);",
+        createSql: workGraphCreateSql("wgos_history"),
         rows: history.map((entry) => ({
           id: entry.id,
           created_at: entry.createdAt,
@@ -2960,19 +3908,35 @@ function buildWorkGraphOsSqliteExport(workspace: WorkGraphOsWorkspace | null, hi
           object_ids_json: sqliteJson(entry.objectIds),
           objects_json: sqliteJson(entry.objects)
         }))
+      },
+      {
+        name: "wgos_execution_logs",
+        createSql: workGraphCreateSql("wgos_execution_logs"),
+        rows: executionLogRows
       }
     ]
   };
 }
 
 function workGraphOsSqliteReadiness(exportPayload: WorkGraphOsSqliteExport) {
+  const writer = resolveWorkGraphSqliteWriter();
+  const storage = writer === "json-only"
+    ? "json-only"
+    : existsSync(workGraphOsDbFile) ? "native-sqlite" : "sqlite-pending-sync";
   return {
     ready: true,
     dialect: exportPayload.dialect,
     migrationMode: exportPayload.migrationMode,
+    dbFile: exportPayload.dbFile,
+    storage,
+    writer,
+    lastSyncedAt: workGraphOsSqliteState.lastSyncedAt,
+    lastError: workGraphOsSqliteState.lastError,
     tables: exportPayload.tables.map((table) => table.name),
     rowCounts: Object.fromEntries(exportPayload.tables.map((table) => [table.name, table.rows.length])),
-    message: "WorkGraph OS can export the current filesystem JSON workspace into SQLite-compatible table rows. The runtime still writes JSON until a SQLite driver is intentionally added."
+    message: writer === "json-only"
+      ? "sqlite3 CLI and node:sqlite are unavailable; the JSON store remains authoritative and SQLite mirroring is disabled on this host."
+      : `WorkGraph OS mirrors workspace, object graph, history, and execution logs into ${path.basename(workGraphOsDbFile)} via ${writer}.`
   };
 }
 
@@ -2990,6 +3954,7 @@ async function appendWorkGraphOsHistory(workspace: WorkGraphOsWorkspace, reason:
   };
   const history = await readWorkGraphOsHistory();
   await writeWorkGraphOsHistory([entry, ...history]);
+  await syncWorkGraphOsObjectSnapshots(workspace);
   return entry;
 }
 
@@ -3176,6 +4141,8 @@ function workGraphBrandPayload(brand: Brand | undefined, activeBrandId: string) 
       selected.tone,
       ...selected.forbiddenWords.map((item) => `avoid: ${item}`)
     ].filter(Boolean),
+    forbiddenWords: selected.forbiddenWords,
+    sceneKeywords: selected.sceneKeywords,
     context: buildBrandContext(selected),
     assetRoles: selected.assetRoles,
     assets: db.assets
@@ -3192,6 +4159,24 @@ function workGraphBrandPayload(brand: Brand | undefined, activeBrandId: string) 
   };
 }
 
+function uniqueAppend(items: string[], value: string) {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) return items;
+  const exists = items.some((item) => normalizeKey(item) === normalizeKey(normalized));
+  return exists ? items : [...items, normalized];
+}
+
+function mergeWorkGraphAssetMetaTags(meta: string, tags: string[]) {
+  const existing = meta.match(/tags:([^\s]+)/)?.[1]?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
+  const merged = tags.reduce((items, tag) => uniqueAppend(items, tag), existing);
+  const cleaned = meta.replace(/\s*tags:[^\s]+/g, "").trim();
+  return [cleaned, merged.length ? `tags:${merged.join(",")}` : ""].filter(Boolean).join(" ");
+}
+
+function workGraphFeedbackBrandLearning(note: string, rating: "accepted" | "needs_revision" | "failed") {
+  return learnFromWorkGraphFeedback(note, rating);
+}
+
 function workGraphAssetToken(asset: Asset) {
   const referencePath = assetReferencePath(asset);
   if (referencePath) return `$${referencePath}`;
@@ -3202,6 +4187,10 @@ function workGraphAssetToken(asset: Asset) {
 }
 
 function workGraphMaterialKind(asset: Asset): "image" | "video" | "document" | "audio" {
+  if (/kind:image/.test(asset.meta)) return "image";
+  if (/kind:video/.test(asset.meta)) return "video";
+  if (/kind:audio/.test(asset.meta)) return "audio";
+  if (/kind:document/.test(asset.meta)) return "document";
   if (asset.type === "generated_video") return "video";
   return asset.imageUrl ? "image" : "document";
 }
@@ -3209,20 +4198,32 @@ function workGraphMaterialKind(asset: Asset): "image" | "video" | "document" | "
 function workGraphAssetPayload(asset: Asset) {
   const role = assetTypeToReferenceRole(asset.type, asset.title, asset.meta);
   const referencePath = assetReferencePath(asset);
+  const fileMatch = asset.meta.match(/file:([^\s]+)/);
+  const thumbnailMatch = asset.meta.match(/thumbnail:([^\s]+)/);
+  const versionMatch = asset.meta.match(/version:([^\s]+)/);
+  const usageMatch = asset.meta.match(/usage:([^\s]+)/);
+  const sizeMatch = asset.meta.match(/size:(\d+)/);
+  const metaTags = asset.meta.match(/tags:([^\s]+)/)?.[1]?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
+  const dataPath = fileMatch ? path.join(workGraphOsAssetDataDir, fileMatch[1]) : "";
   return {
     id: asset.id,
     title: asset.title,
     kind: workGraphMaterialKind(asset),
     token: workGraphAssetToken(asset),
     previewUrl: asset.imageUrl ?? "",
-    fileName: asset.imageUrl?.split("/").pop() ?? `${asset.id}.asset`,
-    size: 0,
+    fileName: fileMatch?.[1] ?? asset.imageUrl?.split("/").pop() ?? `${asset.id}.asset`,
+    size: sizeMatch ? Number(sizeMatch[1]) : 0,
     createdAt: asset.createdAt,
-    tags: [asset.type, role, asset.brandId].filter(Boolean),
+    tags: [asset.type, role, asset.brandId, ...metaTags].filter(Boolean),
     note: asset.meta,
     brandId: asset.brandId,
     role,
     referencePath,
+    dataPath,
+    thumbnailUrl: thumbnailMatch ? `/workgraph-os/assets/file/${thumbnailMatch[1]}` : asset.imageUrl ?? "",
+    thumbnailPath: thumbnailMatch ? path.join(workGraphOsAssetDataDir, thumbnailMatch[1]) : "",
+    versionPath: versionMatch ? path.join(workGraphOsAssetDataDir, versionMatch[1]) : "",
+    usagePath: usageMatch ? path.join(workGraphOsAssetDataDir, usageMatch[1]) : "",
     source: "sparkcanvas-asset-store"
   };
 }
@@ -3236,13 +4237,442 @@ function workGraphSlug(value: string) {
     || "skill";
 }
 
+function safeWorkGraphRelativePath(value: string) {
+  return value
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((part) => part && part !== "." && part !== "..")
+    .join("/");
+}
+
+function workGraphSkillFolderName(input: unknown, fallbackIndex = 0) {
+  return piSkillFolderName(input, fallbackIndex);
+}
+
+function workGraphSkillRelativeDir(input: unknown, fallbackIndex = 0) {
+  return piSkillFolderName(input, fallbackIndex);
+}
+
+function workGraphSkillRelativePath(input: unknown, fallbackIndex = 0) {
+  return piSkillRelativePath(input, fallbackIndex);
+}
+
+function workGraphSkillDiskDirs(input: unknown, fallbackIndex = 0) {
+  const folder = workGraphSkillRelativeDir(input, fallbackIndex);
+  return [
+    path.join(workGraphOsPiDir, "skills", folder),
+    path.join(workGraphOsSkillDataDir, folder)
+  ];
+}
+
+function workGraphSkillFileSpec(skill: Record<string, unknown>) {
+  const command = objectString(skill, "command", "/skill");
+  const title = objectString(skill, "title", "Skill");
+  const output = objectString(skill, "output", "PNG");
+  const description = objectString(skill, "description", "由 WorkGraph OS 管理的 Pi Skill。");
+  const capabilityType = objectString(skill, "capabilityType", "custom");
+  const runtime = objectString(skill, "runtime", "pi-skill");
+  const keywords = objectStringArray(skill, "keywords");
+  const slug = workGraphSkillFolderName(skill);
+  const json = {
+    id: objectString(skill, "id", `skill-${slug}`),
+    title,
+    command,
+    output,
+    description,
+    capabilityType,
+    runtime,
+    keywords,
+    version: objectString(skill, "version", "0.1.0"),
+    status: objectString(objectField(skill, "evolution"), "status", "created")
+  };
+  return {
+    "SKILL.md": [
+      `# ${title}`,
+      "",
+      `Command: \`${command}\``,
+      `Output: \`${output}\``,
+      "",
+      description,
+      "",
+      "## Inputs",
+      "- Goal Object",
+      "- Brand Object",
+      "- Asset Objects",
+      "- ModelPolicy",
+      "",
+      "## Run Contract",
+      "Return ResultObject, ExecutionLog entries, and preview-ready output data.",
+      "",
+      "## Safety",
+      "Do not overwrite user assets. Keep API keys in environment variables."
+    ].join("\n"),
+    "skill.json": `${JSON.stringify(json, null, 2)}\n`,
+    "scripts/run.ts": [
+      "export async function run(input: unknown) {",
+      "  return {",
+      `    skill: ${JSON.stringify(command)},`,
+      "    status: \"planned\",",
+      "    input",
+      "  };",
+      "}",
+      ""
+    ].join("\n"),
+    "resources/guide.md": [
+      `# ${title} Guide`,
+      "",
+      "Use this guide to keep prompts, model routing, brand constraints, and output validation explicit.",
+      ""
+    ].join("\n"),
+    "examples/input.json": `${JSON.stringify({ goal: "给 DAPOT 做一条泰国年轻女性喜欢的新店开业 TikTok 视频", brandId: "brand_dapot", command }, null, 2)}\n`,
+    "examples/output.json": `${JSON.stringify({ resultType: output, status: "preview", logs: [] }, null, 2)}\n`
+  };
+}
+
+async function ensurePiAdapterFiles() {
+  await ensurePiAdapterSystem(workGraphPiAdapterConfig());
+}
+
+async function ensureWorkGraphSkillFiles(skill: Record<string, unknown>, fallbackIndex = 0) {
+  await ensurePiSkillFiles(workGraphPiAdapterConfig(), skill, fallbackIndex);
+}
+
+async function writeWorkGraphSkillFileToDirs(skill: Record<string, unknown>, relativePath: string, content: string) {
+  const safePath = safePiSkillRelativePath(relativePath);
+  if (!safePath) throw new Error("Invalid Skill file path");
+  for (const dir of workGraphSkillDiskDirs(skill)) {
+    const filePath = path.join(dir, safePath);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, content);
+  }
+}
+
+async function appendWorkGraphSkillLog(skill: Record<string, unknown>, logName: string, payload: unknown) {
+  const safeName = workGraphSlug(logName).slice(0, 80) || "skill-log";
+  const createdAt = now();
+  const payloadObject = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : { payload };
+  const content = `${JSON.stringify({ createdAt, ...payloadObject }, null, 2)}\n`;
+  for (const dir of workGraphSkillDiskDirs(skill)) {
+    const filePath = path.join(dir, "logs", `${createdAt.replace(/[:.]/g, "-")}-${safeName}.json`);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, content);
+  }
+}
+
+async function snapshotWorkGraphSkillVersion(skill: Record<string, unknown>, reason: string) {
+  const createdAt = now();
+  const files = ["SKILL.md", "skill.json", "resources/guide.md", "examples/input.json", "examples/output.json"];
+  for (const dir of workGraphSkillDiskDirs(skill)) {
+    const snapshotDir = path.join(dir, "versions", createdAt.replace(/[:.]/g, "-"));
+    await mkdir(snapshotDir, { recursive: true });
+    await writeFile(path.join(snapshotDir, "version.json"), `${JSON.stringify({ createdAt, reason }, null, 2)}\n`);
+    for (const relativePath of files) {
+      try {
+        const content = await readFile(path.join(dir, relativePath), "utf8");
+        const outPath = path.join(snapshotDir, safePiSkillRelativePath(relativePath));
+        await mkdir(path.dirname(outPath), { recursive: true });
+        await writeFile(outPath, content);
+      } catch {
+        // Missing optional files are skipped in the version snapshot.
+      }
+    }
+  }
+  return createdAt;
+}
+
+async function applyWorkGraphSkillOptimization(skill: Record<string, unknown>, prompt: string) {
+  return applyPiSkillOptimization(workGraphPiAdapterConfig(), skill, prompt);
+}
+
+async function writeWorkGraphPiSession(run: ReturnType<typeof buildWorkGraphOsExecution>, artifacts: Awaited<ReturnType<typeof persistWorkGraphRunArtifacts>>) {
+  const sessionId = `pi-session-${run.execution.id}`;
+  const piContext = await buildPiExecutionContext(workGraphPiAdapterConfig(), {
+    goal: objectString(run.promptRecord, "sourcePrompt", ""),
+    workflowId: run.execution.workflowId,
+    node: {
+      id: run.execution.nodeId,
+      title: objectString(run.promptRecord, "nodeTitle", run.execution.nodeId),
+      params: objectField(run.promptRecord, "nodeParams")
+    },
+    brand: {
+      id: objectString(run.promptRecord, "brandId", ""),
+      context: objectString(run.promptRecord, "brandContext", "")
+    },
+    assets: Array.isArray(objectField(run.promptRecord, "assets")) ? objectField(run.promptRecord, "assets") as unknown[] : [],
+    skill: objectField(run.promptRecord, "skill") && typeof objectField(run.promptRecord, "skill") === "object"
+      ? objectField(run.promptRecord, "skill") as Record<string, unknown>
+      : null,
+    modelPolicy: run.routingDecision,
+    promptRecord: run.promptRecord
+  });
+  return writePiSessionRecord(workGraphPiAdapterConfig(), {
+    id: sessionId,
+    executionId: run.execution.id,
+    workflowId: run.execution.workflowId,
+    nodeId: run.execution.nodeId,
+    skillId: run.execution.skillId,
+    resultId: run.execution.resultId,
+    promptRecordId: objectString(run.promptRecord, "id", ""),
+    status: run.execution.status,
+    createdAt: run.execution.createdAt,
+    input: {
+      goal: objectString(run.promptRecord, "sourcePrompt", ""),
+      finalPrompt: objectString(run.promptRecord, "finalPrompt", ""),
+      brandId: objectString(run.promptRecord, "brandId", ""),
+      materialIds: objectStringArray(run.promptRecord, "materialIds"),
+      modelPolicy: run.routingDecision,
+      skill: objectField(run.promptRecord, "skill"),
+      piContext
+    },
+    output: {
+      resultId: run.execution.resultId,
+      output: objectString(run.result, "output", objectString(run.result, "preview", "")),
+      artifactPaths: artifacts.artifactPaths,
+      executionLog: run.executionLog
+    }
+  });
+}
+
+// Collect local filesystem paths for selected assets so pi-web can read them.
+// Deliverable ② enriches this; here we forward any absolute reference paths we have.
+function workGraphBridgeFilePaths(run: ReturnType<typeof buildWorkGraphOsExecution>) {
+  const inputFiles = Array.isArray(objectField(run.promptRecord, "inputFiles")) ? objectField(run.promptRecord, "inputFiles") as unknown[] : [];
+  const paths = inputFiles
+    .map((entry) => objectString(entry, "path", ""))
+    .filter((value) => value && path.isAbsolute(value));
+  return Array.from(new Set(paths));
+}
+
+function setWorkGraphBridge(run: ReturnType<typeof buildWorkGraphOsExecution>, bridge: WorkGraphOsBridgeInfo, simulated: boolean) {
+  run.execution.bridge = bridge;
+  run.execution.simulated = simulated;
+  (run.job as Record<string, unknown>).bridge = bridge;
+  (run.job as Record<string, unknown>).simulated = simulated;
+  (run.result as Record<string, unknown>).bridge = bridge;
+  (run.result as Record<string, unknown>).simulated = simulated;
+}
+
+function appendWorkGraphBridgeLog(run: ReturnType<typeof buildWorkGraphOsExecution>, mode: "pi-web" | "simulated", message: string, artifactPaths: string[] = []) {
+  const entry = {
+    id: `${run.execution.id}-bridge`,
+    executionId: run.execution.id,
+    step: "bridge",
+    status: mode === "pi-web" ? "done" : "simulated",
+    nodeId: run.execution.nodeId,
+    workflowId: run.execution.workflowId,
+    message: `pi-web bridge (${mode}): ${message}`,
+    payload: { mode, artifactPaths },
+    createdAt: now()
+  };
+  run.executionLog.push(entry as (typeof run.executionLog)[number]);
+  run.workspace.executionLog = [entry, ...(run.workspace.executionLog ?? [])].slice(0, 500);
+}
+
+// Real pi-web execution. Tries the configured pi-web instance; on success the
+// run is marked executor="pi-web"/simulated=false, otherwise it stays simulated
+// (or throws in mode="on"). The honest contract: only a real pi session that
+// returns output may report a non-simulated result.
+async function applyWorkGraphPiBridge(run: ReturnType<typeof buildWorkGraphOsExecution>, overrideMode?: "auto" | "on" | "off") {
+  const config = { ...workGraphPiWebConfig(), ...(overrideMode ? { mode: overrideMode } : {}) };
+  const probe = await probePiWebBridge(config);
+  const simulatedReason = (reason: string): WorkGraphOsBridgeInfo => ({
+    mode: "simulated",
+    reachable: probe.reachable,
+    baseUrl: config.baseUrl,
+    reason,
+    piSessionId: ""
+  });
+  if (!probe.enabled || !probe.reachable) {
+    if (config.mode === "on") {
+      throw Object.assign(new Error(`pi-web bridge required but ${probe.reason}`), { statusCode: 502 });
+    }
+    setWorkGraphBridge(run, simulatedReason(probe.reason), true);
+    appendWorkGraphBridgeLog(run, "simulated", probe.reason);
+    return { mode: "simulated" as const, probe };
+  }
+  const result = await runPiWebSession(config, {
+    sessionId: `pi-session-${run.execution.id}`,
+    goal: objectString(run.promptRecord, "sourcePrompt", ""),
+    prompt: objectString(run.promptRecord, "finalPrompt", objectString(run.promptRecord, "sourcePrompt", "")),
+    output: objectString(run.promptRecord, "output", ""),
+    files: workGraphBridgeFilePaths(run),
+    skill: run.execution.skillId
+      ? { id: run.execution.skillId, command: objectString(objectField(run.promptRecord, "skill"), "command", "") }
+      : null,
+    modelPolicy: run.routingDecision,
+    metadata: { workflowId: run.execution.workflowId, nodeId: run.execution.nodeId, resultId: run.execution.resultId }
+  });
+  if (!result.ok) {
+    if (config.mode === "on") {
+      throw Object.assign(new Error(`pi-web bridge required but ${result.reason}`), { statusCode: 502 });
+    }
+    setWorkGraphBridge(run, { ...simulatedReason(result.reason), reachable: result.reachable }, true);
+    appendWorkGraphBridgeLog(run, "simulated", result.reason);
+    return { mode: "simulated" as const, probe, result };
+  }
+  const realBridge: WorkGraphOsBridgeInfo = {
+    mode: "pi-web",
+    reachable: true,
+    baseUrl: config.baseUrl,
+    reason: result.reason,
+    piSessionId: result.piSessionId
+  };
+  setWorkGraphBridge(run, realBridge, false);
+  run.execution.executor = "pi-web";
+  run.execution.status = result.status;
+  const job = run.job as Record<string, unknown>;
+  job.executor = "pi-web";
+  job.status = result.status;
+  job.output = result.output || job.output;
+  job.preview = result.preview || job.preview;
+  const resultObject = run.result as Record<string, unknown>;
+  resultObject.executor = "pi-web";
+  resultObject.status = result.status === "done" ? "ready" : result.status;
+  if (result.output) resultObject.output = result.output;
+  if (result.artifactPaths.length) {
+    resultObject.previewUrl = result.artifactPaths[0];
+    resultObject.artifactPaths = result.artifactPaths;
+  }
+  appendWorkGraphBridgeLog(run, "pi-web", `${result.reason} (status=${result.status})`, result.artifactPaths);
+  return { mode: "pi-web" as const, probe, result };
+}
+
+// Skill auto-evolution (deliverable ④). After a run, a successful execution past
+// the promote threshold turns the executed skill into a reusable template; a
+// failed run flags it for repair and queues a repair task. Disk side effects are
+// best-effort and never fail the run.
+async function applyWorkGraphSkillEvolutionOutcome(run: ReturnType<typeof buildWorkGraphOsExecution>) {
+  const skillId = run.execution.skillId;
+  const index = run.workspace.skills.findIndex((item) => objectString(item, "id", "") === skillId);
+  if (index < 0) return { decision: null, repairTask: null };
+  const skill = run.workspace.skills[index] as Record<string, unknown>;
+  const evolution = workGraphSkillEvolution(skill);
+  const runSucceeded = !["error", "failed"].includes(String(run.execution.status));
+  const decision = evaluateWorkGraphSkillEvolution({
+    success: runSucceeded,
+    evolution,
+    promoteThreshold: Number(process.env.WGOS_SKILL_PROMOTE_THRESHOLD ?? 2) || 2
+  });
+  const historyEntry = {
+    id: `skill-evolution-${Date.now().toString(36)}-${nanoid(6)}`,
+    createdAt: now(),
+    type: decision.repair ? "repair-task" : decision.promote ? "promote" : "evaluate",
+    status: decision.status,
+    executionId: run.execution.id,
+    reason: decision.reason
+  };
+  run.workspace.skills[index] = {
+    ...skill,
+    evolution: {
+      ...evolution,
+      status: decision.status,
+      template: decision.template,
+      ...(decision.promote ? { promotedAt: now(), validatedBy: run.execution.simulated ? "simulated-preview" : "pi-web" } : {}),
+      history: [historyEntry, ...evolution.history].slice(0, 50)
+    }
+  };
+  let repairTask: Record<string, unknown> | null = null;
+  if (decision.repair) {
+    repairTask = {
+      id: `repair-${Date.now().toString(36)}-${nanoid(6)}`,
+      type: "skill-repair",
+      status: "needs_repair",
+      skillId,
+      executionId: run.execution.id,
+      workflowId: run.execution.workflowId,
+      nodeId: run.execution.nodeId,
+      reason: objectString(run.execution.bridge, "reason", `run ${run.execution.id} failed`),
+      suggestedPrompt: `修复技能 ${skillId}:上次执行失败(${objectString(run.execution.bridge, "reason", "unknown")})。请检查输入契约、模型路由与品牌约束后重试。`,
+      createdAt: now()
+    };
+    run.workspace.jobs = [repairTask, ...run.workspace.jobs];
+  }
+  // Best-effort disk artifacts: version the SKILL.md on promotion, log repair tasks.
+  try {
+    if (decision.promote) {
+      await applyPiSkillOptimization(workGraphPiAdapterConfig(), skill, "Promoted to reusable template after repeated successful runs.");
+    } else if (decision.repair && repairTask) {
+      await appendPiSkillLog(workGraphPiAdapterConfig(), skill, "repair-task", repairTask);
+    }
+  } catch (error) {
+    console.warn(`WorkGraph skill evolution disk write failed for ${skillId}: ${(error as Error).message}`);
+  }
+  return { decision, repairTask };
+}
+
+// Output variants for side-by-side comparison (deliverable ⑤). The primary
+// result becomes variant 0; extra variants are preview-only derivatives routed
+// through the fallback model chain so users can compare model outputs. No extra
+// paid generation is triggered — variants inherit the primary run's executor.
+function buildWorkGraphResultVariants(primary: Record<string, unknown>, count: number, routingDecision: unknown) {
+  const variantGroupId = objectString(primary, "id", "result");
+  const fallbacks = objectStringArray(routingDecision, "fallbackModelIds");
+  const primaryVariant = { ...primary, variantGroupId, variantIndex: 0, variantRole: "primary" };
+  const extras: Record<string, unknown>[] = [];
+  for (let index = 1; index < count; index += 1) {
+    const modelId = fallbacks[index - 1] ?? objectString(primary, "modelId", "");
+    extras.push({
+      ...primary,
+      id: `${variantGroupId}-v${index}`,
+      title: `${objectString(primary, "title", "Result")} · variant ${index} (${modelId})`,
+      variantGroupId,
+      variantIndex: index,
+      variantRole: "variant",
+      modelId,
+      createdAt: now(),
+      updatedAt: now()
+    });
+  }
+  return { variantGroupId, variants: [primaryVariant, ...extras] };
+}
+
+async function readSkillJsonFile(filePath: string) {
+  try {
+    return JSON.parse(await readFile(filePath, "utf8")) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+async function scanWorkGraphSkillDir(root: string, source: "pi-skill-fs" | "data-skill-store") {
+  return scanPiSkillDir(root, source, (input, index = 0) => workGraphNormalizeSkill(input, index));
+}
+
+async function workGraphSkillFileTree(dir: string, root = dir): Promise<WorkGraphOsSkillFileTree[]> {
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    const visible = entries.filter((entry) => !entry.name.startsWith(".")).sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
+    const tree: WorkGraphOsSkillFileTree[] = [];
+    for (const entry of visible) {
+      const absolutePath = path.join(dir, entry.name);
+      const relativePath = path.relative(root, absolutePath).replace(/\\/g, "/");
+      if (entry.isDirectory()) {
+        tree.push({ name: entry.name, path: relativePath, type: "directory", children: await workGraphSkillFileTree(absolutePath, root) });
+      } else {
+        const info = await stat(absolutePath);
+        tree.push({ name: entry.name, path: relativePath, type: "file", size: info.size });
+      }
+    }
+    return tree;
+  } catch {
+    return [];
+  }
+}
+
+async function workGraphSkillDetail(skillId: string) {
+  const workspace = await readWorkGraphOsWorkspace();
+  const skill = workGraphSkillCatalog(workspace).find((item) => objectString(item, "id") === skillId);
+  if (!skill) return null;
+  return buildPiSkillDetail(workGraphPiAdapterConfig(), skill);
+}
+
 function workGraphNormalizeSkill(input: unknown, index = 0) {
   const title = objectString(input, "title", `Skill ${index + 1}`);
   const command = objectString(input, "command", `/${workGraphSlug(title)}`).replace(/^\/?/, "/");
   const output = objectString(input, "output", /video|视频|mp4/i.test(`${title} ${command}`) ? "MP4" : "PNG");
   const isVideo = /video|视频|mp4/i.test(`${title} ${command} ${output}`);
   const isArchive = /archive|归档|zip|kit/i.test(`${title} ${command} ${output}`);
-  const slug = workGraphSlug(command || title);
+  const slug = workGraphSkillFolderName(input, index);
   const createdAt = objectString(input, "createdAt", now());
   return {
     id: objectString(input, "id", `skill-${slug}`),
@@ -3257,7 +4687,7 @@ function workGraphNormalizeSkill(input: unknown, index = 0) {
     inputs: objectStringArray(input, "inputs").length ? objectStringArray(input, "inputs") : ["Goal Object", "Asset Object", "Brand Object"],
     outputs: objectStringArray(input, "outputs").length ? objectStringArray(input, "outputs") : [`Result Object: ${output}`],
     runtime: objectString(input, "runtime", "pi-skill"),
-    skillMdPath: objectString(input, "skillMdPath", `skills/generated/${slug}/SKILL.md`),
+    skillMdPath: objectString(input, "skillMdPath", `skills/${slug}/SKILL.md`),
     version: objectString(input, "version", "0.1.0"),
     evolution: objectField(input, "evolution") ?? {
       status: "created",
@@ -3266,9 +4696,23 @@ function workGraphNormalizeSkill(input: unknown, index = 0) {
       failureCount: 0,
       testPlan: ["run generated skill", "verify result object", "save reusable SKILL.md"]
     },
+    filesystem: objectField(input, "filesystem"),
     source: objectString(input, "source", "workgraph-skill-store"),
     createdAt
   };
+}
+
+async function workGraphSkillCatalogWithFs(workspace: WorkGraphOsWorkspace | null) {
+  await ensurePiAdapterFiles();
+  const workspaceSkills = workGraphSkillCatalog(workspace);
+  await Promise.all(workspaceSkills.map((skill, index) => ensureWorkGraphSkillFiles(skill, index)));
+  const piSkills = await scanWorkGraphSkillDir(path.join(workGraphOsPiDir, "skills"), "pi-skill-fs");
+  const dataSkills = await scanWorkGraphSkillDir(workGraphOsSkillDataDir, "data-skill-store");
+  return [...workspaceSkills, ...piSkills, ...dataSkills].filter((skill, index, list) => {
+    const id = objectString(skill, "id", "");
+    const command = objectString(skill, "command", "");
+    return list.findIndex((item) => objectString(item, "id", "") === id || objectString(item, "command", "") === command) === index;
+  });
 }
 
 function workGraphSkillCatalog(workspace: WorkGraphOsWorkspace | null) {
@@ -5064,7 +6508,20 @@ function serviceConfig(kind: "text" | "video", modelOverride?: string) {
       || process.env.YIJIARJ_API_KEY
       || localAuthValue("YIJIARJ_API_KEY");
   const normalizedBaseUrl = kind === "text" ? openAiCompatibleBaseUrl(baseUrl) : baseUrl.replace(/\/$/, "");
+  if (kind === "video" && (process.env.SPARKCANVAS_DISABLE_VIDEO_GEN === "1" || shouldBlockPaidVideoGeneration(normalizedBaseUrl))) {
+    return { baseUrl: normalizedBaseUrl, apiKey: "", model };
+  }
   return { baseUrl: normalizedBaseUrl, apiKey, model };
+}
+
+function shouldBlockPaidVideoGeneration(baseUrl: string) {
+  if (process.env.SPARKCANVAS_ALLOW_PAID_VIDEO_GEN === "1") return false;
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return host === "api.yijiarj.cn" || host === "apius.yijiarj.cn" || host.endsWith(".yijiarj.cn");
+  } catch {
+    return /(^|\/\/|\.)yijiarj\.cn(?:\/|$)/i.test(baseUrl);
+  }
 }
 
 function requestHeaders(apiKey: string) {
@@ -5482,7 +6939,11 @@ function launchReadinessStatus() {
       id: "video-api",
       label: "yijiarj video API",
       ready: Boolean(videoConfig.apiKey && videoConfig.baseUrl),
-      message: videoConfig.apiKey ? `Ready: ${videoConfig.model}` : "Missing VIDEO_GEN_KEY or YIJIARJ_API_KEY."
+      message: videoConfig.apiKey
+        ? `Ready: ${videoConfig.model}`
+        : process.env.SPARKCANVAS_ALLOW_PAID_VIDEO_GEN === "1"
+          ? "Missing VIDEO_GEN_KEY or YIJIARJ_API_KEY."
+          : "Paid video generation is disabled by default; set SPARKCANVAS_ALLOW_PAID_VIDEO_GEN=1 only when intentionally running yijia generation."
     },
     {
       id: "public-reference",
@@ -5643,6 +7104,113 @@ function imageFormatFromText(text: string): "png" | "jpeg" {
 
 function imageExtensionForApi(format: "png" | "jpeg" | "webp") {
   return format === "jpeg" ? "jpg" : format;
+}
+
+function workGraphAssetKindFromMime(mime = "", filename = ""): "image" | "video" | "document" | "audio" {
+  return assetKindFromMime(mime, filename);
+}
+
+function workGraphAssetExtFromInput(filename: string, mime = "") {
+  return assetExtFromInput(filename, mime);
+}
+
+async function storeWorkGraphAssetBuffer(bytes: Buffer, filename: string, mime = "") {
+  return storeAssetBuffer({
+    assetDir: workGraphOsAssetDataDir,
+    now,
+    idFactory: () => Date.now().toString(36)
+  }, bytes, filename, mime);
+}
+
+function workGraphAssetMetaValue(asset: unknown, name: string) {
+  const meta = objectString(asset, "note", objectString(asset, "meta", ""));
+  const match = meta.match(new RegExp(`${name}:([^\\s]+)`));
+  return match?.[1] ?? "";
+}
+
+async function writeWorkGraphAssetCompanionFile(relativePath: string, content: string | Buffer) {
+  const safePath = safeWorkGraphRelativePath(relativePath);
+  const filePath = path.join(workGraphOsAssetDataDir, safePath);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, content);
+  return { relativePath: safePath, absolutePath: filePath };
+}
+
+async function createWorkGraphAssetCompanions(input: { assetId: string; title: string; stored: Awaited<ReturnType<typeof storeWorkGraphAssetBuffer>>; brandId: string; tags: string[] }) {
+  const base = input.stored.relativePath.replace(/\.[^.]+$/, "");
+  const thumbnailRelativePath = `${base}.thumb.svg`;
+  const versionRelativePath = `${base}.versions/initial.json`;
+  const usageRelativePath = `${base}.usage.jsonl`;
+  const color = input.stored.kind === "image" ? "#22d3ee" : input.stored.kind === "video" ? "#fb7185" : input.stored.kind === "audio" ? "#a78bfa" : "#94a3b8";
+  const thumb = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">`,
+    `<rect width="320" height="180" rx="14" fill="#020617"/>`,
+    `<rect x="12" y="12" width="296" height="156" rx="10" fill="#0f172a" stroke="${color}" stroke-width="2"/>`,
+    `<text x="24" y="64" fill="${color}" font-family="Arial, sans-serif" font-size="16" font-weight="700">${input.stored.kind.toUpperCase()} ASSET</text>`,
+    `<text x="24" y="92" fill="#e2e8f0" font-family="Arial, sans-serif" font-size="13">${input.title.replace(/[<>&]/g, "")}</text>`,
+    `<text x="24" y="120" fill="#64748b" font-family="Arial, sans-serif" font-size="11">${input.stored.storedName}</text>`,
+    `</svg>`
+  ].join("");
+  await writeWorkGraphAssetCompanionFile(thumbnailRelativePath, thumb);
+  await writeWorkGraphAssetCompanionFile(versionRelativePath, `${JSON.stringify({
+    assetId: input.assetId,
+    version: 1,
+    kind: input.stored.kind,
+    sourceFile: input.stored.relativePath,
+    brandId: input.brandId,
+    tags: input.tags,
+    size: input.stored.size,
+    mime: input.stored.mime,
+    createdAt: now()
+  }, null, 2)}\n`);
+  await writeWorkGraphAssetCompanionFile(usageRelativePath, `${JSON.stringify({
+    type: "upload",
+    assetId: input.assetId,
+    sourceFile: input.stored.relativePath,
+    createdAt: now()
+  })}\n`);
+  return { thumbnailRelativePath, versionRelativePath, usageRelativePath };
+}
+
+async function appendWorkGraphAssetUsage(asset: unknown, usage: Record<string, unknown>) {
+  const usageRelativePath = workGraphAssetMetaValue(asset, "usage");
+  if (!usageRelativePath) return;
+  const filePath = path.join(workGraphOsAssetDataDir, safeWorkGraphRelativePath(usageRelativePath));
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const line = `${JSON.stringify({ createdAt: now(), ...usage })}\n`;
+  await writeFile(filePath, existsSync(filePath) ? `${readFileSync(filePath, "utf8")}${line}` : line);
+}
+
+async function cleanupWorkGraphAssetSnapshotsByTitle(assetId: string, title: string) {
+  const cleanupFile = async (filePath: string) => {
+    if (!existsSync(filePath)) return;
+    const record = JSON.parse(await readFile(filePath, "utf8")) as Record<string, unknown>;
+    let changed = false;
+    const removeFromContext = (value: unknown) => {
+      if (typeof value !== "string") return value;
+      const next = value.split("\n").filter((line) => !line.includes(title)).join("\n");
+      if (next !== value) changed = true;
+      return next;
+    };
+    record.context = removeFromContext(record.context);
+    const payload = objectField(record, "payload") as Record<string, unknown> | undefined;
+    if (payload) {
+      payload.context = removeFromContext(payload.context);
+      if (Array.isArray(payload.assets)) {
+        const nextAssets = payload.assets.filter((asset) => objectString(asset, "id", "") !== assetId && objectString(asset, "title", "") !== title);
+        if (nextAssets.length !== payload.assets.length) changed = true;
+        payload.assets = nextAssets;
+      }
+    }
+    if (Array.isArray(record.assets)) {
+      const nextAssets = record.assets.filter((asset) => objectString(asset, "id", "") !== assetId && objectString(asset, "title", "") !== title);
+      if (nextAssets.length !== record.assets.length) changed = true;
+      record.assets = nextAssets;
+    }
+    if (changed) await writeJsonAtomic(filePath, record);
+  };
+  await cleanupFile(path.join(workGraphOsBrandDataDir, "brand-dapot.json"));
+  await cleanupFile(path.join(workGraphOsBrandDataDir, "brand-brand_dapot.json"));
 }
 
 function imageApiSize(ratio?: string) {
@@ -6927,6 +8495,14 @@ app.post("/auth/logout", async (req, res) => {
 });
 
 app.use((req, res, next) => {
+  if (!isProduction && req.path.startsWith("/workgraph-os")) {
+    const user = db.users[0] ?? defaultAuthUser();
+    if (!db.users.some((item) => item.id === user.id)) db.users.unshift(user);
+    req.authUser = user;
+    req.authSession = db.sessions.find((session) => session.userId === user.id);
+    req.authToken = DEMO_TOKEN;
+    return next();
+  }
   const token = req.header("authorization")?.replace(/^Bearer\s+/i, "");
   const authUser = authUserFromToken(token);
   if (!authUser) return res.status(401).json({ message: "Unauthorized" });
@@ -6981,11 +8557,18 @@ app.get("/workgraph-os/workspace", async (_req, res) => {
 });
 
 app.get("/workgraph-os/brands", async (_req, res) => {
+  const brands = db.brands
+    .filter((brand) => !brand.archived)
+    .map((brand) => workGraphBrandPayload(brand, brand.id));
+  const files = await syncBrandRecords({ brandDir: workGraphOsBrandDataDir }, brands);
   res.json({
-    source: "sparkcanvas-brand-db",
-    brands: db.brands
-      .filter((brand) => !brand.archived)
-      .map((brand) => workGraphBrandPayload(brand, brand.id))
+    source: "brand-store",
+    storage: {
+      mode: "filesystem-json",
+      dir: workGraphOsBrandDataDir,
+      files
+    },
+    brands
   });
 });
 
@@ -7005,16 +8588,466 @@ app.get("/workgraph-os/assets", async (req, res) => {
   });
 });
 
+app.post("/workgraph-os/assets/upload", express.raw({ type: "*/*", limit: "100mb" }), async (req, res) => {
+  const input = z.object({
+    title: z.string().optional(),
+    filename: z.string().optional(),
+    mime: z.string().optional(),
+    brandId: z.string().optional(),
+    tags: z.string().optional(),
+    note: z.string().optional()
+  }).parse(req.query);
+  const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  if (!bytes.length) return res.status(400).json({ message: "Uploaded asset is empty" });
+  const filename = input.filename || "asset.bin";
+  const title = input.title?.trim() || filename.replace(/\.[^.]+$/, "") || "WorkGraph Asset";
+  const mime = input.mime || String(req.headers["content-type"] ?? "application/octet-stream");
+  const stored = await storeWorkGraphAssetBuffer(bytes, filename, mime);
+  const imageUrl = isPreviewableImageAsset(stored)
+    ? `/workgraph-os/assets/file/${stored.relativePath}`
+    : undefined;
+  const assetType: Asset["type"] = stored.kind === "video" ? "generated_video" : stored.kind === "image" ? "upload" : "upload";
+  const meta = [
+    input.note || "workgraph-os asset upload",
+    `kind:${stored.kind}`,
+    `file:${stored.relativePath}`,
+    `size:${stored.size}`,
+    `mime:${mime}`,
+    input.tags ? `tags:${input.tags}` : ""
+  ].filter(Boolean).join(" ");
+  const asset = createAsset(title, assetType, input.brandId ?? activeBrand().id, "#94a3b8", meta, imageUrl);
+  const companion = await createWorkGraphAssetCompanions({
+    assetId: asset.id,
+    title,
+    stored,
+    brandId: asset.brandId,
+    tags: input.tags ? input.tags.split(",").map((item) => item.trim()).filter(Boolean) : []
+  });
+  asset.meta = [
+    asset.meta,
+    `thumbnail:${companion.thumbnailRelativePath}`,
+    `version:${companion.versionRelativePath}`,
+    `usage:${companion.usageRelativePath}`
+  ].join(" ");
+  db.assets.unshift(asset);
+  await persistDb();
+  const workspace = await readWorkGraphOsWorkspace();
+  let nextWorkspace = workspace;
+  if (workspace) {
+    const material = workGraphAssetPayload(asset);
+    nextWorkspace = {
+      ...workspace,
+      materials: [material, ...workspace.materials.filter((item) => objectString(item, "id", "") !== asset.id)],
+      selectedIds: workspace.selectedIds.includes(asset.id) ? workspace.selectedIds : [asset.id, ...workspace.selectedIds],
+      activeMaterialId: asset.id,
+      updatedAt: now()
+    };
+    await writeWorkGraphOsWorkspace(nextWorkspace);
+  }
+  res.status(201).json({
+    source: "workgraph-asset-store",
+    asset: workGraphAssetPayload(asset),
+    workspace: nextWorkspace,
+    objectIndex: buildWorkGraphOsObjectIndex(nextWorkspace),
+    storage: {
+      dir: workGraphOsAssetDataDir,
+      relativePath: stored.relativePath,
+      absolutePath: stored.absolutePath
+    }
+  });
+});
+
+app.delete("/workgraph-os/assets/:id", async (req, res) => {
+  const assetId = safeWorkGraphRelativePath(req.params.id ?? "");
+  if (!assetId) return res.status(400).json({ message: "Asset id is required" });
+  const index = db.assets.findIndex((asset) => asset.id === assetId);
+  if (index === -1) return res.status(404).json({ message: "Asset not found" });
+  const [asset] = db.assets.splice(index, 1);
+  const payload = workGraphAssetPayload(asset);
+  await persistDb();
+
+  const workspace = await readWorkGraphOsWorkspace();
+  let nextWorkspace = workspace;
+  if (workspace) {
+    nextWorkspace = {
+      ...workspace,
+      selectedIds: workspace.selectedIds.filter((id) => id !== assetId),
+      activeMaterialId: workspace.activeMaterialId === assetId ? "" : workspace.activeMaterialId,
+      materials: workspace.materials.filter((material) => objectString(material, "id", "") !== assetId),
+      nodes: workspace.nodes.map((node) => {
+        if (!node || typeof node !== "object" || Array.isArray(node)) return node;
+        const item = node as Record<string, unknown>;
+        return {
+          ...item,
+          materialIds: (Array.isArray(item.materialIds) ? item.materialIds : []).filter((id): id is string => typeof id === "string" && id !== assetId)
+        };
+      }),
+      updatedAt: now()
+    };
+    await writeWorkGraphOsWorkspace(nextWorkspace);
+  }
+
+  for (const file of [payload.dataPath, payload.thumbnailPath, payload.versionPath, payload.usagePath]) {
+    if (file && file.startsWith(workGraphOsAssetDataDir)) await rm(file, { recursive: true, force: true });
+  }
+  await rm(path.join(workGraphOsAssetDataDir, `asset-${assetId}.json`), { recursive: true, force: true });
+  await cleanupWorkGraphAssetSnapshotsByTitle(assetId, asset.title);
+
+  res.json({
+    ok: true,
+    id: assetId,
+    workspaceUpdatedAt: nextWorkspace?.updatedAt ?? "",
+    assetCount: db.assets.length
+  });
+});
+
+app.get(/^\/workgraph-os\/assets\/file\/(.+)$/, (req, res) => {
+  const relativePath = safeWorkGraphRelativePath(req.params[0] ?? "");
+  if (!relativePath) return res.status(404).json({ message: "Asset file not found" });
+  const filePath = path.join(workGraphOsAssetDataDir, relativePath);
+  if (!filePath.startsWith(workGraphOsAssetDataDir) || !existsSync(filePath)) return res.status(404).json({ message: "Asset file not found" });
+  res.sendFile(filePath);
+});
+
 app.get("/workgraph-os/skills", async (req, res) => {
   const workspace = await readWorkGraphOsWorkspace();
   const query = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
-  const skills = workGraphSkillCatalog(workspace).filter((skill) => {
+  const skills = (await workGraphSkillCatalogWithFs(workspace)).filter((skill) => {
     if (!query) return true;
-    return [skill.title, skill.command, skill.description, skill.keywords.join(" "), skill.capabilityType].join(" ").toLowerCase().includes(query);
+    return [objectString(skill, "title"), objectString(skill, "command"), objectString(skill, "description"), objectStringArray(skill, "keywords").join(" "), objectString(skill, "capabilityType")].join(" ").toLowerCase().includes(query);
   });
   res.json({
     source: "workgraph-skill-store",
+    filesystem: {
+      piDir: path.join(workGraphOsPiDir, "skills"),
+      dataDir: workGraphOsSkillDataDir,
+      systemFiles: [path.join(workGraphOsPiDir, "AGENTS.md"), path.join(workGraphOsPiDir, "SYSTEM.md")]
+    },
+    onlineSearch: {
+      status: "planned",
+      disabled: true
+    },
     skills
+  });
+});
+
+app.get("/workgraph-os/models/probe", async (_req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  const catalog = workspace ? workGraphModelCatalog(workspace) : buildWorkGraphModelCatalog("imgen", "PNG");
+  const piConfig = workGraphPiWebConfig();
+  const piModels = await listPiWebModels(piConfig);
+  // Index live pi-web models by both "provider:id" and bare id so catalog ids
+  // like "vdamo-gpt-image-2" can be matched to provider "vdamo" / id "gpt-image-2".
+  const liveIds = new Set<string>();
+  for (const model of piModels) {
+    // Normalize dots to dashes so pi-web ids like "gpt-image-1.5" match catalog
+    // ids like "vdamo-gpt-image-1-5".
+    const bare = model.id.toLowerCase().replace(/\./g, "-");
+    liveIds.add(bare);
+    if (model.provider) liveIds.add(`${model.provider}-${bare}`.toLowerCase());
+  }
+  const catalogProbe = catalog.map((item) => {
+    const id = String(item.id);
+    const normalized = id.toLowerCase();
+    const bareId = normalized.replace(/^(vdamo|yijiarj|local)-/, "");
+    const live = liveIds.size === 0
+      ? "unknown"
+      : (liveIds.has(normalized) || liveIds.has(bareId)) ? "available" : "unavailable";
+    return { id, kind: item.kind, status: item.status, capabilities: item.capabilities, fallbackModelIds: item.fallbackModelIds, live };
+  });
+  res.json({
+    source: "workgraph-model-probe",
+    piWeb: { baseUrl: piConfig.baseUrl, mode: piConfig.mode, reachable: piModels.length > 0, modelCount: piModels.length },
+    liveModels: piModels,
+    catalog: catalogProbe
+  });
+});
+
+app.get("/workgraph-os/skills/evolution", async (_req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  const skills = workspace?.skills ?? [];
+  const templates = skills
+    .filter((skill) => Boolean(objectField(objectField(skill, "evolution"), "template")) || objectString(objectField(skill, "evolution"), "status", "") === "reusable-template")
+    .map((skill) => ({
+      id: objectString(skill, "id", ""),
+      title: objectString(skill, "title", ""),
+      status: objectString(objectField(skill, "evolution"), "status", ""),
+      successCount: Number(objectField(objectField(skill, "evolution"), "successCount") ?? 0),
+      validatedBy: objectString(objectField(skill, "evolution"), "validatedBy", "")
+    }));
+  const repairTasks = (workspace?.jobs ?? []).filter((job) => objectString(job, "type", "") === "skill-repair");
+  res.json({ source: "workgraph-skill-evolution", templates, repairTasks });
+});
+
+app.get("/workgraph-os/skills/:id", async (req, res) => {
+  const detail = await workGraphSkillDetail(req.params.id);
+  if (!detail) return res.status(404).json({ message: "Skill not found" });
+  res.json(detail);
+});
+
+app.put("/workgraph-os/skills/:id/files", async (req, res) => {
+  const parsed = workGraphOsSkillFileSaveSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ message: "Invalid Skill file payload" });
+  const detail = await workGraphSkillDetail(req.params.id);
+  if (!detail) return res.status(404).json({ message: "Skill not found" });
+  const skill = detail.skill as Record<string, unknown>;
+  const reason = parsed.data.reason?.trim() || `manual edit ${parsed.data.path}`;
+  if (parsed.data.path === "skill.json") {
+    try {
+      JSON.parse(parsed.data.content);
+    } catch {
+      return res.status(400).json({ message: "skill.json must be valid JSON" });
+    }
+  }
+  await ensureWorkGraphSkillFiles(skill);
+  const snapshotAt = await snapshotWorkGraphSkillVersion(skill, reason);
+  await writeWorkGraphSkillFileToDirs(skill, parsed.data.path, `${parsed.data.content.trimEnd()}\n`);
+  await appendWorkGraphSkillLog(skill, "file-edited", {
+    path: parsed.data.path,
+    reason,
+    snapshotAt,
+    bytes: Buffer.byteLength(parsed.data.content, "utf8")
+  });
+  const nextDetail = await workGraphSkillDetail(req.params.id);
+  const workspace = await readWorkGraphOsWorkspace();
+  res.json({
+    source: "pi-adapter",
+    status: "saved",
+    writesFiles: true,
+    file: parsed.data.path,
+    snapshotAt,
+    detail: nextDetail,
+    objectIndex: buildWorkGraphOsObjectIndex(workspace),
+    message: "Skill file saved with a version snapshot and edit log."
+  });
+});
+
+app.post("/workgraph-os/skills/:id/optimize", async (req, res) => {
+  const parsed = workGraphOsSkillOptimizeSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ message: "Invalid skill optimization payload" });
+  const detail = await workGraphSkillDetail(req.params.id);
+  if (!detail) return res.status(404).json({ message: "Skill not found" });
+  const skillMd = detail.files.find((file) => file.path === "SKILL.md")?.content ?? "";
+  const plan = [
+    `Read ${detail.folder}/SKILL.md and skill.json.`,
+    `Apply requested change: ${parsed.data.prompt}`,
+    "Create a new version under versions/ after user confirmation.",
+    "Record optimization log under logs/ without overwriting previous files."
+  ];
+  const diffPreview = [
+    `--- ${detail.folder}/SKILL.md`,
+    `+++ ${detail.folder}/SKILL.md (preview)`,
+    "@@",
+    skillMd ? skillMd.split("\n").slice(0, 6).map((line) => ` ${line}`).join("\n") : " # Empty SKILL.md",
+    "+",
+    `+## Proposed Optimization`,
+    `+${parsed.data.prompt}`,
+    "+",
+    "+Acceptance: user reviews this diff before WorkGraph OS writes a new version."
+  ].join("\n");
+  res.json({
+    source: "pi-adapter",
+    status: "preview",
+    writesFiles: false,
+    skill: detail.skill,
+    plan,
+    diffPreview,
+    message: "Optimization preview only. Confirm/apply is intentionally separate so Skill files are not silently overwritten."
+  });
+});
+
+app.post("/workgraph-os/skills/:id/optimize/apply", async (req, res) => {
+  const parsed = workGraphOsSkillOptimizeApplySchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ message: "Invalid skill optimization apply payload" });
+  const detail = await workGraphSkillDetail(req.params.id);
+  if (!detail) return res.status(404).json({ message: "Skill not found" });
+  const applied = await applyWorkGraphSkillOptimization(detail.skill as Record<string, unknown>, parsed.data.prompt);
+  const nextDetail = await workGraphSkillDetail(req.params.id);
+  const workspace = await readWorkGraphOsWorkspace();
+  res.json({
+    source: "pi-adapter",
+    status: "applied",
+    writesFiles: true,
+    applied,
+    skill: nextDetail?.skill ?? detail.skill,
+    detail: nextDetail,
+    objectIndex: buildWorkGraphOsObjectIndex(workspace),
+    message: "Skill optimization applied with a version snapshot and log entry."
+  });
+});
+
+app.post("/workgraph-os/skills/:id/copy", async (req, res) => {
+  const parsed = workGraphOsSkillCopySchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ message: "Invalid Skill copy payload" });
+  const detail = await workGraphSkillDetail(req.params.id);
+  if (!detail) return res.status(404).json({ message: "Skill not found" });
+  const workspace = await readWorkGraphOsWorkspace();
+  if (!workspace) return res.status(409).json({ message: "WorkGraph OS workspace is empty; save a workspace before copying skills" });
+  const sourceSkill = detail.skill as Record<string, unknown>;
+  const title = parsed.data.title?.trim() || `${objectString(sourceSkill, "title", "Skill")} Copy`;
+  const command = (parsed.data.command?.trim() || `${objectString(sourceSkill, "command", "/skill")}-copy-${nanoid(4)}`).replace(/^\/?/, "/");
+  const copiedSkill = workGraphNormalizeSkill({
+    ...sourceSkill,
+    id: `skill-copy-${Date.now().toString(36)}-${nanoid(6)}`,
+    title,
+    command,
+    source: "workgraph-skill-copy",
+    createdAt: now(),
+    evolution: {
+      ...workGraphSkillEvolution(sourceSkill),
+      status: "draft",
+      runCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      copiedFromSkillId: objectString(sourceSkill, "id", req.params.id),
+      history: [{
+        id: `skill-history-${Date.now().toString(36)}-${nanoid(6)}`,
+        type: "copy",
+        sourceSkillId: objectString(sourceSkill, "id", req.params.id),
+        status: "draft",
+        createdAt: now()
+      }]
+    }
+  });
+  await ensureWorkGraphSkillFiles(copiedSkill);
+  await appendWorkGraphSkillLog(copiedSkill, "skill-copied", {
+    sourceSkillId: objectString(sourceSkill, "id", req.params.id),
+    sourceFolder: detail.folder
+  });
+  const nextWorkspace: WorkGraphOsWorkspace = {
+    ...workspace,
+    skills: [copiedSkill, ...workspace.skills.filter((skill) => objectString(skill, "id", "") !== objectString(copiedSkill, "id", ""))],
+    updatedAt: now()
+  };
+  const syncedWorkspace = await writeWorkGraphOsWorkspace(nextWorkspace);
+  const objectIndex = buildWorkGraphOsObjectIndex(syncedWorkspace);
+  const historyEntry = await appendWorkGraphOsHistory(syncedWorkspace, "manual");
+  res.status(201).json({
+    source: "workgraph-skill-store",
+    status: "copied",
+    skill: copiedSkill,
+    detail: await workGraphSkillDetail(objectString(copiedSkill, "id", "")),
+    workspace: syncedWorkspace,
+    objectIndex,
+    historyEntry
+  });
+});
+
+app.post("/workgraph-os/skills/:id/test", async (req, res) => {
+  const parsed = workGraphOsSkillTestSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ message: "Invalid Skill test payload" });
+  const detail = await workGraphSkillDetail(req.params.id);
+  if (!detail) return res.status(404).json({ message: "Skill not found" });
+  const workspace = await readWorkGraphOsWorkspace();
+  if (!workspace) return res.status(409).json({ message: "WorkGraph OS workspace is empty; save a workspace before testing skills" });
+  const skill = detail.skill as Record<string, unknown>;
+  const testNode = workspace.nodes.find((node) => objectString(node, "id", "") === parsed.data.nodeId)
+    ?? workspace.nodes.find((node) => objectString(node, "skillId", "") === objectString(skill, "id", ""))
+    ?? {
+      id: `skill-test-${objectString(skill, "id", req.params.id)}`,
+      title: `Test ${objectString(skill, "title", "Skill")}`,
+      type: objectString(skill, "nodeType", "skill_execute"),
+      body: parsed.data.prompt || workspace.prompt,
+      skillId: objectString(skill, "id", req.params.id),
+      status: "ready"
+    };
+  const output = objectString(skill, "output", workGraphDefaultOutput(workspace, testNode));
+  const routingDecision = buildWorkGraphModelRoutingDecision(workspace, testNode, output);
+  const brandId = resolveWorkGraphBrandId(workspace.activeBrandId, `${workspace.prompt}\n${parsed.data.prompt ?? ""}`);
+  const brandPayload = workGraphBrandPayload(findBrand(brandId), brandId);
+  const materialIds = objectStringArray(testNode, "materialIds").length ? objectStringArray(testNode, "materialIds") : workspace.selectedIds;
+  const selectedAssets = materialIds.map((id) => {
+    const dbAsset = db.assets.find((asset) => asset.id === id);
+    if (dbAsset) return workGraphAssetPayload(dbAsset);
+    return workspace.materials.find((item) => objectString(item, "id", "") === id) ?? { id };
+  });
+  const runtime = runWorkGraphSkill({
+    mode: "node",
+    prompt: parsed.data.prompt?.trim() || workspace.prompt,
+    output,
+    node: {
+      id: objectString(testNode, "id", "skill-test"),
+      title: objectString(testNode, "title", "Skill Test"),
+      type: objectString(testNode, "type", "skill_execute"),
+      body: objectString(testNode, "body", "")
+    },
+    workflowId: objectString(workspace.workflow, "id", "workflow-active"),
+    skill: {
+      id: objectString(skill, "id", req.params.id),
+      title: objectString(skill, "title", "Skill"),
+      command: objectString(skill, "command", ""),
+      output,
+      skillMdPath: objectString(skill, "skillMdPath", ""),
+      runtime: objectString(skill, "runtime", "pi-skill")
+    },
+    modelPolicy: routingDecision,
+    brand: {
+      id: brandPayload.id,
+      name: brandPayload.name,
+      context: brandPayload.context
+    },
+    assets: selectedAssets.map((asset) => ({
+      id: objectString(asset, "id", ""),
+      title: objectString(asset, "title", ""),
+      kind: objectString(asset, "kind", objectString(asset, "type", "")),
+      type: objectString(asset, "type", ""),
+      token: objectString(asset, "token", ""),
+      referencePath: objectString(asset, "referencePath", ""),
+      tags: objectStringArray(asset, "tags")
+    })),
+    materialIds,
+    now
+  });
+  const testId = `skill-test-${Date.now().toString(36)}-${nanoid(6)}`;
+  const updatedSkill = withWorkGraphSkillEvolution(skill, {
+    type: "test",
+    status: runtime.status,
+    testId,
+    nodeId: objectString(testNode, "id", ""),
+    workflowId: objectString(workspace.workflow, "id", "workflow-active"),
+    modelId: routingDecision.selectedModelId,
+    output
+  });
+  await appendWorkGraphSkillLog(updatedSkill, "skill-tested", {
+    testId,
+    status: runtime.status,
+    routingDecision,
+    logs: runtime.logs,
+    previewLength: runtime.preview.length
+  });
+  const nextWorkspace: WorkGraphOsWorkspace = {
+    ...workspace,
+    skills: workspace.skills.map((item) => objectString(item, "id", "") === objectString(updatedSkill, "id", "") ? updatedSkill : item),
+    executionLog: [
+      ...runtime.logs.map((entry, index) => ({
+        id: `${testId}-runtime-${index + 1}`,
+        executionId: testId,
+        step: entry.step,
+        status: "done",
+        nodeId: objectString(testNode, "id", ""),
+        workflowId: objectString(workspace.workflow, "id", "workflow-active"),
+        message: entry.message,
+        payload: entry.payload,
+        createdAt: now()
+      })),
+      ...(workspace.executionLog ?? [])
+    ].slice(0, 500),
+    updatedAt: now()
+  };
+  const syncedWorkspace = await writeWorkGraphOsWorkspace(nextWorkspace);
+  const objectIndex = buildWorkGraphOsObjectIndex(syncedWorkspace);
+  const historyEntry = await appendWorkGraphOsHistory(syncedWorkspace, "manual");
+  res.json({
+    source: "workgraph-skill-runtime",
+    status: runtime.status,
+    testId,
+    skill: updatedSkill,
+    preview: runtime.preview,
+    logs: runtime.logs,
+    routingDecision,
+    workspace: syncedWorkspace,
+    objectIndex,
+    historyEntry
   });
 });
 
@@ -7029,6 +9062,7 @@ app.post("/workgraph-os/skills", async (req, res) => {
     source: "workgraph-skill-store",
     createdAt: now()
   });
+  await ensureWorkGraphSkillFiles(skill);
   const nextWorkspace: WorkGraphOsWorkspace = {
     ...workspace,
     skills: [skill, ...workspace.skills],
@@ -7051,14 +9085,15 @@ app.post("/workgraph-os/plan", async (req, res) => {
   if (!workspace) return res.status(409).json({ message: "WorkGraph OS workspace is empty; save a workspace before planning workflows" });
   const parsed = workGraphOsPlanSchema.safeParse(req.body ?? {});
   if (!parsed.success) return res.status(400).json({ message: "Invalid WorkGraph OS planner payload" });
-  const planned = buildWorkGraphOsPlan(workspace, parsed.data);
-  await writeWorkGraphOsWorkspace(planned.workspace);
-  const objectIndex = buildWorkGraphOsObjectIndex(planned.workspace);
-  const historyEntry = await appendWorkGraphOsHistory(planned.workspace, "manual");
+  const planned = buildWorkGraphOsPlan(workspace, parsed.data, await workGraphSkillCatalogWithFs(workspace));
+  await Promise.all(planned.workspace.skills.map((skill, index) => ensureWorkGraphSkillFiles(workGraphNormalizeSkill(skill, index), index)));
+  const syncedWorkspace = await writeWorkGraphOsWorkspace(planned.workspace);
+  const objectIndex = buildWorkGraphOsObjectIndex(syncedWorkspace);
+  const historyEntry = await appendWorkGraphOsHistory(syncedWorkspace, "manual");
   res.json({
     source: "workgraph-workflow-planner",
     plan: planned.plan,
-    workspace: planned.workspace,
+    workspace: syncedWorkspace,
     routingDecision: planned.routingDecision,
     memory: planned.memory,
     objectIndex,
@@ -7072,16 +9107,172 @@ app.put("/workgraph-os/workspace", async (req, res) => {
     updatedAt: now()
   });
   if (!parsed.success) return res.status(400).json({ message: "Invalid WorkGraph OS workspace payload" });
-  await writeWorkGraphOsWorkspace(parsed.data);
-  const objectIndex = buildWorkGraphOsObjectIndex(parsed.data);
-  const historyEntry = await appendWorkGraphOsHistory(parsed.data);
+  const syncedWorkspace = await writeWorkGraphOsWorkspace(parsed.data);
+  const objectIndex = buildWorkGraphOsObjectIndex(syncedWorkspace);
+  const historyEntry = await appendWorkGraphOsHistory(syncedWorkspace);
   res.json({
     storage: {
       mode: "filesystem-json",
       file: workGraphOsDataFile,
       exists: true
     },
-    workspace: parsed.data,
+    workspace: syncedWorkspace,
+    objectIndex,
+    historyEntry
+  });
+});
+
+app.post("/workgraph-os/feedback", async (req, res) => {
+  const workspace = await readWorkGraphOsWorkspace();
+  if (!workspace) return res.status(409).json({ message: "WorkGraph OS workspace is empty; save a workspace before recording feedback" });
+  const parsed = workGraphOsFeedbackSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ message: "Invalid WorkGraph OS feedback payload" });
+  const input = parsed.data;
+  const createdAt = now();
+  const feedback = {
+    id: input.id ?? `fb-${Date.now().toString(36)}-${nanoid(6)}`,
+    targetId: input.targetId,
+    targetType: input.targetType,
+    rating: input.rating,
+    action: input.action ?? (input.rating === "accepted" ? "reuse" : input.rating === "failed" ? "avoid" : "revise"),
+    note: input.note.trim(),
+    memoryId: input.memoryId ?? `mem-${Date.now().toString(36)}-${nanoid(6)}`,
+    sourceResultId: input.sourceResultId,
+    sourceWorkflowId: input.sourceWorkflowId ?? objectString(workspace.workflow, "id", "workflow-active"),
+    brandId: input.brandId ?? workspace.activeBrandId,
+    createdAt
+  };
+  const brand = findBrand(feedback.brandId) ?? inferBrandFromPrompt(`${workspace.prompt}\n${feedback.note}`);
+  const learning = workGraphFeedbackBrandLearning(feedback.note, feedback.rating);
+  const appliedLearning = {
+    brandId: brand?.id ?? "",
+    brandForbiddenWords: [] as string[],
+    brandSceneKeywords: [] as string[],
+    modelPolicyId: "",
+    modelPolicyStrategy: "",
+    assetIds: [] as string[],
+    assetTags: [] as string[],
+    memoryReusable: learning.memoryReusable
+  };
+  if (brand) {
+    if (learning.forbiddenRule) {
+      brand.forbiddenWords = uniqueAppend(brand.forbiddenWords, learning.forbiddenRule);
+      appliedLearning.brandForbiddenWords = brand.forbiddenWords;
+    }
+    if (learning.sceneRule) {
+      brand.sceneKeywords = uniqueAppend(brand.sceneKeywords, learning.sceneRule);
+      appliedLearning.brandSceneKeywords = brand.sceneKeywords;
+    }
+    brand.updatedAt = createdAt;
+    await persistDb();
+    await syncBrandRecords({ brandDir: workGraphOsBrandDataDir }, [workGraphBrandPayload(brand, brand.id)]);
+  }
+  const targetResult = workspace.results.find((item) => objectString(item, "id", "") === feedback.targetId)
+    ?? workspace.results.find((item) => objectString(item, "id", "") === feedback.sourceResultId)
+    ?? workspace.results[0];
+  const feedbackMaterialIds = Array.from(new Set([
+    ...(feedback.targetType === "asset" ? [feedback.targetId] : []),
+    ...objectStringArray(targetResult, "materialIds"),
+    ...objectStringArray((workspace.promptRecords ?? []).find((item) => objectString(item, "id", "") === objectString(targetResult, "promptRecordId", "")), "materialIds")
+  ].filter(Boolean)));
+  const feedbackAssetTags = [
+    `feedback-${feedback.action}`,
+    feedback.rating === "accepted" ? "feedback-reuse" : "feedback-avoid",
+    brand?.id ? `brand-${brand.id}` : ""
+  ].filter(Boolean);
+  const targetRouting = objectField(targetResult, "routingDecision");
+  const targetPromptRecord = (workspace.promptRecords ?? []).find((item) => objectString(item, "id", "") === objectString(targetResult, "promptRecordId", ""));
+  const modelId = objectString(targetRouting, "selectedModelId", "") || objectString(targetResult, "modelId", "") || objectString(targetPromptRecord, "modelId", "") || workspace.activeModelId;
+  const strategy = objectString(targetRouting, "strategy", "") || objectString(targetResult, "modelStrategy", "") || objectString(targetPromptRecord, "modelStrategy", "") || "balanced";
+  const modelPolicy = {
+    id: `model-policy-${Date.now().toString(36)}-${nanoid(6)}`,
+    type: "model_policy",
+    targetType: feedback.targetType,
+    targetId: feedback.targetId,
+    feedbackId: feedback.id,
+    action: feedback.action,
+    rating: feedback.rating,
+    strategy,
+    provider: objectString(targetRouting, "selectedCapability", "custom"),
+    modelId,
+    fallbackModelIds: objectStringArray(targetRouting, "fallbackModelIds"),
+    note: feedback.note,
+    avoid: feedback.action === "avoid" || feedback.rating === "failed" || feedback.rating === "needs_revision",
+    updatedAt: createdAt
+  };
+  appliedLearning.modelPolicyId = modelPolicy.id;
+  appliedLearning.modelPolicyStrategy = strategy;
+  const updatedAssets = feedbackMaterialIds.map((assetId) => {
+    const asset = db.assets.find((item) => item.id === assetId);
+    if (!asset) return null;
+    asset.meta = mergeWorkGraphAssetMetaTags(asset.meta, feedbackAssetTags);
+    return asset;
+  }).filter(Boolean) as Asset[];
+  if (updatedAssets.length) {
+    appliedLearning.assetIds = updatedAssets.map((asset) => asset.id);
+    appliedLearning.assetTags = feedbackAssetTags;
+    await persistDb();
+    await Promise.all(updatedAssets.map((asset) => appendWorkGraphAssetUsage(workGraphAssetPayload(asset), {
+      type: "feedback",
+      feedbackId: feedback.id,
+      targetType: feedback.targetType,
+      targetId: feedback.targetId,
+      rating: feedback.rating,
+      action: feedback.action,
+      note: feedback.note,
+      tags: feedbackAssetTags
+    })));
+  }
+  const memory = buildWorkGraphFeedbackMemory({
+    memoryId: feedback.memoryId,
+    feedbackId: feedback.id,
+    targetType: feedback.targetType,
+    targetId: feedback.targetId,
+    rating: feedback.rating,
+    action: feedback.action,
+    note: feedback.note,
+    brandId: brand?.id ?? feedback.brandId,
+    createdAt,
+    learning
+  });
+  const nextWorkspace = {
+    ...workspace,
+    materials: workspace.materials.map((item) => {
+      const asset = updatedAssets.find((candidate) => candidate.id === objectString(item, "id", ""));
+      return asset ? workGraphAssetPayload(asset) : item;
+    }),
+    results: workspace.results.map((item) => {
+      const id = objectString(item, "id", "");
+      if (id !== feedback.targetId && id !== feedback.sourceResultId) return item;
+      const currentTrace = objectField(item, "trace");
+      const currentFeedbackIds = objectStringArray(item, "feedbackIds").length
+        ? objectStringArray(item, "feedbackIds")
+        : objectStringArray(currentTrace, "feedbackIds");
+      return {
+        ...(item as Record<string, unknown>),
+        feedbackIds: uniqueAppend(currentFeedbackIds, feedback.id),
+        trace: {
+          ...(currentTrace && typeof currentTrace === "object" ? currentTrace as Record<string, unknown> : {}),
+          feedbackIds: uniqueAppend(currentFeedbackIds, feedback.id)
+        },
+        updatedAt: createdAt
+      };
+    }),
+    modelPolicies: [modelPolicy, ...(workspace.modelPolicies ?? []).filter((item) => objectString(item, "id", "") !== modelPolicy.id)].slice(0, 200),
+    feedback: [feedback, ...workspace.feedback.filter((item) => objectString(item, "id", "") !== feedback.id)],
+    memories: [memory, ...workspace.memories.filter((item) => objectString(item, "id", "") !== memory.id)],
+    updatedAt: createdAt
+  };
+  const syncedWorkspace = await writeWorkGraphOsWorkspace(nextWorkspace);
+  const objectIndex = buildWorkGraphOsObjectIndex(syncedWorkspace);
+  const historyEntry = await appendWorkGraphOsHistory(syncedWorkspace, "manual");
+  res.status(201).json({
+    source: "workgraph-feedback-store",
+    feedback,
+    memory,
+    appliedLearning,
+    brand: brand ? workGraphBrandPayload(brand, brand.id) : null,
+    workspace: syncedWorkspace,
     objectIndex,
     historyEntry
   });
@@ -7093,20 +9284,98 @@ app.post("/workgraph-os/run", async (req, res) => {
   const parsed = workGraphOsRunSchema.safeParse(req.body ?? {});
   if (!parsed.success) return res.status(400).json({ message: "Invalid WorkGraph OS run payload" });
   const run = buildWorkGraphOsExecution(workspace, parsed.data);
-  await writeWorkGraphOsWorkspace(run.workspace);
-  const objectIndex = buildWorkGraphOsObjectIndex(run.workspace);
-  const historyEntry = await appendWorkGraphOsHistory(run.workspace, "manual");
+  let bridge: Awaited<ReturnType<typeof applyWorkGraphPiBridge>>;
+  try {
+    bridge = await applyWorkGraphPiBridge(run, parsed.data.bridge);
+  } catch (error) {
+    const statusCode = typeof (error as { statusCode?: number }).statusCode === "number" ? (error as { statusCode: number }).statusCode : 502;
+    return res.status(statusCode).json({ message: (error as Error).message });
+  }
+  const artifacts = await persistWorkGraphRunArtifacts(run);
+  const piSession = await writeWorkGraphPiSession(run, artifacts);
+  await Promise.all((run.result as Record<string, unknown>).materialIds instanceof Array
+    ? ((run.result as Record<string, unknown>).materialIds as unknown[]).map((assetId) => {
+        const asset = run.workspace.materials.find((item) => objectString(item, "id", "") === String(assetId));
+        return asset ? appendWorkGraphAssetUsage(asset, {
+          type: "node-run",
+          executionId: run.execution.id,
+          workflowId: run.execution.workflowId,
+          nodeId: run.execution.nodeId,
+          resultId: run.execution.resultId,
+          skillId: run.execution.skillId,
+          modelId: run.execution.modelId
+        }) : Promise.resolve();
+      })
+    : []);
+  const skillEvolution = await applyWorkGraphSkillEvolutionOutcome(run);
+  const variantSet = buildWorkGraphResultVariants(artifacts.result as Record<string, unknown>, parsed.data.variants ?? 1, run.routingDecision);
+  const workspaceWithArtifacts = {
+    ...run.workspace,
+    results: [
+      ...variantSet.variants.slice(1),
+      ...run.workspace.results.map((item) => objectString(item, "id", "") === run.execution.resultId ? variantSet.variants[0] : item)
+    ]
+  };
+  const syncedWorkspace = await writeWorkGraphOsWorkspace(workspaceWithArtifacts);
+  const objectIndex = buildWorkGraphOsObjectIndex(syncedWorkspace);
+  const historyEntry = await appendWorkGraphOsHistory(syncedWorkspace, "manual");
   res.json({
     execution: run.execution,
-    workspace: run.workspace,
+    workspace: syncedWorkspace,
     job: run.job,
-    result: run.result,
+    result: variantSet.variants[0],
+    variantGroupId: variantSet.variantGroupId,
+    variants: variantSet.variants,
     memory: run.memory,
+    promptRecord: run.promptRecord,
     routingDecision: run.routingDecision,
     executionLog: run.executionLog,
+    piSession,
+    bridge: { ...run.execution.bridge, outcome: bridge.mode, simulated: run.execution.simulated },
+    skillEvolution: skillEvolution.decision,
+    repairTask: skillEvolution.repairTask,
+    artifacts: artifacts.artifactPaths,
     objectIndex,
     historyEntry
   });
+});
+
+app.get("/workgraph-os/pi/status", async (_req, res) => {
+  const config = workGraphPiWebConfig();
+  const probe = await probePiWebBridge(config);
+  res.json({
+    source: "pi-web-bridge",
+    baseUrl: config.baseUrl,
+    mode: config.mode,
+    timeoutMs: config.timeoutMs,
+    enabled: probe.enabled,
+    reachable: probe.reachable,
+    version: probe.version,
+    reason: probe.reason
+  });
+});
+
+app.get("/workgraph-os/pi/sessions", async (req, res) => {
+  const limit = typeof req.query.limit === "string" ? Number(req.query.limit) : 20;
+  const sessions = await listPiSessionRecords(workGraphPiAdapterConfig(), Number.isFinite(limit) ? limit : 20);
+  res.json({
+    source: "pi-adapter",
+    piDir: workGraphOsPiDir,
+    sessions
+  });
+});
+
+app.get("/workgraph-os/pi/sessions/:id", async (req, res) => {
+  try {
+    const session = await readPiSessionRecord(workGraphPiAdapterConfig(), req.params.id);
+    res.json({
+      source: "pi-adapter",
+      piDir: workGraphOsPiDir,
+      session
+    });
+  } catch {
+    res.status(404).json({ message: "Pi session not found" });
+  }
 });
 
 app.get("/workgraph-os/logs", async (req, res) => {
@@ -7197,6 +9466,7 @@ app.get("/workgraph-os/sqlite/schema", async (_req, res) => {
   const workspace = await readWorkGraphOsWorkspace();
   const history = await readWorkGraphOsHistory();
   const exportPayload = buildWorkGraphOsSqliteExport(workspace, history);
+  await syncWorkGraphOsSqlite(exportPayload);
   res.json({
     ...workGraphOsSqliteReadiness(exportPayload),
     schema: exportPayload.tables.map((table) => ({ name: table.name, createSql: table.createSql }))
@@ -7207,9 +9477,46 @@ app.get("/workgraph-os/sqlite/export", async (_req, res) => {
   const workspace = await readWorkGraphOsWorkspace();
   const history = await readWorkGraphOsHistory();
   const exportPayload = buildWorkGraphOsSqliteExport(workspace, history);
+  await syncWorkGraphOsSqlite(exportPayload);
   res.json({
     ...exportPayload,
     readiness: workGraphOsSqliteReadiness(exportPayload)
+  });
+});
+
+app.get("/workgraph-os/snapshots", async (_req, res) => {
+  let manifest: unknown = null;
+  try {
+    manifest = JSON.parse(await readFile(workGraphOsSnapshotFile, "utf8"));
+  } catch {
+    manifest = null;
+  }
+  const directories = manifest && typeof manifest === "object" ? objectField(manifest, "directories") : undefined;
+  const directoryEntries = directories && typeof directories === "object" ? Object.entries(directories as Record<string, unknown>) : [];
+  const snapshots = await Promise.all(directoryEntries.map(async ([type, dir]) => {
+    if (typeof dir !== "string") return { type, dir: "", exists: false, indexes: [], files: [] };
+    try {
+      const entries = await readdir(dir, { withFileTypes: true });
+      return {
+        type,
+        dir,
+        exists: true,
+        indexes: entries.filter((entry) => entry.isFile() && entry.name.startsWith("_") && entry.name.endsWith(".json")).map((entry) => entry.name),
+        files: entries.filter((entry) => entry.isFile() && !entry.name.startsWith("_") && entry.name.endsWith(".json")).slice(0, 20).map((entry) => entry.name)
+      };
+    } catch {
+      return { type, dir, exists: false, indexes: [], files: [] };
+    }
+  }));
+  res.json({
+    source: "workgraph-object-snapshot-store",
+    storage: {
+      mode: "filesystem-json-snapshots",
+      file: workGraphOsSnapshotFile,
+      exists: Boolean(manifest)
+    },
+    manifest,
+    snapshots
   });
 });
 
@@ -7243,6 +9550,34 @@ app.get("/workgraph-os/history/:id", async (req, res) => {
   const entry = history.find((item) => item.id === req.params.id);
   if (!entry) return res.status(404).json({ message: "WorkGraph OS history entry not found" });
   res.json(entry);
+});
+
+// Version history for any object (material/skill/workflow/result/node/...) derived
+// from history snapshots. Returns the ordered states the object passed through,
+// collapsing consecutive identical snapshots so only real changes are versions.
+app.get("/workgraph-os/versions/:type/:id", async (req, res) => {
+  const history = await readWorkGraphOsHistory();
+  const ordered = [...history].sort((left, right) => String(left.createdAt).localeCompare(String(right.createdAt)));
+  const versions: Array<{ version: number; historyId: string; createdAt: string; reason: string; object: unknown }> = [];
+  let lastSignature = "";
+  for (const entry of ordered) {
+    // Match on the object's real payload id (the index id is positional, e.g.
+    // "result-0", so we also accept the stable id carried in the payload).
+    const match = (entry.objects ?? []).find((object) => object.type === req.params.type
+      && (object.id === req.params.id || objectString(object.payload, "id", "") === req.params.id));
+    if (!match) continue;
+    const signature = JSON.stringify(match.payload ?? match);
+    if (signature === lastSignature) continue;
+    lastSignature = signature;
+    versions.push({ version: versions.length + 1, historyId: entry.id, createdAt: entry.createdAt, reason: entry.reason, object: match });
+  }
+  res.json({
+    source: "workgraph-version-history",
+    type: req.params.type,
+    id: req.params.id,
+    versionCount: versions.length,
+    versions: versions.reverse()
+  });
 });
 
 app.get("/brands", (_req, res) => {
@@ -8546,7 +10881,109 @@ const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
 app.use(errorHandler);
 
 const port = Number(process.env.PORT ?? 4100);
+// Output watcher: when pi/generation drops a real media file into the watch
+// directory, register it as an Asset and surface it back in the workspace so
+// outputs automatically flow back into the material library.
+const workGraphOutputWatcherState = {
+  enabled: workGraphOsOutputWatchEnabled,
+  dir: workGraphOsOutputWatchDir,
+  active: false,
+  registered: [] as Array<{ assetId: string; path: string; kind: string; createdAt: string }>,
+  seen: new Set<string>(),
+  pending: new Map<string, NodeJS.Timeout>()
+};
+
+function isWatchableOutputFile(filePath: string) {
+  // Skip WorkGraph bookkeeping artifacts; only real media/documents flow back.
+  if (/[\\/]/.test(path.basename(filePath)) ) return false;
+  if (/\.(md|json|jsonl|tmp|part|crdownload)$/i.test(filePath)) return false;
+  if (path.basename(filePath).startsWith(".")) return false;
+  return /\.(png|jpe?g|webp|gif|svg|mp4|mov|webm|m4v|mp3|wav|m4a|aac|ogg|pdf|docx?|pptx?)$/i.test(filePath);
+}
+
+async function registerWatchedOutputFile(absolutePath: string) {
+  if (workGraphOutputWatcherState.seen.has(absolutePath)) return;
+  if (!existsSync(absolutePath)) return;
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(absolutePath);
+  } catch {
+    return;
+  }
+  if (!bytes.length) return;
+  workGraphOutputWatcherState.seen.add(absolutePath);
+  const filename = path.basename(absolutePath);
+  const mime = "";
+  const stored = await storeWorkGraphAssetBuffer(bytes, filename, mime);
+  const imageUrl = isPreviewableImageAsset(stored) ? `/workgraph-os/assets/file/${stored.relativePath}` : undefined;
+  const assetType: Asset["type"] = stored.kind === "video" ? "generated_video" : stored.kind === "image" ? "generated_image" : "upload";
+  const meta = [
+    "workgraph-os output watcher",
+    `kind:${stored.kind}`,
+    `file:${stored.relativePath}`,
+    `size:${stored.size}`,
+    `source:output-watcher`,
+    `origin:${absolutePath}`
+  ].join(" ");
+  const asset = createAsset(filename.replace(/\.[^.]+$/, "") || "Generated Output", assetType, activeBrand().id, "#94a3b8", meta, imageUrl);
+  const companion = await createWorkGraphAssetCompanions({ assetId: asset.id, title: asset.title, stored, brandId: asset.brandId, tags: ["output", stored.kind] });
+  asset.meta = [asset.meta, `thumbnail:${companion.thumbnailRelativePath}`, `version:${companion.versionRelativePath}`, `usage:${companion.usageRelativePath}`].join(" ");
+  db.assets.unshift(asset);
+  await persistDb();
+  const workspace = await readWorkGraphOsWorkspace();
+  if (workspace) {
+    const material = workGraphAssetPayload(asset);
+    await writeWorkGraphOsWorkspace({
+      ...workspace,
+      materials: [material, ...workspace.materials.filter((item) => objectString(item, "id", "") !== asset.id)],
+      updatedAt: now()
+    });
+  }
+  workGraphOutputWatcherState.registered.unshift({ assetId: asset.id, path: absolutePath, kind: stored.kind, createdAt: asset.createdAt });
+  workGraphOutputWatcherState.registered = workGraphOutputWatcherState.registered.slice(0, 200);
+  console.log(`WorkGraph output watcher registered asset ${asset.id} from ${absolutePath}`);
+}
+
+function scheduleWatchedOutputFile(absolutePath: string) {
+  // Debounce so a file is only imported once it has finished being written.
+  const existing = workGraphOutputWatcherState.pending.get(absolutePath);
+  if (existing) clearTimeout(existing);
+  workGraphOutputWatcherState.pending.set(absolutePath, setTimeout(() => {
+    workGraphOutputWatcherState.pending.delete(absolutePath);
+    registerWatchedOutputFile(absolutePath).catch((error) => console.warn(`WorkGraph output watcher failed for ${absolutePath}: ${(error as Error).message}`));
+  }, 750));
+}
+
+async function startWorkGraphOutputWatcher() {
+  if (!workGraphOsOutputWatchEnabled) return;
+  await mkdir(workGraphOsOutputWatchDir, { recursive: true });
+  try {
+    fsWatch(workGraphOsOutputWatchDir, { recursive: true }, (_event, filename) => {
+      if (!filename) return;
+      const absolutePath = path.resolve(workGraphOsOutputWatchDir, filename.toString());
+      if (!isWatchableOutputFile(absolutePath)) return;
+      scheduleWatchedOutputFile(absolutePath);
+    });
+    workGraphOutputWatcherState.active = true;
+    console.log(`WorkGraph output watcher active on ${workGraphOsOutputWatchDir}`);
+  } catch (error) {
+    console.warn(`WorkGraph output watcher could not start on ${workGraphOsOutputWatchDir}: ${(error as Error).message}`);
+  }
+}
+
+app.get("/workgraph-os/outputs", (_req, res) => {
+  res.json({
+    source: "workgraph-output-watcher",
+    enabled: workGraphOutputWatcherState.enabled,
+    active: workGraphOutputWatcherState.active,
+    dir: workGraphOutputWatcherState.dir,
+    registeredCount: workGraphOutputWatcherState.registered.length,
+    registered: workGraphOutputWatcherState.registered.slice(0, 50)
+  });
+});
+
 await loadDb();
+await startWorkGraphOutputWatcher();
 app.listen(port, () => {
   console.log(`SparkCanvas API listening on http://localhost:${port}`);
 });
