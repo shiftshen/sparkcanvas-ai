@@ -638,6 +638,19 @@ const workGraphOsResultDataDir = process.env.WORKGRAPH_OS_RESULT_DIR ?? path.joi
 const workGraphOsOutputDataDir = process.env.WORKGRAPH_OS_OUTPUT_DIR ?? path.join(projectRoot, "data", "outputs");
 const workGraphOsOutputWatchDir = process.env.WGOS_OUTPUT_WATCH_DIR ?? workGraphOsOutputDataDir;
 const workGraphOsOutputWatchEnabled = (process.env.WGOS_OUTPUT_WATCH ?? "on").trim().toLowerCase() !== "off";
+
+// Directories the output watcher monitors so generated media flows back as Assets.
+// Includes the configured output dir and the real pi-web working dir (where the
+// agent writes outputs), but never the repo root — watching the whole project
+// recursively would register every source file as an asset.
+function workGraphOsWatchDirs() {
+  const dirs = new Set([path.resolve(workGraphOsOutputWatchDir)]);
+  const piWebCwd = process.env.WGOS_PIWEB_CWD;
+  if (piWebCwd && path.resolve(piWebCwd) !== path.resolve(projectRoot)) {
+    dirs.add(path.resolve(piWebCwd));
+  }
+  return [...dirs];
+}
 const workGraphOsLogDataDir = process.env.WORKGRAPH_OS_LOG_DIR ?? path.join(projectRoot, "data", "logs");
 const workGraphOsWorkflowDataDir = process.env.WORKGRAPH_OS_WORKFLOW_DIR ?? path.join(projectRoot, "data", "workflows");
 const workGraphOsNodeDataDir = process.env.WORKGRAPH_OS_NODE_DIR ?? path.join(projectRoot, "data", "nodes");
@@ -10887,6 +10900,7 @@ const port = Number(process.env.PORT ?? 4100);
 const workGraphOutputWatcherState = {
   enabled: workGraphOsOutputWatchEnabled,
   dir: workGraphOsOutputWatchDir,
+  dirs: [] as string[],
   active: false,
   registered: [] as Array<{ assetId: string; path: string; kind: string; createdAt: string }>,
   seen: new Set<string>(),
@@ -10956,19 +10970,25 @@ function scheduleWatchedOutputFile(absolutePath: string) {
 
 async function startWorkGraphOutputWatcher() {
   if (!workGraphOsOutputWatchEnabled) return;
-  await mkdir(workGraphOsOutputWatchDir, { recursive: true });
-  try {
-    fsWatch(workGraphOsOutputWatchDir, { recursive: true }, (_event, filename) => {
-      if (!filename) return;
-      const absolutePath = path.resolve(workGraphOsOutputWatchDir, filename.toString());
-      if (!isWatchableOutputFile(absolutePath)) return;
-      scheduleWatchedOutputFile(absolutePath);
-    });
-    workGraphOutputWatcherState.active = true;
-    console.log(`WorkGraph output watcher active on ${workGraphOsOutputWatchDir}`);
-  } catch (error) {
-    console.warn(`WorkGraph output watcher could not start on ${workGraphOsOutputWatchDir}: ${(error as Error).message}`);
+  const dirs = workGraphOsWatchDirs();
+  const watched: string[] = [];
+  for (const dir of dirs) {
+    await mkdir(dir, { recursive: true });
+    try {
+      fsWatch(dir, { recursive: true }, (_event, filename) => {
+        if (!filename) return;
+        const absolutePath = path.resolve(dir, filename.toString());
+        if (!isWatchableOutputFile(absolutePath)) return;
+        scheduleWatchedOutputFile(absolutePath);
+      });
+      watched.push(dir);
+    } catch (error) {
+      console.warn(`WorkGraph output watcher could not start on ${dir}: ${(error as Error).message}`);
+    }
   }
+  workGraphOutputWatcherState.active = watched.length > 0;
+  workGraphOutputWatcherState.dirs = watched;
+  if (watched.length) console.log(`WorkGraph output watcher active on ${watched.join(", ")}`);
 }
 
 app.get("/workgraph-os/outputs", (_req, res) => {
@@ -10977,6 +10997,7 @@ app.get("/workgraph-os/outputs", (_req, res) => {
     enabled: workGraphOutputWatcherState.enabled,
     active: workGraphOutputWatcherState.active,
     dir: workGraphOutputWatcherState.dir,
+    dirs: workGraphOutputWatcherState.dirs,
     registeredCount: workGraphOutputWatcherState.registered.length,
     registered: workGraphOutputWatcherState.registered.slice(0, 50)
   });
