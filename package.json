@@ -16,6 +16,7 @@
     "test:smoke": "node scripts/workgraph-os-skill-scaffold.mjs && node scripts/smoke-test.mjs && node scripts/public-reference-strategy-smoke.mjs && node scripts/reference-upload-service-smoke.mjs && node scripts/reference-object-storage-smoke.mjs && node scripts/video-url-materialization-smoke.mjs && node scripts/compose-verification-failure-smoke.mjs && node scripts/workgraph-os-smoke.mjs && node scripts/workgraph-os-skill-evolution-smoke.mjs && npm run test:production-smoke",
     "workgraph-os:repair-skills": "node scripts/workgraph-os-skill-scaffold.mjs",
     "test:workgraph-os-ui": "node scripts/workgraph-os-ui-flow-smoke.mjs",
+    "test:workgraph-os-pi-real": "node scripts/workgraph-os-pi-real-smoke.mjs",
     "test:workgraph-os-ui-interaction": "node scripts/workgraph-os-ui-interaction-smoke.mjs",
     "test:workgraph-os-ui-quality": "node scripts/workgraph-os-ui-quality-smoke.mjs",
     "test:workgraph-os-ui-visual": "node scripts/workgraph-os-ui-visual-smoke.mjs",
