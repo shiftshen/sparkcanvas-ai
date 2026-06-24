@@ -76,11 +76,15 @@ const draftSkill = await request("/workgraph-os/skills", {
   })
 });
 assert(draftSkill.skill?.id, "UI smoke should create a draft Skill from the selected node");
+// Deterministic edited node input so we can assert the run uses the node body
+// (not just the global workspace prompt). Derived from the freshly-created skill
+// command, so it is stable within this run and independent of prior state.
+const editedNodeInput = `执行 ${draftSkill.skill.command}`;
 const workspaceWithDraftSkill = await request("/workgraph-os/workspace", {
   method: "PUT",
   body: JSON.stringify({
     ...draftSkill.workspace,
-    nodes: draftSkill.workspace.nodes.map((node) => node.id === "workflow-runner" ? { ...node, skillId: draftSkill.skill.id } : node),
+    nodes: draftSkill.workspace.nodes.map((node) => node.id === "workflow-runner" ? { ...node, skillId: draftSkill.skill.id, body: editedNodeInput } : node),
     activeNodeId: "workflow-runner",
     activeSkillId: draftSkill.skill.id,
     updatedAt: new Date().toISOString()
@@ -108,8 +112,8 @@ const run = await request("/workgraph-os/run", {
 assert(run.execution?.executor === "workgraph-skill-runtime", "UI smoke should run through local Skill runtime");
 assert(run.executionLog?.some((entry) => entry.payload?.previewOnly === true), "UI smoke must remain preview-only and avoid paid yijia calls");
 assert(String(run.result?.output).includes("TikTok Opening Video Plan"), "UI smoke should produce a previewable video plan");
-assert(String(run.result?.output).includes("执行 /ui-flow-skill_execute-mpqpjzsz"), "UI smoke should run with the edited node input instead of only the global workspace prompt");
-assert(String(run.promptRecord?.sourcePrompt).includes("执行 /ui-flow-skill_execute-mpqpjzsz") && run.promptRecord?.workspacePrompt === prompt, "UI smoke PromptRecord should keep both effective node prompt and original workspace prompt");
+assert(String(run.result?.output).includes(editedNodeInput), "UI smoke should run with the edited node input instead of only the global workspace prompt");
+assert(String(run.promptRecord?.sourcePrompt).includes(editedNodeInput) && run.promptRecord?.workspacePrompt === prompt, "UI smoke PromptRecord should keep both effective node prompt and original workspace prompt");
 assert(run.result?.trace?.piSessionId, "UI smoke result should trace Pi session");
 const piSessions = await request("/workgraph-os/pi/sessions?limit=5");
 assert(piSessions.source === "pi-adapter" && piSessions.sessions?.some((session) => session.id === run.result.trace.piSessionId), "UI smoke should read Pi session list back through the Pi adapter API");

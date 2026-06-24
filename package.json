@@ -13,7 +13,7 @@
     "build": "pnpm -r build",
     "start": "pnpm --filter @sparkcanvas/backend start",
     "check": "pnpm -r --filter=!@sparkcanvas/workgraph-os check",
-    "test:smoke": "node scripts/smoke-test.mjs && node scripts/public-reference-strategy-smoke.mjs && node scripts/reference-upload-service-smoke.mjs && node scripts/reference-object-storage-smoke.mjs && node scripts/video-url-materialization-smoke.mjs && node scripts/compose-verification-failure-smoke.mjs && node scripts/workgraph-os-smoke.mjs && node scripts/workgraph-os-skill-evolution-smoke.mjs && npm run test:production-smoke",
+    "test:smoke": "node scripts/workgraph-os-skill-scaffold.mjs && node scripts/smoke-test.mjs && node scripts/public-reference-strategy-smoke.mjs && node scripts/reference-upload-service-smoke.mjs && node scripts/reference-object-storage-smoke.mjs && node scripts/video-url-materialization-smoke.mjs && node scripts/compose-verification-failure-smoke.mjs && node scripts/workgraph-os-smoke.mjs && node scripts/workgraph-os-skill-evolution-smoke.mjs && npm run test:production-smoke",
     "workgraph-os:repair-skills": "node scripts/workgraph-os-skill-scaffold.mjs",
     "test:workgraph-os-ui": "node scripts/workgraph-os-ui-flow-smoke.mjs",
     "test:workgraph-os-ui-interaction": "node scripts/workgraph-os-ui-interaction-smoke.mjs",

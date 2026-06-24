@@ -112,7 +112,9 @@ async function syncDir(primaryDir, mirrorDir) {
 async function main() {
   await mkdir(piSkillDir, { recursive: true });
   await mkdir(dataSkillDir, { recursive: true });
-  const folders = new Set();
+  // Always ensure the canonical seed skill exists so a fresh checkout (e.g. CI,
+  // where .pi/ and data/ are gitignored) can scaffold it from the template.
+  const folders = new Set(["generated"]);
   for (const rootDir of [piSkillDir, dataSkillDir]) {
     for (const entry of await readdir(rootDir, { withFileTypes: true }).catch(() => [])) {
       if (entry.isDirectory() && !entry.name.startsWith(".")) folders.add(entry.name);
