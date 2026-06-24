@@ -84,13 +84,15 @@ jobs:
       - name: WGOS UI smokes (pi-web absent -> simulated, zero cost)
         env:
           WGOS_UI_URL: http://127.0.0.1:3203/
-          WGOS_WEB_URL: http://localhost:3203
+          WGOS_WEB_URL: http://127.0.0.1:3203
         run: |
-          node scripts/workgraph-os-ui-flow-smoke.mjs
-          node scripts/workgraph-os-ui-interaction-smoke.mjs
+          # Pixel/interaction smokes expect the default studio graph, so run them
+          # before the flow smoke, which PUTs its own workspace and mutates state.
           node scripts/workgraph-os-ui-quality-smoke.mjs
+          node scripts/workgraph-os-ui-interaction-smoke.mjs
           node scripts/workgraph-os-ui-visual-smoke.mjs
           node scripts/workgraph-os-ui-layout-smoke.mjs
+          node scripts/workgraph-os-ui-flow-smoke.mjs
 
       - name: Dump dev log on failure
         if: failure()
