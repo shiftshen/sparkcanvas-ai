@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: check + build + smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install sqlite3 CLI (SQLite writer parity)
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: npm test (check && build && test:smoke)
+        run: npm test
+
+  wgos-ui:
+    name: WGOS UI smokes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install sqlite3 CLI (SQLite writer parity)
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./apps/web/node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @sparkcanvas/web exec playwright install --with-deps chromium chromium-headless-shell
+
+      - name: Start dev stack (web :3203 + backend :4200)
+        run: |
+          WGOS_BACKEND_PORT=4200 WGOS_WEB_PORT=3203 nohup npm run dev > /tmp/wgos-dev.log 2>&1 &
+          for i in $(seq 1 150); do
+            bh=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:4200/health || true)
+            wh=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3203/ || true)
+            if [ "$bh" = "200" ] && [ "$wh" = "200" ]; then echo "dev stack up after ${i}s"; break; fi
+            sleep 1
+          done
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3203/)" = "200"
+
+      - name: WGOS UI smokes (pi-web absent -> simulated, zero cost)
+        env:
+          WGOS_UI_URL: http://127.0.0.1:3203/
+          WGOS_WEB_URL: http://localhost:3203
+        run: |
+          node scripts/workgraph-os-ui-flow-smoke.mjs
+          node scripts/workgraph-os-ui-interaction-smoke.mjs
+          node scripts/workgraph-os-ui-quality-smoke.mjs
+          node scripts/workgraph-os-ui-visual-smoke.mjs
+          node scripts/workgraph-os-ui-layout-smoke.mjs
+
+      - name: Dump dev log on failure
+        if: failure()
+        run: tail -120 /tmp/wgos-dev.log || true
