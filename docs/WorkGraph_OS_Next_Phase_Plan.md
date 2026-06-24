@@ -47,7 +47,23 @@
 - M2(Phase 2):studio 端到端可见真实产出、变体、版本。
 - M3(Phase 3+4):可维护后端、单测覆盖、SQLite 查询源、营销线可上线。
 
-## 附录:pi-web 契约(T3 填充)
-- message type:_待 T3 实测确认_
-- events 终止信号:_待确认_
-- 产物文件路径表示:_待确认_
+## 附录:pi-web 契约(T3 实测,pi-web @agegr/pi-web 0.6.x, :30141)
+实测于 2026-06-25,最便宜模型 `vdamo:gpt-5.4-mini`,临时 cwd,prompt `"x"`,实测 `usage.cost.total = 0`。
+
+**启动一次 agent 轮次**:`POST /api/agent/new`
+- body:`{ cwd, provider, modelId, thinkingLevel, type: "prompt", prompt: "<文本>" }`
+  - `cwd` 必填且目录必须存在(否则 400 `cwd is required` / `Directory does not exist`)。
+  - `type` 是**命令名**:合法命令含 `prompt`(用户提问)、`set_model`、`set_thinking_level`;非法命令返回 500 `Unsupported command: <type>`(探测非法命令零成本)。
+  - handler 从 body 取出 `provider/modelId/toolNames/thinkingLevel`,其余整体作为命令体传 `session.send()`。
+- 返回:`{ success: true, sessionId, data }`;`session.send()` 会 **await 整个轮次**,短轮次时 POST 同步返回(`data` 为 send 结果)。
+
+**事件流**:`GET /api/agent/[id]/events`(SSE,`text/event-stream`)
+- 实时:先发 `{type:"connected", sessionId}`,轮次进行中转发 coding-agent 事件;轮次**结束后**再连接只会收到 `connected`(非回放)。
+- 因此跟踪长轮次需在 POST 前/中并发连接;短轮次直接用 POST 返回的 `data` 或读 session 记录即可。
+
+**输出 / 产物 / 完成**:读 `GET /api/sessions/[id]`(或 session `.jsonl`,位于 `~/.pi/agent/sessions/<slug>/...jsonl`)
+- 轮次记录为 message 序列:`{role:"user",content:[{type:"text",text}]}` → `{role:"assistant",content:[{type:"text"|"toolCall",...}], usage:{...,cost}, stopReason}`。
+- 完成:assistant 末条 `stopReason != "toolUse"`;`info.modified` 更新。
+- 产物:agent 在 `cwd` 通过 `write`/`edit` 等工具调用产生的文件(由 cwd watcher 或解析 toolCall 捕获)。
+
+**T4 落地策略**:`POST /api/agent/new`(同步等轮次)→ 读 `/api/sessions/[id]` 取末条 assistant 文本为 output、扫 cwd 新文件为产物;成功且有返回才 `executor:"pi-web"`,否则诚实 `simulated`。
