@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port ${WGOS_WEB_PORT:-3200} --strictPort",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 3200",
     "check": "tsc -b --noEmit"
   },
