@@ -652,17 +652,17 @@ export async function runPiWebSession(config: PiWebBridgeConfig, request: PiWebR
   try {
     // pi-web (>=0.6) starts an agent turn with POST /api/agent/new. `cwd` is
     // required; provider/modelId/thinkingLevel are pulled out and the remaining
-    // body is forwarded to the coding-agent session as the user message.
+    // body is a coding-agent command. The user-message command is `prompt`.
+    // session.send() awaits the whole turn, so the POST returns after completion.
     const response = await piWebRequest(config, "/api/agent/new", {
       method: "POST",
       body: JSON.stringify({
         cwd,
         provider: config.provider,
         modelId: config.modelId,
-        type: "message",
-        message: request.prompt,
-        files: request.files,
-        metadata: { ...(request.metadata ?? {}), goal: request.goal, output: request.output, skill: request.skill }
+        thinkingLevel: "off",
+        type: "prompt",
+        prompt: request.prompt
       })
     }, config.timeoutMs);
     if (!response.ok) {
@@ -679,23 +679,29 @@ export async function runPiWebSession(config: PiWebBridgeConfig, request: PiWebR
     if (payload.success === false || !piSessionId) {
       return fail(`pi-web /api/agent/new did not start a session: ${sanitizePiWebReason(JSON.stringify(payload).slice(0, 180))}`, true);
     }
-    // Collect the agent turn output from the SSE event stream. Only a terminal
-    // event with returned output counts as a completed run; otherwise we report
-    // the run as dispatched-but-unconfirmed and the caller stays simulated.
-    const collected = await collectPiWebEvents(config, piSessionId);
-    if (!collected.terminal) {
-      return fail(`pi-web session ${piSessionId} dispatched but returned no terminal output within ${config.timeoutMs}ms`, true);
+    // The turn runs asynchronously; consume the live event stream and the session
+    // record to capture the assistant output. Only a turn that actually returned
+    // output is reported as a completed pi-web run — otherwise we stay simulated.
+    const collected = await collectPiWebTurn(config, piSessionId, cwd);
+    const hasOutput = collected.output.trim().length > 0;
+    if (collected.error || !hasOutput) {
+      return fail(
+        collected.error
+          ? `pi-web session ${piSessionId} reported an execution error`
+          : `pi-web session ${piSessionId} returned no output within ${config.timeoutMs}ms`,
+        true
+      );
     }
     return {
-      ok: !collected.error,
+      ok: true,
       reachable: true,
-      status: collected.error ? "error" : "done",
+      status: "done",
       output: collected.output,
       preview: collected.output,
       artifactPaths: collected.files,
       piSessionId,
-      raw: { start: payload, events: collected.eventCount },
-      reason: collected.error ? "pi-web reported execution failure" : "pi-web execution complete"
+      raw: { start: payload, events: collected.eventCount, messages: collected.messageCount },
+      reason: "pi-web execution complete"
     };
   } catch (error) {
     const reason = (error as Error).name === "AbortError"
@@ -705,69 +711,155 @@ export async function runPiWebSession(config: PiWebBridgeConfig, request: PiWebR
   }
 }
 
-// Read the pi-web agent SSE stream (GET /api/agent/[id]/events) until a terminal
-// event or timeout. Defensive parsing: pi-web forwards raw coding-agent events,
-// so we accumulate any text-like fields and detect file artifacts and terminal
-// signals without depending on the exact event schema.
-async function collectPiWebEvents(config: PiWebBridgeConfig, sessionId: string) {
-  const result = { terminal: false, error: false, output: "", files: [] as string[], eventCount: 0 };
-  const fetchImpl = piWebFetch(config);
-  if (typeof fetchImpl !== "function") return result;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
-  const textParts: string[] = [];
+// Parse one /api/sessions/[id] payload into assistant text + written files.
+// pi-web keeps messages in `context.messages` (live) and mirrors them into `tree`
+// once persisted; we read both defensively. `lastStopReason` lets the poller tell
+// a finished turn (final assistant message, stopReason != "toolUse") from one that
+// is still streaming tool calls.
+function parsePiWebSession(payload: Record<string, unknown>, cwd: string) {
+  const assistantTexts: string[] = [];
   const files = new Set<string>();
-  try {
-    const response = await fetchImpl(`${config.baseUrl.replace(/\/$/, "")}/api/agent/${encodeURIComponent(sessionId)}/events`, {
-      method: "GET",
-      headers: { accept: "text/event-stream" },
-      signal: controller.signal
-    });
-    if (!response.ok || !response.body) return result;
-    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let index = buffer.indexOf("\n\n");
-      while (index >= 0) {
-        const frame = buffer.slice(0, index);
-        buffer = buffer.slice(index + 2);
-        index = buffer.indexOf("\n\n");
-        const dataLine = frame.split("\n").find((line) => line.startsWith("data:"));
-        if (!dataLine) continue;
-        const json = dataLine.slice(5).trim();
-        if (!json || json === "[DONE]") { if (json === "[DONE]") result.terminal = true; continue; }
-        let event: Record<string, unknown>;
-        try { event = JSON.parse(json) as Record<string, unknown>; } catch { continue; }
-        result.eventCount += 1;
-        const type = objectString(event, "type", "");
-        for (const key of ["text", "content", "message", "delta", "output"]) {
-          const value2 = objectField(event, key);
-          if (typeof value2 === "string" && value2.trim()) textParts.push(value2);
-        }
-        for (const key of ["path", "file"]) {
-          const value2 = objectString(event, key, "");
-          if (value2) files.add(value2);
-        }
-        for (const value2 of objectStringArray(event, "files")) files.add(value2);
-        if (/error|failed/i.test(type)) result.error = true;
-        if (/complete|completed|done|finished|idle|turn_end|turn_complete|result|stopped|end/i.test(type)) {
-          result.terminal = true;
-          break;
+  let messageCount = 0;
+  let error = false;
+  let lastStopReason = "";
+  const handleMessage = (message: unknown) => {
+    if (!message || typeof message !== "object") return;
+    const role = objectString(message, "role", "");
+    const content = objectField(message, "content");
+    if (role === "assistant") {
+      lastStopReason = objectString(message, "stopReason", lastStopReason);
+      if (/error|failed/i.test(objectString(message, "stopReason", ""))) error = true;
+    }
+    if (!Array.isArray(content)) return;
+    for (const part of content) {
+      const partType = objectString(part, "type", "");
+      if (role === "assistant" && partType === "text") {
+        const text = objectString(part, "text", "");
+        if (text) {
+          assistantTexts.push(text);
+          messageCount += 1;
         }
       }
-      if (result.terminal) break;
+      if (partType === "toolCall" && /write|edit|create|save|patch/i.test(objectString(part, "name", ""))) {
+        const path = objectString(objectField(part, "arguments"), "path", "");
+        if (path.startsWith("/")) files.add(path);
+      }
     }
-    reader.cancel().catch(() => {});
-  } catch {
-    // Stream aborted or pi-web closed the connection; fall through with what we have.
-  } finally {
-    clearTimeout(timer);
+  };
+  const contextMessages = objectField(objectField(payload, "context"), "messages");
+  if (Array.isArray(contextMessages)) contextMessages.forEach(handleMessage);
+  const visitTree = (node: unknown) => {
+    if (Array.isArray(node)) return node.forEach(visitTree);
+    if (!node || typeof node !== "object") return;
+    const obj = node as Record<string, unknown>;
+    const entry = obj.entry && typeof obj.entry === "object" ? obj.entry as Record<string, unknown> : obj;
+    if (objectString(entry, "type", "") === "message") handleMessage(objectField(entry, "message"));
+    if (Array.isArray(obj.children)) obj.children.forEach(visitTree);
+  };
+  if (!assistantTexts.length) visitTree(objectField(payload, "tree"));
+  return {
+    error,
+    messageCount,
+    lastStopReason,
+    output: assistantTexts.join("\n").trim(),
+    files: Array.from(files).filter((path) => !cwd || path.startsWith(cwd))
+  };
+}
+
+// Capture a pi-web turn: consume the live event stream (the only real-time
+// channel — the session API does not reflect an in-progress turn), then read the
+// session record once as a fallback. Output is required for the caller to treat
+// the run as a real pi-web execution; otherwise it falls back to simulated.
+async function collectPiWebTurn(config: PiWebBridgeConfig, sessionId: string, cwd: string) {
+  const fetchImpl = piWebFetch(config);
+  const textParts: string[] = [];
+  const files = new Set<string>();
+  let error = false;
+  let eventCount = 0;
+  let terminal = false;
+  const collectFromValue = (value: unknown) => {
+    // Pull assistant text and written-file paths out of an arbitrarily-shaped event.
+    if (typeof value === "string") return;
+    if (Array.isArray(value)) { value.forEach(collectFromValue); return; }
+    if (!value || typeof value !== "object") return;
+    const obj = value as Record<string, unknown>;
+    if (objectString(obj, "role", "") === "assistant" || objectString(obj, "type", "") === "text") {
+      const text = objectString(obj, "text", "");
+      if (text) textParts.push(text);
+    }
+    if (/write|edit|create|save|patch/i.test(objectString(obj, "name", ""))) {
+      const path = objectString(objectField(obj, "arguments"), "path", "");
+      if (path.startsWith("/")) files.add(path);
+    }
+    for (const nested of Object.values(obj)) if (nested && typeof nested === "object") collectFromValue(nested);
+  };
+  if (typeof fetchImpl === "function") {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+    try {
+      const response = await fetchImpl(`${config.baseUrl.replace(/\/$/, "")}/api/agent/${encodeURIComponent(sessionId)}/events`, {
+        method: "GET",
+        headers: { accept: "text/event-stream" },
+        signal: controller.signal
+      });
+      if (response.ok && response.body) {
+        const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let index = buffer.indexOf("\n\n");
+          while (index >= 0) {
+            const frame = buffer.slice(0, index);
+            buffer = buffer.slice(index + 2);
+            index = buffer.indexOf("\n\n");
+            const dataLine = frame.split("\n").find((line) => line.startsWith("data:"));
+            if (!dataLine) continue;
+            const json = dataLine.slice(5).trim();
+            if (!json || json === "[DONE]") { if (json === "[DONE]") terminal = true; continue; }
+            let event: Record<string, unknown>;
+            try { event = JSON.parse(json) as Record<string, unknown>; } catch { continue; }
+            eventCount += 1;
+            const type = objectString(event, "type", "");
+            if (type === "connected") continue;
+            collectFromValue(event);
+            if (/error|failed/i.test(type)) error = true;
+            if (/complete|completed|done|finished|idle|turn_end|turn_complete|result|stopped|\bend\b/i.test(type)) terminal = true;
+          }
+          if (terminal) break;
+        }
+        reader.cancel().catch(() => {});
+      }
+    } catch {
+      // stream aborted/timed out — fall through to the session read
+    } finally {
+      clearTimeout(timer);
+    }
   }
-  result.output = textParts.join("").trim();
-  result.files = Array.from(files);
-  return result;
+  // Fallback: read the persisted session once (covers turns that finished without
+  // streamable text, or completed before we connected to the event stream).
+  let messageCount = textParts.length;
+  if (!textParts.length || !files.size) {
+    try {
+      const response = await piWebRequest(config, `/api/sessions/${encodeURIComponent(sessionId)}`, { method: "GET" }, Math.min(config.timeoutMs, 15000));
+      if (response.ok) {
+        const parsed = parsePiWebSession(await response.json() as Record<string, unknown>, cwd);
+        if (parsed.output) textParts.push(parsed.output);
+        parsed.files.forEach((f) => files.add(f));
+        if (parsed.error) error = true;
+        messageCount = Math.max(messageCount, parsed.messageCount);
+      }
+    } catch {
+      // ignore — output requirement below handles the empty case
+    }
+  }
+  return {
+    error,
+    eventCount,
+    messageCount,
+    output: textParts.join("\n").trim(),
+    files: Array.from(files).filter((path) => !cwd || path.startsWith(cwd))
+  };
 }

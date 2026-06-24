@@ -66,4 +66,6 @@
 - 完成:assistant 末条 `stopReason != "toolUse"`;`info.modified` 更新。
 - 产物:agent 在 `cwd` 通过 `write`/`edit` 等工具调用产生的文件(由 cwd watcher 或解析 toolCall 捕获)。
 
-**T4 落地策略**:`POST /api/agent/new`(同步等轮次)→ 读 `/api/sessions/[id]` 取末条 assistant 文本为 output、扫 cwd 新文件为产物;成功且有返回才 `executor:"pi-web"`,否则诚实 `simulated`。
+**T4 落地(已实现)**:`/workgraph-os/run` 真实优先(`WGOS_PIWEB_ENABLED` auto|on|off,per-run `bridge` 覆盖)。`runPiWebSession`:`POST /api/agent/new`(`type:"prompt"`)启动 → `collectPiWebTurn` 实时消费 `/api/agent/[id]/events` SSE 并兜底读一次 session → **仅当抓到非空 assistant 产出**才 `executor:"pi-web"`/`simulated:false`,否则诚实回退 simulated(reason 明确,如 "returned no output within Xms")。模型/cwd 由 `WGOS_PIWEB_PROVIDER/MODEL/CWD` 配置。
+
+**实测重要发现(本机 pi-web 实例)**:轮次为**异步**(POST 立即返回,`send()` 不等完成);`/api/sessions/[id]` 在轮次进行中**始终 0 消息**(只在完成后落盘);`/api/agent/[id]/events` SSE 对所测轮次只发 `connected`、未流出 message 事件(轮次极慢/疑似挂起)。因此当前实例下真实轮次**多数会诚实回退 simulated**;真实路径在 pi-web 返回产出时才激活。已修复早期"空产出却标 pi-web done"的假阳性(现要求非空产出)。后续 pi-web 版本若稳定流式,真实路径即生效,无需改动 WGOS。
