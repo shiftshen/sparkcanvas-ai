@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@11.1.3",
   "scripts": {
-    "dev": "concurrently \"pnpm --filter @sparkcanvas/backend dev:workgraph-os\" \"WGOS_WEB_PORT=${WGOS_WEB_PORT:-3203} WGOS_API_TARGET=http://localhost:${WGOS_BACKEND_PORT:-4200} pnpm --filter @sparkcanvas/web dev\"",
+    "dev": "concurrently \"pnpm --filter @sparkcanvas/backend dev:workgraph-os\" \"WGOS_WEB_PORT=${WGOS_WEB_PORT:-3203} WGOS_API_TARGET=http://127.0.0.1:${WGOS_BACKEND_PORT:-4200} pnpm --filter @sparkcanvas/web dev\"",
     "dev:marketing": "concurrently \"pnpm --filter @sparkcanvas/backend dev\" \"pnpm --filter @sparkcanvas/frontend dev\"",
     "dev:workgraph-os": "pnpm --filter @sparkcanvas/web dev",
     "dev:workgraph-os:legacy": "pnpm --filter @sparkcanvas/workgraph-os dev",
@@ -21,7 +21,7 @@
     "test:workgraph-os-ui-visual": "node scripts/workgraph-os-ui-visual-smoke.mjs",
     "test:production-smoke": "node scripts/production-smoke.mjs",
     "deploy:marketing": "bash scripts/deploy-marketing.sh",
-    "test": "npm run check && npm run build && npm run test:smoke"
+    "test": "npm run build && npm run check && npm run test:smoke"
   },
   "workspaces": [
     "apps/*",

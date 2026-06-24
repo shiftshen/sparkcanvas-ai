@@ -2,7 +2,7 @@
 const nextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   async rewrites() {
-    const backend = process.env.WGOS_API_TARGET || `http://localhost:${process.env.WGOS_BACKEND_PORT || "4200"}`;
+    const backend = process.env.WGOS_API_TARGET || `http://127.0.0.1:${process.env.WGOS_BACKEND_PORT || "4200"}`;
     return [
       {
         source: "/workgraph-os/:path*",
