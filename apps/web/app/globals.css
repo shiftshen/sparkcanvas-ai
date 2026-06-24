@@ -203,8 +203,17 @@ select:focus {
   }
 
   .wg-workspace-grid > aside:not([data-resource-panel="true"]) {
+    min-height: 220px;
     max-height: 360px;
     order: 4;
+  }
+
+  /* On the single-column compact layout the inspector always stacks and stays
+     reachable; the desktop "collapse to side" affordance must not hide it. */
+  .wg-workspace-grid[data-inspector-collapsed="true"] [data-inspector-panel="true"] {
+    display: flex;
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .wg-workspace-grid > .wg-bottom-panel,
