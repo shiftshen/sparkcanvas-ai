@@ -32,6 +32,8 @@ import PDFDocument from "pdfkit";
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { objectField, objectString, objectStringArray } from "./object-access.js";
+import { sqliteSqlValue, sqliteJson } from "./sqlite-literals.js";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createWriteStream, existsSync, readFileSync, renameSync, watch as fsWatch } from "node:fs";
 import path from "node:path";
@@ -2448,20 +2450,7 @@ async function persistWorkGraphRunArtifacts(run: ReturnType<typeof buildWorkGrap
   return { artifactPaths, result: resultWithArtifacts };
 }
 
-function objectField(input: unknown, key: string) {
-  if (!input || typeof input !== "object") return undefined;
-  return (input as Record<string, unknown>)[key];
-}
-
-function objectString(input: unknown, key: string, fallback = "") {
-  const value = objectField(input, key);
-  return typeof value === "string" ? value : fallback;
-}
-
-function objectStringArray(input: unknown, key: string) {
-  const value = objectField(input, key);
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-}
+// objectField / objectString / objectStringArray are imported from ./object-access (T10).
 
 function workGraphResultKind(output: string) {
   const normalized = output.toLowerCase();
@@ -3745,20 +3734,11 @@ function buildWorkGraphOsEdges(workspace: WorkGraphOsWorkspace | null, objects: 
   return edges;
 }
 
-function sqliteJson(value: unknown) {
-  return JSON.stringify(value ?? null);
-}
 
-function sqliteSqlString(value: string) {
-  return `'${value.replaceAll("'", "''")}'`;
-}
 
-function sqliteSqlValue(value: unknown) {
-  if (value === null || value === undefined) return "NULL";
-  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NULL";
-  if (typeof value === "boolean") return value ? "1" : "0";
-  return sqliteSqlString(String(value));
-}
+
+
+
 
 function buildWorkGraphOsSqliteScript(exportPayload: WorkGraphOsSqliteExport) {
   const lines = [
