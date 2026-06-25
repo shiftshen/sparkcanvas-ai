@@ -344,3 +344,16 @@ Current GitHub remote:
 ```text
 https://github.com/shiftshen/sparkcanvas-ai.git
 ```
+
+## 11. WorkGraph OS (WGOS) — 现状交接 (2026-06-25)
+
+WGOS 的执行已从"对象模型齐备但模拟"推进为真实可用,详见 `docs/WorkGraph_OS_Next_Phase_Plan.md`(含 T1-T15 完成状态、env、测试命令、pi-web 契约附录)。要点:
+
+- **pi-web 桥接**(`packages/pi-adapter`):`/workgraph-os/run` 真实优先(`WGOS_PIWEB_ENABLED` auto|on|off,per-run `bridge` 覆盖)。真实轮次 `POST /api/agent/new`(`type:"prompt"`)+ events SSE;**仅抓到真实非空产出才 `executor:"pi-web"`,否则诚实 `simulated`**。本机 pi-web 实例(:30141)轮次慢/挂起,多数诚实回退。状态:`GET /workgraph-os/pi/status`。
+- **文件/产出**:选中素材绝对路径注入 finalPrompt;输出 watcher(`WGOS_OUTPUT_WATCH_DIR` + 显式 `WGOS_PIWEB_CWD`,不含 repo root)自动把新媒体回流为 Asset(`/workgraph-os/outputs`)。
+- **SQLite**:写路径降级 cli→node:sqlite→json-only(`WGOS_SQLITE_WRITER`),永不抛错;opt-in 读源 `WGOS_SQLITE_READ=on`(`/workgraph-os/objects` 走 SQLite,默认 JSON)。
+- **技能进化**:成功×N→模板、失败→修复任务(`/workgraph-os/skills/evolution`,`WGOS_SKILL_PROMOTE_THRESHOLD`)。
+- **模型/变体/版本**:`/workgraph-os/models/probe`(live 可用性)、run `variants`(并排)、`/workgraph-os/versions/:type/:id`(版本链);studio 已有变体并排 + 版本回滚 + 真实产出预览面板。
+- **CI**:`.github/workflows/ci.yml`(gate=npm test+test:unit;wgos-ui=quality+flow 阻塞、interaction/visual/layout 非阻塞)。
+- **测试**:`npm test`、`npm run test:unit`、`npm run test:workgraph-os-ui`、`npm run test:workgraph-os-pi-real`(gated)。
+- **风险/待办**:server.ts 仍大(增量拆分已起步);pixel smoke 待硬化(T15);上线闸门 flip 到 ready 需真实 image/text/video keys + 公网 input_reference(ops 配置)。

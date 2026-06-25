@@ -2,6 +2,22 @@
 
 状态基线(2026-06-25):WGOS 五项已真实化并合入 `main`(`908b9ae`、`ce6e8dc`);`npm test`(check && build && test:smoke)与全套 WGOS smoke(flow/interaction/quality/visual/layout/skill-evolution)全绿。本计划处理剩余的真实性缺口、前端闭环、工程卫生与上线。
 
+## 完成状态(2026-06-25,T1-T14)
+全部 14 项 + T15 已处理,`npm test`/`npm run test:unit`/CI 全绿。
+- **T1** pnpm 统一(删 package-lock,`pnpm -r` 脚本)· **T2** GitHub Actions CI(gate=check+build+smoke+unit;wgos-ui=quality+flow 阻塞、pixel 非阻塞)。
+- **T3** pi-web 契约实测(见附录)· **T4** 真执行落地(`type:"prompt"`+events SSE,仅真实产出才 executor=pi-web,否则诚实 simulated)· **T5** watcher 纳入真实 pi cwd · **T6** gated 真实 e2e(`npm run test:workgraph-os-pi-real`,无 pi-web skip)。
+- **T7** 变体并排 UI · **T8** 版本历史+回滚 · **T9** 真实产出预览(读后端英文 output/previewUrl)。
+- **T10** server.ts 增量拆分(`object-access.ts`、`sqlite-literals.ts`;进一步域拆分为后续)· **T11** vitest 单测(`test:unit`,pi-adapter 13 + skill-runtime 5)。
+- **T12** SQLite 查询源(opt-in `WGOS_SQLITE_READ=on`,默认 JSON 零回归)· **T13** 上线闸门 production-smoke 覆盖(闸门 `productionReady === 全部ready`)· **T14** 本文档/交接同步。
+- **T15**(追踪)pixel/交互 smoke 现非阻塞,待 seed 已知图+稳健等待后改回阻塞。
+
+### 新增环境变量
+`WGOS_PIWEB_ENABLED`(auto|on|off)、`WGOS_PIWEB_BASE_URL`(默认 http://localhost:30141)、`WGOS_PIWEB_PROVIDER`、`WGOS_PIWEB_MODEL`、`WGOS_PIWEB_CWD`、`WGOS_PIWEB_TIMEOUT_MS`;`WGOS_OUTPUT_WATCH`(on|off)、`WGOS_OUTPUT_WATCH_DIR`;`WGOS_SQLITE_WRITER`(cli|node|off)、`WGOS_SQLITE_READ`(on|off)、`WGOS_SKILL_PROMOTE_THRESHOLD`。
+上线闸门(flip 到 Launch ready 所需,属 ops/secrets):`IMAGE_GEN_KEY`/`VDAMO_OPENAI_API_KEY`、`TEXT_GEN_KEY`、`VIDEO_GEN_KEY`/`YIJIARJ_API_KEY`(+`SPARKCANVAS_ALLOW_PAID_VIDEO_GEN=1`)、`SPARKCANVAS_PUBLIC_BASE_URL`(或上传/对象存储发布配置)。
+
+### 测试命令
+`npm test`(check+build+smoke)· `npm run test:unit`(vitest)· `npm run test:workgraph-os-ui`(e2e,需 dev 栈)· `npm run test:workgraph-os-pi-real`(gated 真实 pi-web,无则 skip)· pixel:`test:workgraph-os-ui-{interaction,visual,layout,quality}`(需 dev 栈 + playwright chromium v1223)。
+
 ## 全局约束(每阶段都适用)
 - 不改 production `marketing.xmanx.com` 的对外行为;不硬编码任何 API key(只走 env / `auth.json`,已 gitignore)。
 - 不提交 `backend/data`、生成媒体、`output/`、私有下载。
