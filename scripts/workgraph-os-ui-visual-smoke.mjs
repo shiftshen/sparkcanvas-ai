@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { mkdir } from "node:fs/promises";
+import { seedCanonicalWorkspace } from "./lib/wgos-seed.mjs";
 
 const url = process.env.WGOS_UI_URL || "http://127.0.0.1:3203/";
 const webRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
@@ -18,7 +19,8 @@ function assert(condition, message) {
 async function auditViewport(page, name, viewport) {
   await page.setViewportSize(viewport);
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(1000);
+  await page.waitForFunction(() => Boolean(document.querySelector("[data-bottom-goal-input='true']") || document.querySelector("[data-workgraph-canvas]")), { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(400);
   const screenshot = `output/playwright/workgraph-final-${name}.png`;
   await page.screenshot({ path: screenshot, fullPage: false });
   const metrics = await page.evaluate((screenshotPath) => {
@@ -108,6 +110,7 @@ async function auditViewport(page, name, viewport) {
 await mkdir("output/playwright", { recursive: true });
 const browser = await chromium.launch({ headless: true });
 try {
+  await seedCanonicalWorkspace(url);
   const page = await browser.newPage();
   const results = [];
   results.push(await auditViewport(page, "desktop", { width: 1280, height: 720 }));

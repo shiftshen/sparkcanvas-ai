@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { seedCanonicalWorkspace, waitForActiveNode } from "./lib/wgos-seed.mjs";
 
 const url = process.env.WGOS_UI_URL || "http://127.0.0.1:3203/";
 const webRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
@@ -106,9 +107,11 @@ async function measure(page) {
 
 const browser = await chromium.launch({ headless: true });
 try {
+  await seedCanonicalWorkspace(url);
   const desktop = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   await desktop.goto(url, { waitUntil: "domcontentloaded" });
-  await desktop.waitForTimeout(1000);
+  await desktop.waitForFunction(() => document.querySelectorAll("[data-bottom-node-switch]").length >= 2, { timeout: 15000 });
+  await desktop.waitForTimeout(300);
   const desktopMetrics = await measure(desktop);
 
   assert(desktopMetrics.title === "AI 工作图谱", `unexpected page title: ${desktopMetrics.title}`);
@@ -148,7 +151,7 @@ try {
   assert(slashTextInput.activeIsGoal && slashTextInput.endsWithSlash, "slash is not typed normally inside the goal input");
   await desktop.locator("body").click({ position: { x: 24, y: 24 } });
   await desktop.keyboard.press("2");
-  await desktop.waitForTimeout(150);
+  await waitForActiveNode(desktop, ["brand", "brand-context"]);
   const numberSwitch = await desktop.evaluate(() => {
     const activeChip = document.querySelector("[data-bottom-node-active='true']");
     const activeCanvasNode = document.querySelector("[data-canvas-active-node='true']");
@@ -177,7 +180,8 @@ try {
 
   const compact = await browser.newPage({ viewport: { width: 820, height: 760 } });
   await compact.goto(url, { waitUntil: "domcontentloaded" });
-  await compact.waitForTimeout(1000);
+  await compact.waitForFunction(() => document.querySelectorAll("[data-bottom-node-switch]").length >= 2, { timeout: 15000 });
+  await compact.waitForTimeout(300);
   const compactMetrics = await measure(compact);
 
   assert(!compactMetrics.hasHorizontalOverflow, "compact viewport has horizontal overflow");

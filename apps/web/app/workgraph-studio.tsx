@@ -3767,7 +3767,8 @@ export default function WorkGraphStudio() {
                 </button>
               </div>
             </div>
-            <div className="wg-current-node-card wg-bottom-zone min-h-0 rounded-md border border-white/10 bg-[#111418]/90 p-1.5" data-bottom-current-node="true" data-bottom-active-node-card="true" data-current-node-console="true" data-current-node-card-density="compact" data-bottom-panel-role="node">
+            <div className="wg-current-node-card wg-bottom-zone min-h-0 flex flex-col overflow-hidden rounded-md border border-white/10 bg-[#111418]/90 p-1.5" data-bottom-current-node="true" data-bottom-active-node-card="true" data-current-node-console="true" data-current-node-card-density="compact" data-bottom-panel-role="node">
+              <div className="wg-current-node-scroll min-h-0 flex-1 overflow-auto pr-0.5">
               <div className="wg-bottom-zone-header mb-1.5 flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="truncate text-[12px] font-semibold text-slate-100">{displayNodeTitle(activeNode)}</div>
@@ -3849,8 +3850,9 @@ export default function WorkGraphStudio() {
                   </button>
                 ))}
               </div>
+              </div>
               <div
-                className="wg-current-node-actions mt-1 flex items-center gap-1 rounded-md border border-white/10 bg-slate-950/45 p-1"
+                className="wg-current-node-actions mt-1 flex shrink-0 items-center gap-1 rounded-md border border-white/10 bg-slate-950/45 p-1"
                 data-current-node-action-bar="true"
               >
                 <button

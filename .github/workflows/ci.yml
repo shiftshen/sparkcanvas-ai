@@ -84,26 +84,19 @@ jobs:
           done
           if [ "$up" != "1" ]; then echo "::error::dev stack did not come up (backend=$bh web=$wh)"; echo "----- dev log -----"; cat /tmp/wgos-dev.log; exit 1; fi
 
-      - name: WGOS UI smoke — quality (blocking, static)
-        run: node scripts/workgraph-os-ui-quality-smoke.mjs
-
-      - name: WGOS UI smokes — pixel/interaction (non-blocking, env-sensitive)
-        continue-on-error: true
+      - name: WGOS UI smokes (blocking)
         env:
           WGOS_UI_URL: http://127.0.0.1:3203/
+          WGOS_WEB_URL: http://127.0.0.1:3203
         run: |
-          # Browser smokes depend on default-graph node order + click timing, so
-          # they are env-sensitive; run on the fresh default graph (before the
-          # state-mutating flow smoke) for signal, but don't gate CI. Tracked for
-          # hardening (seed a known graph + robust waits).
+          # Hardened (T15): each browser smoke seeds a canonical workspace and
+          # polls for state instead of relying on default-graph order or fixed
+          # delays, so they are deterministic and gate CI again.
+          node scripts/workgraph-os-ui-quality-smoke.mjs
           node scripts/workgraph-os-ui-interaction-smoke.mjs
           node scripts/workgraph-os-ui-visual-smoke.mjs
           node scripts/workgraph-os-ui-layout-smoke.mjs
-
-      - name: WGOS UI smoke — flow e2e (blocking)
-        env:
-          WGOS_WEB_URL: http://127.0.0.1:3203
-        run: node scripts/workgraph-os-ui-flow-smoke.mjs
+          node scripts/workgraph-os-ui-flow-smoke.mjs
 
       - name: Dump dev log on failure
         if: failure()

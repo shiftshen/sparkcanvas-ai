@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { seedCanonicalWorkspace, waitForActiveNode } from "./lib/wgos-seed.mjs";
 
 const url = process.env.WGOS_UI_URL || "http://127.0.0.1:3203/";
 const webRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
@@ -216,12 +217,17 @@ try {
   const uploadPath = path.join(uploadDir, `${uploadTitle}.png`);
   await writeFile(uploadPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=", "base64"));
 
+  await seedCanonicalWorkspace(url);
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   uploadPage = page;
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(1000);
+  // Wait for the canonical graph's node switches to render before interacting,
+  // so the test is timing-robust instead of relying on a fixed delay.
+  await page.waitForFunction(() => document.querySelectorAll("[data-bottom-node-switch]").length >= 2, { timeout: 15000 });
+  await page.waitForTimeout(300);
 
   await clickIndexed(page, "[data-bottom-node-switch]", 1, "second node switch");
+  await waitForActiveNode(page, ["brand", "brand-context"]);
   let state = await metrics(page);
   assert(state.activeBottomNode === "brand" || state.activeBottomNode === "brand-context", `brand node did not activate: ${state.activeBottomNode}`);
 
@@ -249,10 +255,12 @@ try {
 
   await page.locator("body").click({ position: { x: 24, y: 24 } });
   await page.keyboard.press("1");
+  await waitForActiveNode(page, ["goal"]);
   state = await metrics(page);
   assert(state.activeBottomNode === "goal", `1 shortcut did not switch to first node: ${state.activeBottomNode}`);
 
   await page.keyboard.press("2");
+  await waitForActiveNode(page, ["brand", "brand-context"]);
   state = await metrics(page);
   assert(state.activeBottomNode === "brand" || state.activeBottomNode === "brand-context", `2 shortcut did not switch back to second node: ${state.activeBottomNode}`);
 
