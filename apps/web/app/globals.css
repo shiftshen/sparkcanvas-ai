@@ -12,16 +12,18 @@
   --accent: 190 78% 54%;
   --accent-sub: 154 58% 48%;
   --canvas-rail: 220 9% 10%;
-  --wg-surface: rgba(14, 16, 19, 0.96);
-  --wg-surface-raised: rgba(18, 20, 24, 0.96);
-  --wg-surface-soft: rgba(255, 255, 255, 0.032);
-  --wg-border: rgba(255, 255, 255, 0.075);
-  --wg-border-strong: rgba(83, 199, 218, 0.28);
-  --wg-shadow-soft: 0 10px 22px rgba(0, 0, 0, 0.18);
-  --wg-font-size-ui: 12px;
-  --wg-font-size-dense: 11px;
-  --wg-font-size-micro: 10px;
-  --wg-ease: 120ms ease;
+  --wg-surface: rgba(17, 20, 26, 0.97);
+  --wg-surface-raised: rgba(23, 27, 34, 0.98);
+  --wg-surface-soft: rgba(255, 255, 255, 0.045);
+  --wg-border: rgba(255, 255, 255, 0.1);
+  --wg-border-strong: rgba(83, 199, 218, 0.34);
+  --wg-shadow-soft: 0 14px 30px rgba(0, 0, 0, 0.28);
+  /* Readability pass: bump the base type scale so the UI stops feeling cramped. */
+  --wg-font-size-ui: 13.5px;
+  --wg-font-size-dense: 12.5px;
+  --wg-font-size-micro: 11.5px;
+  --wg-radius: 10px;
+  --wg-ease: 140ms ease;
 }
 
 * {
@@ -71,7 +73,7 @@ select:focus {
 }
 
 .react-flow__node {
-  font-size: 11px;
+  font-size: 12.5px;
 }
 
 .react-flow__handle {
@@ -2230,4 +2232,61 @@ textarea {
       font-size: 9px;
     }
   }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Readability & polish pass (studio UI redesign): more breathing room, clearer
+   hierarchy and contrast, and softer panel surfaces — without touching layout
+   structure or behaviour. Scoped to .wg-shell so the marketing site is untouched.
+   ────────────────────────────────────────────────────────────────────────── */
+.wg-shell {
+  font-size: var(--wg-font-size-dense);
+  line-height: 1.5;
+}
+.wg-shell .text-micro {
+  letter-spacing: 0.01em;
+}
+.wg-panel {
+  border-radius: var(--wg-radius);
+  box-shadow: var(--wg-shadow-soft);
+}
+/* Give the dense panels real internal breathing room. */
+.wg-resource-panel,
+.wg-inspector-panel,
+.wg-bottom-panel,
+.wg-preview-panel {
+  --panel-gap: 0.6rem;
+}
+.wg-inspector-header,
+.wg-resource-header {
+  padding: 0.7rem 0.8rem;
+}
+/* Headings: stronger, more legible section titles. */
+.wg-shell [data-property-panel-heading="true"],
+.wg-shell [data-inspector-summary="true"],
+.wg-shell [data-resource-primary-tab],
+.wg-shell summary {
+  letter-spacing: 0.012em;
+}
+/* Cards / tiles: clearer separation and hover affordance. */
+.wg-shell [data-resource-object-list] > *,
+.wg-shell [data-variant-item="true"],
+.wg-shell [data-version-item="true"],
+.wg-shell [data-preview-gallery-item="true"] {
+  border-radius: 9px;
+}
+.wg-shell [data-variant-item="true"] { padding: 0.5rem 0.6rem; }
+/* Buttons: a bit more tappable, less cramped. */
+.wg-shell button[data-variant-select="true"],
+.wg-shell button[data-version-rollback="true"] {
+  padding: 0.15rem 0.5rem;
+  border-radius: 7px;
+}
+/* Secondary node-module drawer must not blanket the canvas: cap its height and
+   keep it docked to the bottom band with a clear surface + scroll. */
+.wg-shell [data-node-native-module-drawers="true"] {
+  max-height: 46vh;
+  overflow: auto;
+  border-radius: var(--wg-radius) var(--wg-radius) 0 0;
+  box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.4);
 }

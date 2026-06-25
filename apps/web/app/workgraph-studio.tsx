@@ -944,7 +944,7 @@ function StudioNode({ data, selected }: NodeProps<Node<{ 节点: WorkGraphNode; 
       >
         <Handle type="target" position={Position.Left} />
         <span className="wg-node-status-rail" aria-hidden="true" data-node-status-rail="true" />
-        <div className="wg-node-status-strip flex h-6 items-center justify-between gap-1.5 border-b border-white/10 px-2 text-[10px]" data-node-status-strip="true" data-node-status-layout="step-header">
+        <div className="wg-node-status-strip flex h-6 items-center justify-between gap-1.5 border-b border-white/10 px-2 text-[12px]" data-node-status-strip="true" data-node-status-layout="step-header">
           <span className={cn("rounded px-1.5 py-0.5 uppercase", nodeKindStyle)} data-node-kind-tag="true">{nodeKindTag}</span>
           <span className="ml-auto shrink-0 text-slate-300">{node.status || "就绪"}</span>
         </div>
@@ -952,9 +952,9 @@ function StudioNode({ data, selected }: NodeProps<Node<{ 节点: WorkGraphNode; 
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="truncate text-[12px] font-semibold text-slate-100">{displayNodeTitle(node)}</div>
-              <p className="mt-0.5 line-clamp-1 text-[10px] leading-4 text-slate-500" data-node-intent-line="true">{operationProfile.intent}</p>
+              <p className="mt-0.5 line-clamp-1 text-[12px] leading-5 text-slate-500" data-node-intent-line="true">{operationProfile.intent}</p>
             </div>
-            <span className="wg-node-index-pill shrink-0 rounded px-1.5 py-0.5 text-[10px]" title={node.id}>{displayNodeShortId(node)}</span>
+            <span className="wg-node-index-pill shrink-0 rounded px-1.5 py-0.5 text-[12px]" title={node.id}>{displayNodeShortId(node)}</span>
           </div>
         </div>
         <div className="wg-node-progress h-0.5 bg-slate-800" data-node-progress-bar="true">
@@ -963,8 +963,8 @@ function StudioNode({ data, selected }: NodeProps<Node<{ 节点: WorkGraphNode; 
         <div className="wg-node-summary-row grid min-h-0 gap-1 p-1.5" data-node-summary-row="true" data-node-section="operation">
           <div className="wg-node-operation rounded-md border border-white/10 bg-black/18 p-1.5" data-node-operation-profile="true" data-node-operation-layout="action-summary" data-node-operation-density="compact" data-node-operation-panel="true" data-node-section="operation">
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-[11px] font-semibold text-cyan-100">{operationProfile.role}</span>
-              <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px]", moduleKind === "video" && "bg-rose-400/12 text-rose-200", moduleKind === "skill" && "bg-violet-400/12 text-violet-200", moduleKind === "model" && "bg-cyan-400/12 text-cyan-200", "bg-slate-800 text-slate-400")}>{displayModuleKind(moduleKind)}</span>
+              <span className="truncate text-[12.5px] font-semibold text-cyan-100">{operationProfile.role}</span>
+              <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[12px]", moduleKind === "video" && "bg-rose-400/12 text-rose-200", moduleKind === "skill" && "bg-violet-400/12 text-violet-200", moduleKind === "model" && "bg-cyan-400/12 text-cyan-200", "bg-slate-800 text-slate-400")}>{displayModuleKind(moduleKind)}</span>
             </div>
           </div>
         </div>
@@ -987,7 +987,7 @@ function StudioNode({ data, selected }: NodeProps<Node<{ 节点: WorkGraphNode; 
     >
       <Handle type="target" position={Position.Left} />
       <span className="wg-node-status-rail" aria-hidden="true" data-node-status-rail="true" />
-      <div className="wg-node-status-strip flex h-6 items-center justify-between gap-1.5 border-b border-white/10 px-2 text-[10px]" data-node-status-strip="true" data-node-status-layout="step-header">
+      <div className="wg-node-status-strip flex h-6 items-center justify-between gap-1.5 border-b border-white/10 px-2 text-[12px]" data-node-status-strip="true" data-node-status-layout="step-header">
         <span className={cn("rounded px-1.5 py-0.5 uppercase", nodeKindStyle)} data-node-kind-tag="true">{nodeKindTag}</span>
         <span className="truncate text-slate-500">{displayNodeType(node.type)}</span>
         <span className="ml-auto shrink-0 text-slate-300">{node.status || "就绪"}</span>
@@ -996,9 +996,9 @@ function StudioNode({ data, selected }: NodeProps<Node<{ 节点: WorkGraphNode; 
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="truncate text-[12px] font-semibold text-slate-100">{displayNodeTitle(node)}</div>
-            <p className="mt-0.5 line-clamp-1 text-[10px] leading-4 text-slate-500" data-node-intent-line="true">{operationProfile.intent}</p>
+            <p className="mt-0.5 line-clamp-1 text-[12px] leading-5 text-slate-500" data-node-intent-line="true">{operationProfile.intent}</p>
           </div>
-          <span className="wg-node-index-pill shrink-0 rounded px-1.5 py-0.5 text-[10px]" title={node.id}>{displayNodeShortId(node)}</span>
+          <span className="wg-node-index-pill shrink-0 rounded px-1.5 py-0.5 text-[12px]" title={node.id}>{displayNodeShortId(node)}</span>
         </div>
       </div>
       <div className="wg-node-progress h-0.5 bg-slate-800" data-node-progress-bar="true">
@@ -1018,49 +1018,49 @@ function StudioNode({ data, selected }: NodeProps<Node<{ 节点: WorkGraphNode; 
         )}
           <div className="wg-node-operation rounded-md border border-white/10 bg-black/18 p-1.5" data-node-operation-profile="true" data-node-operation-layout="action-summary" data-node-operation-density="compact" data-node-operation-panel="true" data-node-section="operation">
             <div className="flex items-center justify-between gap-2">
-            <span className="truncate text-[11px] font-semibold text-cyan-100">{operationProfile.role}</span>
-            <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px]", moduleKind === "video" && "bg-rose-400/12 text-rose-200", moduleKind === "skill" && "bg-violet-400/12 text-violet-200", moduleKind === "model" && "bg-cyan-400/12 text-cyan-200", "bg-slate-800 text-slate-400")}>{displayModuleKind(moduleKind)}</span>
+            <span className="truncate text-[12.5px] font-semibold text-cyan-100">{operationProfile.role}</span>
+            <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[12px]", moduleKind === "video" && "bg-rose-400/12 text-rose-200", moduleKind === "skill" && "bg-violet-400/12 text-violet-200", moduleKind === "model" && "bg-cyan-400/12 text-cyan-200", "bg-slate-800 text-slate-400")}>{displayModuleKind(moduleKind)}</span>
           </div>
           <div className="mt-1 flex gap-1 overflow-hidden" data-node-action-strip="true" data-node-action-strip-mode="quiet">
             {operationProfile.actions.slice(0, 3).map((action) => (
-              <span key={action} className="truncate rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-500">{action}</span>
+              <span key={action} className="truncate rounded bg-white/5 px-1.5 py-0.5 text-[12px] text-slate-500">{action}</span>
             ))}
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-1 text-[10px] text-slate-500" data-node-mini-metrics="true" data-node-metrics-layout="single-row" data-node-section="metrics">
+        <div className="grid grid-cols-3 gap-1 text-[12px] text-slate-500" data-node-mini-metrics="true" data-node-metrics-layout="single-row" data-node-section="metrics">
           <span className="truncate rounded bg-black/24 px-1.5 py-1" title={node.modelId || node.modelTitle || "自动模型"} data-node-metric="model">模型 {node.modelTitle || displayShortId(node.modelId || "自动")}</span>
           <span className="truncate rounded bg-black/24 px-1.5 py-1" data-node-metric="asset">素材 {node.materialIds?.length ?? 0}</span>
           <span className="truncate rounded bg-black/24 px-1.5 py-1" data-node-metric="log">日志 {node.logCount ?? 0}</span>
         </div>
 
         {moduleKind === "brand" && (
-          <div className="rounded border border-amber-500/20 bg-amber-500/5 px-2 py-1 text-[11px] leading-4 text-amber-100/80" data-node-detail-density="one-line">
+          <div className="rounded border border-amber-500/20 bg-amber-500/5 px-2 py-1 text-[12.5px] leading-5 text-amber-100/80" data-node-detail-density="one-line">
             <p className="line-clamp-1"><span className="font-semibold text-amber-200">品牌</span> · {node.body || "读取品牌上下文、禁用词、风格规则。"}</p>
           </div>
         )}
         {moduleKind === "skill" && (
-          <div className="rounded border border-violet-500/20 bg-violet-500/5 px-2 py-1 text-[11px] leading-4" data-node-detail-density="one-line">
+          <div className="rounded border border-violet-500/20 bg-violet-500/5 px-2 py-1 text-[12.5px] leading-5" data-node-detail-density="one-line">
             <p className="truncate text-violet-200"><span className="font-semibold">技能</span> · {node.skillTitle || node.skillId || node.skillCommand || "自动技能"}</p>
           </div>
         )}
         {moduleKind === "model" && (
-          <div className="grid grid-cols-2 gap-1 text-[11px]" data-node-detail-density="one-line">
+          <div className="grid grid-cols-2 gap-1 text-[12.5px]" data-node-detail-density="one-line">
             <div className="truncate rounded border border-slate-800 bg-slate-950/70 px-2 py-0.5 text-cyan-200" title={node.modelId || "自动模型"}>{node.modelTitle || "自动模型"}</div>
             <div className="truncate rounded border border-slate-800 bg-slate-950/70 px-2 py-0.5 text-slate-300">{node.modelStrategy || "balanced"}</div>
           </div>
         )}
 
-        <p className="line-clamp-1 text-[11px] leading-4 text-slate-300" data-node-result-summary="true" data-node-section="result">{displayTextAlias(node.resultPreview || node.body) || "等待节点输入"}</p>
+        <p className="line-clamp-1 text-[12.5px] leading-5 text-slate-300" data-node-result-summary="true" data-node-section="result">{displayTextAlias(node.resultPreview || node.body) || "等待节点输入"}</p>
         <div className="wg-node-action-bar grid grid-cols-[minmax(0,1fr)_28px_28px] gap-1" data-node-action-style="icon-compact" data-node-section="actions">
-          <button className="flex h-7 min-w-0 items-center justify-center gap-1 rounded-md bg-cyan-300 px-2 text-[10px] font-semibold text-slate-950" title="运行当前节点" aria-label="运行当前节点" onClick={() => dispatchNodeAction(node.id, "run")} data-node-card-action="run">
+          <button className="flex h-7 min-w-0 items-center justify-center gap-1 rounded-md bg-cyan-300 px-2 text-[12px] font-semibold text-slate-950" title="运行当前节点" aria-label="运行当前节点" onClick={() => dispatchNodeAction(node.id, "run")} data-node-card-action="run">
             <Play className="h-3.5 w-3.5" />
             <span className="truncate">运行</span>
           </button>
-          <button className="grid h-7 place-items-center rounded-md border border-white/10 px-1 text-[10px] text-slate-300" title="重试当前节点" aria-label="重试当前节点" onClick={() => dispatchNodeAction(node.id, "retry")} data-node-card-action="retry">
+          <button className="grid h-7 place-items-center rounded-md border border-white/10 px-1 text-[12px] text-slate-300" title="重试当前节点" aria-label="重试当前节点" onClick={() => dispatchNodeAction(node.id, "retry")} data-node-card-action="retry">
             <RotateCcw className="h-3.5 w-3.5" />
           </button>
-          <button className="grid h-7 place-items-center rounded-md border border-white/10 px-1 text-[10px] text-slate-300" title="打开节点参数" aria-label="打开节点参数" onClick={() => dispatchNodeAction(node.id, "params")} data-node-card-action="params">
+          <button className="grid h-7 place-items-center rounded-md border border-white/10 px-1 text-[12px] text-slate-300" title="打开节点参数" aria-label="打开节点参数" onClick={() => dispatchNodeAction(node.id, "params")} data-node-card-action="params">
             <Settings2 className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -1145,7 +1145,7 @@ function fallbackEdges(nodes: WorkGraphNode[]): Edge[] {
 
 function SectionTitle({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
   return (
-    <div className="section-title flex h-7 items-center gap-2 border-b border-white/12 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-200">
+    <div className="section-title flex h-7 items-center gap-2 border-b border-white/12 px-3 text-[12.5px] font-semibold uppercase tracking-wide text-slate-200">
       <Icon className="h-3.5 w-3.5 text-cyan-300" />
       {children}
     </div>
@@ -2702,7 +2702,7 @@ export default function WorkGraphStudio() {
             <div
               key={item.key}
               className={cn(
-                "wg-flow-step flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-1 text-[10px]",
+                "wg-flow-step flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-1 text-[12px]",
                 activeWorkflowStage === item.key ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100" : "border-white/10 bg-black/16 text-slate-500"
               )}
               data-workbench-flow-step={item.label}
@@ -2783,7 +2783,7 @@ export default function WorkGraphStudio() {
         data-preview-expanded={previewExpanded ? "true" : "false"}
       >
         <aside className="row-span-2 flex min-h-0 flex-col overflow-hidden border-r border-white/10 bg-slate-900/70 wg-panel" data-resource-panel="true" data-resource-panel-layout="column">
-          <div className="wg-resource-header flex h-9 shrink-0 items-center gap-2 border-b border-white/12 px-3 text-[11px] font-semibold text-slate-200">
+          <div className="wg-resource-header flex h-9 shrink-0 items-center gap-2 border-b border-white/12 px-3 text-[12.5px] font-semibold text-slate-200">
             <Database className="h-3.5 w-3.5 text-cyan-300" />
             {!resourceCollapsed && (
               <div className="min-w-0 flex-1">
@@ -2824,10 +2824,10 @@ export default function WorkGraphStudio() {
             <div className="wg-library-mode-card mb-2 rounded-md border border-white/10 bg-black/16 p-2" data-library-mode-card="true" data-library-mode-active={activeObjectType}>
               <div className="mb-1 flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="truncate text-[11px] font-semibold text-slate-200">工作库入口</div>
-                  <div className="truncate text-[10px] text-slate-500">素材、技能、模型、结果分层管理</div>
+                  <div className="truncate text-[12.5px] font-semibold text-slate-200">工作库入口</div>
+                  <div className="truncate text-[12px] text-slate-500">素材、技能、模型、结果分层管理</div>
                 </div>
-                <span className="shrink-0 rounded border border-cyan-300/20 bg-cyan-300/8 px-1.5 py-0.5 text-[10px] text-cyan-100">{displayObjectType(activeObjectType)}</span>
+                <span className="shrink-0 rounded border border-cyan-300/20 bg-cyan-300/8 px-1.5 py-0.5 text-[12px] text-cyan-100">{displayObjectType(activeObjectType)}</span>
               </div>
               <div className="wg-library-mode-actions grid grid-cols-2 gap-1" data-library-mode-actions="true">
                 <button className="wg-library-action" onClick={() => fileInputRef.current?.click()} disabled={busy} title="上传素材" aria-label="上传素材" data-library-action="upload">
@@ -2845,7 +2845,7 @@ export default function WorkGraphStudio() {
                 <button
                   key={type}
                   className={cn(
-                    "flex h-7 min-w-0 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition-colors",
+                    "flex h-7 min-w-0 items-center gap-1.5 rounded-md border px-2 text-[12.5px] font-medium transition-colors",
                     activeObjectType === type ? "border-cyan-300/70 bg-cyan-300/12 text-cyan-100" : "border-white/8 bg-black/12 text-slate-400 hover:border-slate-700 hover:text-slate-200"
                   )}
                   onClick={() => setActiveObjectType(type)}
@@ -2864,7 +2864,7 @@ export default function WorkGraphStudio() {
                 <button
                   key={type}
                   className={cn(
-                    "h-6 rounded-md border px-1 text-[10px]",
+                    "h-6 rounded-md border px-1 text-[12px]",
                     activeObjectType === type ? "border-cyan-400/70 bg-cyan-400/8 text-cyan-200" : "border-white/8 text-slate-500 hover:text-slate-300"
                   )}
                   onClick={() => setActiveObjectType(type)}
@@ -2941,8 +2941,8 @@ export default function WorkGraphStudio() {
           <div className="shrink-0 border-b border-white/10 px-2 py-1.5" data-resource-toolbar="true" data-resource-toolbar-density="compact">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="truncate text-[11px] font-semibold text-slate-300">资源</div>
-                <div className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-500" data-resource-current-summary="true">
+                <div className="truncate text-[12.5px] font-semibold text-slate-300">资源</div>
+                <div className="mt-0.5 flex items-center gap-1 text-[12px] text-slate-500" data-resource-current-summary="true">
                   <span className="rounded border border-slate-800 bg-slate-900 px-1.5 py-0.5" data-resource-active-type="true">{displayObjectType(activeObjectType)}</span>
                   <span className="rounded border border-slate-800 bg-slate-900 px-1.5 py-0.5" data-resource-result-count="true">{filteredObjects.length}</span>
                 </div>
@@ -2987,13 +2987,13 @@ export default function WorkGraphStudio() {
                 <span className="wg-resource-object-rail" aria-hidden="true" data-resource-object-rail="true" />
                 <div className="wg-resource-object-main min-w-0" data-resource-object-main="true">
                 <div className="flex items-center justify-between gap-2" data-resource-object-metadata="true">
-                  <span className="wg-resource-type-badge truncate text-[10px] font-semibold text-slate-500">{displayObjectType(object.type)}</span>
-                  <span className="wg-resource-id truncate text-[10px] text-cyan-200" title={object.id}>{displayShortId(object.id)}</span>
+                  <span className="wg-resource-type-badge truncate text-[12px] font-semibold text-slate-500">{displayObjectType(object.type)}</span>
+                  <span className="wg-resource-id truncate text-[12px] text-cyan-200" title={object.id}>{displayShortId(object.id)}</span>
                 </div>
                 <div className="mt-0.5 truncate text-[12px] font-medium text-slate-100" data-resource-object-title="true">{displayTextAlias(object.title) || object.id}</div>
-                <div className="mt-0.5 line-clamp-1 text-[10px] leading-4 text-slate-500" data-resource-object-summary="true">{displayTextAlias(object.summary) || object.id}</div>
+                <div className="mt-0.5 line-clamp-1 text-[12px] leading-5 text-slate-500" data-resource-object-summary="true">{displayTextAlias(object.summary) || object.id}</div>
                 </div>
-                <div className="wg-resource-object-action flex items-center justify-between gap-2 text-[10px] text-slate-600" data-resource-object-affordance="true" data-resource-object-action-zone="true">
+                <div className="wg-resource-object-action flex items-center justify-between gap-2 text-[12px] text-slate-600" data-resource-object-affordance="true" data-resource-object-action-zone="true">
                   <span className="truncate" data-resource-drag-hint={object.type === "asset" ? "true" : undefined}>
                     {object.type === "asset" ? "拖到节点绑定素材" : object.type === "skill" ? "打开技能详情" : "用于当前工作图"}
                   </span>
@@ -3001,9 +3001,9 @@ export default function WorkGraphStudio() {
                 </div>
               </button>
             )) : (
-              <div className="wg-empty-state wg-resource-empty-state rounded-md border border-dashed border-cyan-300/20 bg-slate-900/50 p-3 text-[11px] leading-4 text-slate-500" data-resource-empty-state="true" data-resource-empty-type={activeObjectType}>
+              <div className="wg-empty-state wg-resource-empty-state rounded-md border border-dashed border-cyan-300/20 bg-slate-900/50 p-3 text-[12.5px] leading-5 text-slate-500" data-resource-empty-state="true" data-resource-empty-type={activeObjectType}>
                 <div className="text-[12px] font-semibold text-slate-200" data-resource-empty-title="true">{displayObjectType(activeObjectType)}库为空</div>
-                <div className="mt-1 text-[11px] leading-4 text-slate-500" data-resource-empty-copy="true">
+                <div className="mt-1 text-[12.5px] leading-5 text-slate-500" data-resource-empty-copy="true">
                   {activeObjectType === "asset"
                     ? "上传或拖入图片、视频、文本后，可直接绑定到当前节点。"
                     : activeObjectType === "skill"
@@ -3050,7 +3050,7 @@ export default function WorkGraphStudio() {
             data-workgraph-canvas-frame="true"
             data-canvas-drag-over={isCanvasDragOver ? "true" : "false"}
           >
-            <div className="wg-canvas-title-strip pointer-events-none absolute left-3 right-3 top-3 z-[8] flex items-center justify-between gap-3 rounded-md border border-white/8 bg-black/24 px-3 py-1.5 text-[10px] text-slate-500 backdrop-blur" data-canvas-status-bar="true" data-canvas-status-position="merged-title" data-canvas-status-layout="chips">
+            <div className="wg-canvas-title-strip pointer-events-none absolute left-3 right-3 top-3 z-[8] flex items-center justify-between gap-3 rounded-md border border-white/8 bg-black/24 px-3 py-1.5 text-[12px] text-slate-500 backdrop-blur" data-canvas-status-bar="true" data-canvas-status-position="merged-title" data-canvas-status-layout="chips">
               <div className="wg-canvas-status-chips flex min-w-0 items-center gap-1.5" data-canvas-status-chips="true">
                 <span className="shrink-0 font-semibold uppercase text-slate-300" data-canvas-status-title="true">执行图谱</span>
                 <span className="wg-canvas-status-chip min-w-0 max-w-[190px] truncate" data-canvas-active-node="true" title={displayNodeTitle(activeNode)}>节点：{displayNodeTitle(activeNode)}</span>
@@ -3083,11 +3083,11 @@ export default function WorkGraphStudio() {
               <Controls position="bottom-left" />
             </ReactFlow>
           </div>
-          <div className="wg-canvas-drop-hint pointer-events-none absolute bottom-3 left-3 z-10 rounded-md border border-dashed border-cyan-300/24 bg-[#0c1116]/78 px-2.5 py-1.5 text-[10px] text-slate-500 backdrop-blur" data-canvas-file-drop-hint="true">
+          <div className="wg-canvas-drop-hint pointer-events-none absolute bottom-3 left-3 z-10 rounded-md border border-dashed border-cyan-300/24 bg-[#0c1116]/78 px-2.5 py-1.5 text-[12px] text-slate-500 backdrop-blur" data-canvas-file-drop-hint="true">
             拖入图片 / 视频 / 文本到节点，自动上传并绑定素材
           </div>
           {isCanvasDragOver && (
-            <div className="wg-canvas-drop-overlay pointer-events-none absolute inset-3 z-30 grid place-items-center rounded-lg border border-dashed border-cyan-300/70 bg-cyan-300/8 text-[13px] font-semibold text-cyan-100 backdrop-blur-[2px]" data-canvas-drop-overlay="true">
+            <div className="wg-canvas-drop-overlay pointer-events-none absolute inset-3 z-30 grid place-items-center rounded-lg border border-dashed border-cyan-300/70 bg-cyan-300/8 text-[13.5px] font-semibold text-cyan-100 backdrop-blur-[2px]" data-canvas-drop-overlay="true">
               松手上传并绑定到当前节点
             </div>
           )}
@@ -3098,7 +3098,7 @@ export default function WorkGraphStudio() {
               data-canvas-node-toolbar-mode="focused"
               data-canvas-node-toolbar-position="below-title"
             >
-              <div className="max-w-[154px] truncate px-1.5 text-[11px] text-slate-300" title={displayNodeTitle(activeNode)}>
+              <div className="max-w-[154px] truncate px-1.5 text-[12.5px] text-slate-300" title={displayNodeTitle(activeNode)}>
                 {displayNodeTitle(activeNode)}
               </div>
                 <button className="grid h-7 w-7 place-items-center rounded-md bg-cyan-300 text-slate-950 disabled:opacity-50 wg-btn-soft" title="运行节点" aria-label="运行当前节点" onClick={() => void runNode()} disabled={busy}>
@@ -3130,7 +3130,7 @@ export default function WorkGraphStudio() {
                 <Settings2 className="h-3.5 w-3.5" />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-semibold text-slate-100" data-inspector-node-title="true">{displayNodeTitle(activeNode)}</div>
+                <div className="truncate text-[13.5px] font-semibold text-slate-100" data-inspector-node-title="true">{displayNodeTitle(activeNode)}</div>
                 <div className="mt-1 flex min-w-0 items-center gap-1 text-micro text-slate-500" data-inspector-node-meta="true">
                   <span className="min-w-0 flex-1 truncate rounded border border-white/8 bg-black/18 px-1.5 py-0.5" title={activeNode?.id || "未选择节点"} data-inspector-node-id="true">{activeNode?.id || "未选择节点"}</span>
                   <span className="shrink-0 truncate rounded border border-cyan-300/16 bg-cyan-300/7 px-1.5 py-0.5 text-cyan-100" data-inspector-node-type="true">{displayNodeType(activeNode?.type)}</span>
@@ -3146,13 +3146,13 @@ export default function WorkGraphStudio() {
                 <PanelRightClose className="pointer-events-none h-3 w-3" />
               </button>
             </div>
-            <div className="wg-inspector-summary mt-1.5 flex min-w-0 items-center gap-1 text-[10px]" data-inspector-summary="true" data-inspector-summary-layout="node-instrument">
+            <div className="wg-inspector-summary mt-1.5 flex min-w-0 items-center gap-1 text-[12px]" data-inspector-summary="true" data-inspector-summary-layout="node-instrument">
               <span className="min-w-0 flex-1 truncate rounded border border-white/10 bg-black/16 px-2 py-0.5" title={activeNode?.modelId || workspace?.activeModelId || "自动模型"} data-inspector-primary-stat="model">模型 {displayModelName(activeNode?.modelId || workspace?.activeModelId, models)}</span>
               <span className="shrink-0 rounded border border-white/10 bg-black/16 px-2 py-0.5" data-inspector-stat="asset">素材 {activeNode?.materialIds?.length ?? 0}</span>
               <span className="shrink-0 rounded border border-white/10 bg-black/16 px-2 py-0.5" data-inspector-stat="log">日志 {activeNodeLogs.length}</span>
             </div>
           </div>
-          <div className="wg-inspector-body h-[calc(100%-68px)] space-y-2 overflow-auto p-2 text-[11px]" data-inspector-body="true">
+          <div className="wg-inspector-body h-[calc(100%-68px)] space-y-2 overflow-auto p-2 text-[12.5px]" data-inspector-body="true">
             <div className="wg-inspector-tabs mb-2 flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/60 p-1" data-inspector-tabs="true">
               {inspectorTabs.map((tab) => {
                 const Icon = tab.icon;
@@ -3160,7 +3160,7 @@ export default function WorkGraphStudio() {
                   <button
                     key={tab.id}
                     className={cn(
-                      "inline-flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-[11px] font-medium",
+                      "inline-flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-[12.5px] font-medium",
                       inspectorTab === tab.id
                         ? "bg-cyan-400/20 text-cyan-200"
                         : "text-slate-500 hover:text-slate-300"
@@ -3179,7 +3179,7 @@ export default function WorkGraphStudio() {
             <div className="wg-inspector-card rounded-md border border-white/10 bg-black/18 p-2.5" data-inspector-overview-card="true" data-inspector-overview-density="compact">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[10px] uppercase text-slate-500">当前节点</div>
+                  <div className="text-[12px] uppercase text-slate-500">当前节点</div>
                   <input
                     className="mt-0.5 w-full border-0 bg-transparent p-0 text-[14px] font-semibold text-slate-100 outline-none"
                     value={activeNode?.title || ""}
@@ -3188,16 +3188,16 @@ export default function WorkGraphStudio() {
                     disabled={!activeNode || busy}
                   />
                 </div>
-                <span className="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-slate-400">{displayNodeType(activeNode?.type)}</span>
+                <span className="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[12px] text-slate-400">{displayNodeType(activeNode?.type)}</span>
               </div>
               {activeOperationProfile && (
                 <div className="mt-2 rounded-md border border-cyan-300/16 bg-cyan-300/6 p-2" data-node-inspector-operation-profile="true" data-node-inspector-operation-density="compact">
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-[12px] font-semibold text-cyan-100">{activeOperationProfile.role}</span>
-                    <span className="text-[10px] text-slate-500">{activeNode?.status || "就绪"}</span>
+                    <span className="text-[12px] text-slate-500">{activeNode?.status || "就绪"}</span>
                   </div>
-                  <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-slate-400">{activeOperationProfile.intent}</p>
-                  <div className="mt-1.5 grid grid-cols-3 gap-1 text-[10px] text-slate-500" data-inspector-operation-takeover="true">
+                  <p className="mt-0.5 line-clamp-2 text-[12.5px] leading-5 text-slate-400">{activeOperationProfile.intent}</p>
+                  <div className="mt-1.5 grid grid-cols-3 gap-1 text-[12px] text-slate-500" data-inspector-operation-takeover="true">
                     {activeOperationProfile.takeover.slice(0, 3).map((item) => (
                       <span key={item} className="truncate rounded bg-black/18 px-1.5 py-1 text-center">{item}</span>
                     ))}
@@ -3211,7 +3211,7 @@ export default function WorkGraphStudio() {
                 placeholder="节点输入 / Prompt / 约束"
                 disabled={!activeNode || busy}
               />
-              <div className="mt-2 grid grid-cols-3 gap-1.5 text-[10px] text-slate-500">
+              <div className="mt-2 grid grid-cols-3 gap-1.5 text-[12px] text-slate-500">
                 <span className="truncate rounded bg-white/5 px-2 py-1" title={activeNode?.modelId || workspace?.activeModelId || "自动模型"}>模型: {displayModelName(activeNode?.modelId || workspace?.activeModelId, models)}</span>
                 <span className="truncate rounded bg-white/5 px-2 py-1">素材: {activeNode?.materialIds?.length ?? 0}</span>
                 <span className="truncate rounded bg-white/5 px-2 py-1">日志: {activeNodeLogs.length}</span>
@@ -3240,10 +3240,10 @@ export default function WorkGraphStudio() {
               <div data-node-module-drawer-launcher="true">
               <div className="wg-property-panel-heading mb-1.5 flex items-center justify-between gap-2 rounded-md border border-white/10 bg-black/16 px-2 py-1.5" data-property-panel-heading="true" data-property-panel-heading-layout="module-context">
                 <div className="min-w-0">
-                  <div className="text-[10px] text-slate-500">节点模块</div>
+                  <div className="text-[12px] text-slate-500">节点模块</div>
                   <div className="truncate text-[12px] font-semibold text-slate-100" data-property-active-module-label="true">{activeModuleLabel} · {displayNodeTitle(activeNode)}</div>
                 </div>
-                <span className="shrink-0 rounded border border-cyan-300/20 bg-cyan-300/8 px-1.5 py-0.5 text-[10px] text-cyan-100" data-property-active-module-pill="true">{activeModuleLabel}</span>
+                <span className="shrink-0 rounded border border-cyan-300/20 bg-cyan-300/8 px-1.5 py-0.5 text-[12px] text-cyan-100" data-property-active-module-pill="true">{activeModuleLabel}</span>
               </div>
               <div className="wg-module-segmented flex items-center gap-1 overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/60 p-1" data-property-module-rail="true">
                 {([
@@ -3287,8 +3287,8 @@ export default function WorkGraphStudio() {
                       else openNodeModule("params");
                     }}
                   >
-                    <span className="block truncate text-[10px] uppercase leading-none text-slate-500">{step.label}</span>
-                    <span className="mt-1 block truncate text-[11px] leading-none text-slate-200">{step.value}</span>
+                    <span className="block truncate text-[12px] uppercase leading-none text-slate-500">{step.label}</span>
+                    <span className="mt-1 block truncate text-[12.5px] leading-none text-slate-200">{step.value}</span>
                   </button>
                 ))}
               </div>
@@ -3311,27 +3311,27 @@ export default function WorkGraphStudio() {
                 data-module-action-density="icon-only"
                 data-property-action-strip="true"
               >
-                <button className="inline-flex h-7 items-center justify-center gap-1 rounded bg-cyan-300 px-1.5 text-[10px] font-semibold text-slate-950 disabled:opacity-60" onClick={() => void runNode()} disabled={busy || !activeNode} title="运行当前节点" aria-label="运行当前节点" data-module-action="run">
+                <button className="inline-flex h-7 items-center justify-center gap-1 rounded bg-cyan-300 px-1.5 text-[12px] font-semibold text-slate-950 disabled:opacity-60" onClick={() => void runNode()} disabled={busy || !activeNode} title="运行当前节点" aria-label="运行当前节点" data-module-action="run">
                   <Play className="h-3.5 w-3.5" />
                 </button>
-                <button className="inline-flex h-7 items-center justify-center gap-1 rounded border border-white/10 px-1.5 text-[10px] text-cyan-100 disabled:opacity-50" onClick={() => void retryActiveNode()} disabled={busy || !activeNode} title="重试当前节点" aria-label="重试当前节点" data-module-action="retry">
+                <button className="inline-flex h-7 items-center justify-center gap-1 rounded border border-white/10 px-1.5 text-[12px] text-cyan-100 disabled:opacity-50" onClick={() => void retryActiveNode()} disabled={busy || !activeNode} title="重试当前节点" aria-label="重试当前节点" data-module-action="retry">
                   <RotateCcw className="h-3.5 w-3.5" />
                 </button>
-                <button className="inline-flex h-7 items-center justify-center gap-1 rounded border border-white/10 px-1.5 text-[10px] text-slate-300" onClick={() => void openActiveSkillDrawer()} title="打开技能文件" aria-label="打开技能文件" data-module-action="open-skill">
+                <button className="inline-flex h-7 items-center justify-center gap-1 rounded border border-white/10 px-1.5 text-[12px] text-slate-300" onClick={() => void openActiveSkillDrawer()} title="打开技能文件" aria-label="打开技能文件" data-module-action="open-skill">
                   <FolderOpen className="h-3.5 w-3.5" />
                 </button>
-                <button className="inline-flex h-7 items-center justify-center gap-1 rounded border border-white/10 px-1.5 text-[10px] text-slate-300 disabled:opacity-50" onClick={() => void saveActiveNodeAsSkill()} disabled={busy || !activeNode} title="保存当前节点为技能" aria-label="保存当前节点为技能" data-module-action="save-skill">
+                <button className="inline-flex h-7 items-center justify-center gap-1 rounded border border-white/10 px-1.5 text-[12px] text-slate-300 disabled:opacity-50" onClick={() => void saveActiveNodeAsSkill()} disabled={busy || !activeNode} title="保存当前节点为技能" aria-label="保存当前节点为技能" data-module-action="save-skill">
                   <Save className="h-3.5 w-3.5" />
                 </button>
               </div>
-              <div className="wg-property-block mt-2 rounded-md border border-white/10 bg-black/14 p-2 text-[11px] leading-4 text-slate-400" data-active-module-summary="true" data-active-module-summary-tone="plain" data-property-block="intent">
+              <div className="wg-property-block mt-2 rounded-md border border-white/10 bg-black/14 p-2 text-[12.5px] leading-5 text-slate-400" data-active-module-summary="true" data-active-module-summary-tone="plain" data-property-block="intent">
                 <div className="grid grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] gap-1.5" data-module-operation-guide="true">
                   <div className="rounded border border-cyan-300/16 bg-cyan-300/6 px-2 py-1.5" data-module-current-operation="true">
-                    <div className="text-[10px] uppercase text-cyan-200/80">当前操作</div>
+                    <div className="text-[12px] uppercase text-cyan-200/80">当前操作</div>
                     <div className="mt-0.5 truncate text-[12px] font-semibold text-cyan-50">{activeModuleAction}</div>
                   </div>
                   <div className="rounded border border-white/10 bg-black/20 px-2 py-1.5" data-module-next-action="true">
-                    <div className="text-[10px] uppercase text-slate-500">下一步</div>
+                    <div className="text-[12px] uppercase text-slate-500">下一步</div>
                     <div className="mt-0.5 truncate text-[12px] font-semibold text-slate-200">{activeModuleNext}</div>
                   </div>
                 </div>
@@ -3370,7 +3370,7 @@ export default function WorkGraphStudio() {
                       <label className="wg-property-row text-[12px] text-slate-500" data-property-row="model-id">模型<select className="mt-1 w-full rounded border border-slate-800 bg-slate-950 p-2 text-[12px] text-slate-300" value={activeNode?.modelId || workspace?.activeModelId || "自动"} onChange={(event) => void patchActiveNode({ modelId: event.target.value }, "node model saved")} disabled={!activeNode || busy}>{(models.length ? models : [{ id: "自动", name: "自动选择", provider: "custom" }]).map((model) => <option key={model.id} value={model.id}>{model.name || model.id}</option>)}</select></label>
                       <label className="wg-property-row text-[12px] text-slate-500" data-property-row="model-strategy">策略<select className="mt-1 w-full rounded border border-slate-800 bg-slate-950 p-2 text-[12px] text-slate-300" value={activeNode?.modelStrategy || "balanced"} onChange={(event) => void patchActiveNode({ modelStrategy: event.target.value }, "node strategy saved")} disabled={!activeNode || busy}>{modelStrategies.map((strategy) => <option key={strategy.value} value={strategy.value}>{strategy.label}</option>)}</select></label>
                     </div>
-                    <div className="wg-property-block rounded border border-slate-800 bg-slate-950/70 p-2 text-[12px] leading-4 text-slate-400" data-property-block="model-policy">
+                    <div className="wg-property-block rounded border border-slate-800 bg-slate-950/70 p-2 text-[12px] leading-5 text-slate-400" data-property-block="model-policy">
                       <div className="font-semibold uppercase text-cyan-200">反馈策略</div>
                       {activeNodeModelPolicy ? (
                         <div className="mt-1 grid grid-cols-2 gap-1">
@@ -3392,12 +3392,12 @@ export default function WorkGraphStudio() {
                     <div className="wg-skill-bind-card rounded border border-violet-400/18 bg-violet-400/6 p-2" data-skill-bind-card="true" data-skill-bound-state={activeNode?.skillId ? "bound" : "unbound"}>
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="text-[10px] uppercase text-violet-200/80">当前节点技能</div>
+                          <div className="text-[12px] uppercase text-violet-200/80">当前节点技能</div>
                           <div className="mt-0.5 truncate text-[12px] font-semibold text-slate-100" title={activeNode?.skillId || "未绑定"}>
                             {activeNodeSkill ? displayTextAlias(activeNodeSkill.title) : activeNode?.skillId ? displayShortId(activeNode.skillId) : "未绑定，使用自动匹配"}
                           </div>
                         </div>
-                        <span className="shrink-0 rounded border border-white/10 bg-black/20 px-1.5 py-0.5 text-[10px] text-slate-400" data-skill-search-count="true">{nodeSkillSearchCount} 结果</span>
+                        <span className="shrink-0 rounded border border-white/10 bg-black/20 px-1.5 py-0.5 text-[12px] text-slate-400" data-skill-search-count="true">{nodeSkillSearchCount} 结果</span>
                       </div>
                       <select className="mt-2 w-full rounded border border-slate-800 bg-slate-950 p-1.5 text-[12px] text-slate-300" value={activeNode?.skillId || ""} onChange={(event) => void bindSkillToActiveNode(event.target.value)} disabled={!activeNode || busy} data-skill-bind-select="true">
                         <option value="">自动技能</option>
@@ -3405,9 +3405,9 @@ export default function WorkGraphStudio() {
                       </select>
                     </div>
                     <div className="wg-skill-search-console rounded border border-slate-800 bg-slate-950/60 p-2" data-skill-search-console="true">
-                      <div className="mb-1 flex items-center justify-between gap-2 text-[10px] uppercase text-slate-500">
+                      <div className="mb-1 flex items-center justify-between gap-2 text-[12px] uppercase text-slate-500">
                         <span>本地技能搜索</span>
-                        <button className="rounded border border-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400 hover:border-cyan-500/60 hover:text-cyan-200" onClick={() => setNodeSkillQuery(nodeSkillSuggestedQuery)} disabled={!nodeSkillSuggestedQuery || busy} data-skill-query-use-node="true">用节点生成查询</button>
+                        <button className="rounded border border-slate-800 px-1.5 py-0.5 text-[12px] text-slate-400 hover:border-cyan-500/60 hover:text-cyan-200" onClick={() => setNodeSkillQuery(nodeSkillSuggestedQuery)} disabled={!nodeSkillSuggestedQuery || busy} data-skill-query-use-node="true">用节点生成查询</button>
                       </div>
                       <div className="flex gap-1">
                         <input className="min-w-0 flex-1 rounded border border-slate-800 bg-black/30 px-2 py-1.5 text-[12px] text-slate-300 outline-none focus:border-cyan-300/70" value={nodeSkillQuery} onChange={(event) => setNodeSkillQuery(event.target.value)} placeholder="搜索本地技能、命令、能力类型" data-skill-search-input="true" />
@@ -3421,7 +3421,7 @@ export default function WorkGraphStudio() {
                           <span className="mt-0.5 block truncate text-micro text-slate-500">{skill.command || skill.id}</span>
                         </button>
                       )) : (
-                        <div className="px-2 py-2 text-[12px] leading-4 text-slate-500" data-skill-empty-results="true">没有搜索结果。可以用当前节点创建草稿技能，再打开文件细化。</div>
+                        <div className="px-2 py-2 text-[12px] leading-5 text-slate-500" data-skill-empty-results="true">没有搜索结果。可以用当前节点创建草稿技能，再打开文件细化。</div>
                       )}
                     </div>
                     <div className="wg-skill-action-grid grid grid-cols-3 gap-1" data-skill-action-grid="true">
@@ -3438,12 +3438,12 @@ export default function WorkGraphStudio() {
                     <div className="wg-asset-bind-card rounded border border-emerald-400/18 bg-emerald-400/6 p-2" data-asset-bind-card="true" data-asset-bound-state={activeNodeAssets.length ? "bound" : "empty"} data-property-row="asset-binding">
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="text-[10px] uppercase text-emerald-200/80">当前节点素材</div>
+                          <div className="text-[12px] uppercase text-emerald-200/80">当前节点素材</div>
                           <div className="mt-0.5 truncate text-[12px] font-semibold text-slate-100" title={(activeNode?.materialIds ?? []).join(", ") || "未绑定"}>
                             {activeNodeAssets.length ? `${activeNodeAssets.length} 个已绑定` : "未绑定，可拖入或上传"}
                           </div>
                         </div>
-                        <button className="shrink-0 rounded border border-emerald-400/28 bg-emerald-400/8 px-2 py-1 text-[10px] font-semibold text-emerald-100 disabled:opacity-50" onClick={() => fileInputRef.current?.click()} disabled={busy} data-asset-upload-inline="true">上传</button>
+                        <button className="shrink-0 rounded border border-emerald-400/28 bg-emerald-400/8 px-2 py-1 text-[12px] font-semibold text-emerald-100 disabled:opacity-50" onClick={() => fileInputRef.current?.click()} disabled={busy} data-asset-upload-inline="true">上传</button>
                       </div>
                       <select className="mt-2 w-full rounded border border-slate-800 bg-slate-950 p-1.5 text-[12px] text-slate-300" value={activeNode?.materialIds?.[0] || workspace?.activeMaterialId || ""} onChange={(event) => void patchActiveNode({ materialIds: event.target.value ? [event.target.value] : [] }, "节点素材已保存")} disabled={!activeNode || busy} data-asset-bind-select="true">
                         <option value="">无素材</option>
@@ -3460,10 +3460,10 @@ export default function WorkGraphStudio() {
                             <div className="truncate text-[12px] font-semibold text-slate-100">{asset.title || displayShortId(asset.id)}</div>
                             <div className="truncate text-micro text-slate-500">{asset.kind || asset.fileName || asset.id}</div>
                           </div>
-                          <button className="rounded border border-slate-700 px-1.5 py-1 text-[10px] text-slate-400 hover:border-red-400/60 hover:text-red-200" onClick={() => void unbindAssetFromNode(asset.id)} disabled={busy} data-asset-unbind="true">移除</button>
+                          <button className="rounded border border-slate-700 px-1.5 py-1 text-[12px] text-slate-400 hover:border-red-400/60 hover:text-red-200" onClick={() => void unbindAssetFromNode(asset.id)} disabled={busy} data-asset-unbind="true">移除</button>
                         </div>
                       )) : (
-                        <div className="px-2 py-2 text-[12px] leading-4 text-slate-500" data-asset-empty-bound="true">暂无绑定素材。可从左侧资源拖到节点、拖到底部输入区，或直接上传。</div>
+                        <div className="px-2 py-2 text-[12px] leading-5 text-slate-500" data-asset-empty-bound="true">暂无绑定素材。可从左侧资源拖到节点、拖到底部输入区，或直接上传。</div>
                       )}
                     </div>
                     <div className="wg-asset-candidate-list max-h-32 overflow-auto rounded border border-slate-800 bg-slate-950/70 p-1" data-asset-candidate-list="true" data-asset-candidate-count={unboundAssetCandidates.length}>
@@ -3476,10 +3476,10 @@ export default function WorkGraphStudio() {
                             <div className="truncate text-[12px] font-semibold text-slate-200">{asset.title || displayShortId(asset.id)}</div>
                             <div className="truncate text-micro text-slate-500">{asset.kind || asset.fileName || asset.id}</div>
                           </div>
-                          <span className="rounded border border-slate-700 px-1.5 py-1 text-[10px] text-emerald-100">绑定</span>
+                          <span className="rounded border border-slate-700 px-1.5 py-1 text-[12px] text-emerald-100">绑定</span>
                         </button>
                       )) : (
-                        <div className="px-2 py-2 text-[12px] leading-4 text-slate-500" data-asset-empty-candidates="true">素材库暂无未绑定候选。上传文件后会出现在这里。</div>
+                        <div className="px-2 py-2 text-[12px] leading-5 text-slate-500" data-asset-empty-candidates="true">素材库暂无未绑定候选。上传文件后会出现在这里。</div>
                       )}
                     </div>
                     <div className="rounded border border-slate-800 bg-slate-950/70 px-2 py-1.5 text-micro text-slate-500" data-asset-drop-hint-panel="true">支持：左侧资源拖到画布节点、拖到底部目标输入、粘贴文件、上传后自动绑定当前节点。</div>
@@ -3487,7 +3487,7 @@ export default function WorkGraphStudio() {
                 </details>
                 <details open className={cn("wg-native-module rounded border border-slate-800 bg-slate-950/40", nodeModuleDrawer === "brand" ? "" : "hidden")} data-node-native-module="brand" data-module-open={nodeModuleDrawer === "brand"} data-property-section="brand">
                   <summary className="cursor-pointer px-2 py-1.5 text-[12px] font-semibold uppercase text-slate-300">品牌</summary>
-                  <div className="wg-property-section-body border-t border-slate-800 p-2 leading-4 text-slate-400" data-brand-learning-panel="true" data-property-section-body="true">
+                  <div className="wg-property-section-body border-t border-slate-800 p-2 leading-5 text-slate-400" data-brand-learning-panel="true" data-property-section-body="true">
                     <div className="font-semibold text-slate-200">{dapot?.name || "DA POT HOT POT"}</div>
                     <p className="mt-1 line-clamp-5">{dapot?.context || "年轻、干净、可信、温暖、适合拍照传播；禁用廉价感、拼接感、文字太多、过度复杂。"}</p>
                     <div className="mt-2 grid grid-cols-2 gap-2 text-[12px]">
@@ -3523,7 +3523,7 @@ export default function WorkGraphStudio() {
                     <span className="text-micro text-slate-600">{activeNode?.id || "no node"}</span>
                   </div>
                   <textarea
-                    className="h-24 w-full resize-none rounded border border-slate-800 bg-slate-950/80 p-2 text-[12px] leading-4 text-slate-300 outline-none focus:border-cyan-500/60"
+                    className="h-24 w-full resize-none rounded border border-slate-800 bg-slate-950/80 p-2 text-[12px] leading-5 text-slate-300 outline-none focus:border-cyan-500/60"
                     value={activeNode?.body || ""}
                     onChange={(event) => void patchActiveNode({ body: event.target.value }, "node input saved")}
                     disabled={!activeNode || busy}
@@ -3536,7 +3536,7 @@ export default function WorkGraphStudio() {
                 </div>
                 <div className="rounded border border-slate-800 bg-slate-900/60 p-2" data-inspector-input-source="true">
                   <div className="text-micro uppercase text-slate-600">输入来源</div>
-                  <div className="mt-1 grid grid-cols-2 gap-1 text-[11px] text-slate-500">
+                  <div className="mt-1 grid grid-cols-2 gap-1 text-[12.5px] text-slate-500">
                     <span className="truncate rounded bg-slate-950/70 px-2 py-1">目标 {workspace?.prompt || prompt ? "已填写" : "空"}</span>
                     <span className="truncate rounded bg-slate-950/70 px-2 py-1">品牌 {activePromptRecord?.brandId || workspace?.activeBrandId || "自动"}</span>
                     <span className="truncate rounded bg-slate-950/70 px-2 py-1">技能 {activePromptRecord?.skillId || activeNode?.skillId || "自动"}</span>
@@ -3563,11 +3563,11 @@ export default function WorkGraphStudio() {
                   ].map(([label, value]) => (
                     <div key={label} className="min-w-0 rounded border border-slate-800 bg-slate-950/60 p-2" data-prompt-context-field={label.toLowerCase().replace(/\s+/g, "-")}>
                       <div className="mb-1 text-micro uppercase text-slate-600">{label}</div>
-                      <pre className="max-h-20 overflow-auto whitespace-pre-wrap text-[12px] leading-4 text-slate-400">{value || "空"}</pre>
+                      <pre className="max-h-20 overflow-auto whitespace-pre-wrap text-[12px] leading-5 text-slate-400">{value || "空"}</pre>
                     </div>
                   ))}
                 </div>
-                <pre className="mt-2 max-h-16 overflow-auto whitespace-pre-wrap rounded border border-slate-800 bg-slate-950/60 p-2 text-[12px] leading-4 text-slate-500">
+                <pre className="mt-2 max-h-16 overflow-auto whitespace-pre-wrap rounded border border-slate-800 bg-slate-950/60 p-2 text-[12px] leading-5 text-slate-500">
                   {activePromptRecord?.brandContext || dapot?.context || "未加载品牌上下文"}
                 </pre>
               </div>
@@ -3584,7 +3584,7 @@ export default function WorkGraphStudio() {
                 </div>
                 <div className="mt-2 space-y-1">
                   {activeNodeLogs.length ? activeNodeLogs.map((log) => (
-                    <div key={log.id} className="rounded border border-slate-800 bg-slate-950/70 px-2 py-1 text-[12px] leading-4 text-slate-400">
+                    <div key={log.id} className="rounded border border-slate-800 bg-slate-950/70 px-2 py-1 text-[12px] leading-5 text-slate-400">
                       <span className="text-cyan-300">{log.step}</span> · {displayLogMessage(log)}
                       {log.payload && <pre className="mt-1 max-h-16 overflow-auto whitespace-pre-wrap text-slate-600">{formatRecord(log.payload)}</pre>}
                     </div>
@@ -3610,7 +3610,7 @@ export default function WorkGraphStudio() {
                   title={`${label}: ${count}`}
                 >
                   <span>{label}</span>
-                  <span className="wg-bottom-tab-count rounded bg-white/5 px-1 text-[10px] text-slate-500" data-bottom-mode-count="true">{count}</span>
+                  <span className="wg-bottom-tab-count rounded bg-white/5 px-1 text-[12px] text-slate-500" data-bottom-mode-count="true">{count}</span>
                 </button>
               ))}
             </div>
@@ -3619,7 +3619,7 @@ export default function WorkGraphStudio() {
                 <button
                   key={node.id}
                   className={cn(
-                    "wg-node-step-chip flex h-6 shrink-0 items-center gap-0.5 rounded-full border px-1.5 text-[10px] transition",
+                    "wg-node-step-chip flex h-6 shrink-0 items-center gap-0.5 rounded-full border px-1.5 text-[12px] transition",
                     node.id === activeNode?.id
                       ? "border-cyan-300/70 bg-cyan-300/12 text-cyan-100"
                       : "border-white/10 bg-black/15 text-slate-500 hover:border-cyan-400/50 hover:text-slate-300"
@@ -3643,7 +3643,7 @@ export default function WorkGraphStudio() {
               <span className="rounded border border-slate-800 bg-slate-900 px-2 py-0.5" title="/ 输入，1-9 切节点，M 模块，R 运行，F 专注，Esc 恢复">快捷键</span>
             </div>
           </div>
-            <div className={cn("wg-bottom-layout grid min-h-0 flex-1 gap-1.5 overflow-hidden p-1.5 text-[11px] leading-4", previewExpanded ? "is-preview-expanded" : "is-preview-collapsed")} data-bottom-workbench="true" data-bottom-layout="three-zone" data-bottom-layout-density="production-console" data-bottom-layout-expanded={previewExpanded ? "true" : "false"} data-bottom-layout-priority="preview-and-input">
+            <div className={cn("wg-bottom-layout grid min-h-0 flex-1 gap-1.5 overflow-hidden p-1.5 text-[12.5px] leading-5", previewExpanded ? "is-preview-expanded" : "is-preview-collapsed")} data-bottom-workbench="true" data-bottom-layout="three-zone" data-bottom-layout-density="production-console" data-bottom-layout-expanded={previewExpanded ? "true" : "false"} data-bottom-layout-priority="preview-and-input">
             <div
               className="wg-goal-composer wg-bottom-zone flex min-h-0 flex-col rounded-md border border-cyan-300/20 bg-[#10181d]/95 p-2"
               onDragEnter={handleGoalComposerDrag}
@@ -3665,7 +3665,7 @@ export default function WorkGraphStudio() {
                   <Sparkles className="h-4 w-4" />
                   目标命令
                 </div>
-                <div className="wg-composer-mode-tabs flex shrink-0 items-center gap-0.5 rounded-md border border-white/10 bg-black/22 p-0.5 text-[10px]" data-composer-mode-tabs="true" data-composer-mode={composerMode}>
+                <div className="wg-composer-mode-tabs flex shrink-0 items-center gap-0.5 rounded-md border border-white/10 bg-black/22 p-0.5 text-[12px]" data-composer-mode-tabs="true" data-composer-mode={composerMode}>
                   {([
                     { key: "goal", label: "目标", title: "生成或重建完整工作图" },
                     { key: "node", label: "节点", title: "只更新当前绑定节点输入" }
@@ -3687,7 +3687,7 @@ export default function WorkGraphStudio() {
                   <span>Ctrl/⌘ Enter</span>
                 </div>
               </div>
-              <div className="wg-goal-binding-strip mb-1 flex h-[18px] min-h-[18px] items-center gap-1.5 overflow-hidden rounded-md border border-white/10 bg-black/18 px-2 text-[10px] leading-none text-slate-500" data-bottom-goal-binding-strip="true" data-bottom-goal-bound-node-id={activeNode?.id || "none"}>
+              <div className="wg-goal-binding-strip mb-1 flex h-[18px] min-h-[18px] items-center gap-1.5 overflow-hidden rounded-md border border-white/10 bg-black/18 px-2 text-[12px] leading-none text-slate-500" data-bottom-goal-binding-strip="true" data-bottom-goal-bound-node-id={activeNode?.id || "none"}>
                 <span className="shrink-0 text-slate-600" data-bottom-goal-binding-label="true">绑定</span>
                 <span className="min-w-0 flex-1 truncate text-cyan-100" title={displayNodeTitle(activeNode)} data-bottom-goal-bound-node="true">{displayNodeTitle(activeNode) || "未选择节点"}</span>
                 <span className="hidden shrink-0 rounded border border-white/8 bg-white/5 px-1.5 py-0 text-slate-400 xl:inline" data-bottom-goal-draft-source="true">{composerMode === "node" ? "节点草稿" : "全局目标"}</span>
@@ -3784,8 +3784,8 @@ export default function WorkGraphStudio() {
                   <span className="max-w-[86px] truncate rounded border border-cyan-300/30 bg-cyan-300/10 px-2 py-0.5 text-micro text-cyan-100" title={activeNode?.modelId || workspace?.activeModelId || "自动模型"}>{displayModelName(activeNode?.modelId || workspace?.activeModelId, models)}</span>
                 </div>
               </div>
-              <p className="line-clamp-1 min-h-[18px] text-[12px] leading-4 text-slate-400" data-current-node-module-hint="true">{activeModuleHint} · {activeNode?.body || "选择节点后，这里显示当前节点的输入、状态和模型策略。"}</p>
-              <div className="wg-current-node-metrics sr-only grid grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,0.8fr)] gap-1 text-[10px] text-slate-500" aria-hidden="true">
+              <p className="line-clamp-1 min-h-[18px] text-[12px] leading-5 text-slate-400" data-current-node-module-hint="true">{activeModuleHint} · {activeNode?.body || "选择节点后，这里显示当前节点的输入、状态和模型策略。"}</p>
+              <div className="wg-current-node-metrics sr-only grid grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,0.8fr)] gap-1 text-[12px] text-slate-500" aria-hidden="true">
                 <span data-current-node-stat="model" title={activeNode?.modelId || workspace?.activeModelId || "自动模型"}>{displayModelName(activeNode?.modelId || workspace?.activeModelId, models)}</span>
                 <span data-current-node-stat="asset">{(activeNode?.materialIds ?? []).length} 素材</span>
                 <span data-current-node-stat="log">{activeNodeLogs.length} 日志</span>
@@ -3808,7 +3808,7 @@ export default function WorkGraphStudio() {
                     }}
                   >
                     <span className="sr-only">{step.label}</span>
-                    <span className="block truncate text-[10px] leading-none text-slate-200">{step.value}</span>
+                    <span className="block truncate text-[12px] leading-none text-slate-200">{step.value}</span>
                   </button>
                 ))}
               </div>
@@ -3833,7 +3833,7 @@ export default function WorkGraphStudio() {
                   <button
                     key={drawer}
                     className={cn(
-                      "flex h-5 min-w-0 items-center justify-center gap-1 rounded border px-1 text-[10px] transition",
+                      "flex h-5 min-w-0 items-center justify-center gap-1 rounded border px-1 text-[12px] transition",
                       nodeModuleDrawer === drawer
                         ? "border-cyan-300/60 bg-cyan-300/12 text-cyan-100"
                         : "border-slate-800 bg-slate-950/70 text-slate-500 hover:border-cyan-500/70 hover:text-slate-200"
@@ -3902,9 +3902,9 @@ export default function WorkGraphStudio() {
                 )) : (
                   <div className="wg-empty-state wg-empty-state-structured grid h-full min-h-[150px] place-items-center rounded-md border border-dashed border-white/15 bg-black/16 text-center" data-logs-empty-state="true">
                     <div className="max-w-[360px]">
-                      <div className="text-[13px] font-semibold text-slate-200">等待第一次执行</div>
-                      <div className="mt-1 text-[11px] leading-4 text-slate-500">生成工作图后，运行当前节点；这里会按时间记录技能、模型、素材和结果写入。</div>
-                      <div className="mt-3 grid grid-cols-3 gap-1 text-[10px] text-slate-500">
+                      <div className="text-[13.5px] font-semibold text-slate-200">等待第一次执行</div>
+                      <div className="mt-1 text-[12.5px] leading-5 text-slate-500">生成工作图后，运行当前节点；这里会按时间记录技能、模型、素材和结果写入。</div>
+                      <div className="mt-3 grid grid-cols-3 gap-1 text-[12px] text-slate-500">
                         <span className="rounded border border-white/10 bg-black/20 px-2 py-1">计划</span>
                         <span className="rounded border border-white/10 bg-black/20 px-2 py-1">执行</span>
                         <span className="rounded border border-white/10 bg-black/20 px-2 py-1">产物</span>
@@ -3962,7 +3962,7 @@ export default function WorkGraphStudio() {
                       </button>
                     </div>
                   </div>
-                  <div className="wg-preview-source-strip mb-1 flex min-h-[20px] items-center gap-1.5 overflow-hidden rounded-md border border-white/10 bg-black/16 px-2 text-[10px] text-slate-500" data-preview-source-strip="true" data-preview-source-tone={previewSourceTone}>
+                  <div className="wg-preview-source-strip mb-1 flex min-h-[20px] items-center gap-1.5 overflow-hidden rounded-md border border-white/10 bg-black/16 px-2 text-[12px] text-slate-500" data-preview-source-strip="true" data-preview-source-tone={previewSourceTone}>
                     <span className="shrink-0 text-slate-600">来源</span>
                     <span className="shrink-0 rounded border border-cyan-300/20 bg-cyan-300/8 px-1.5 py-0 text-cyan-100" data-preview-source-kind="true">{previewSourceKind}</span>
                     <span className="min-w-0 flex-1 truncate" title={displayNodeTitle(activeNode)} data-preview-source-node="true">{displayNodeTitle(activeNode) || "未选择节点"}</span>
@@ -3985,7 +3985,7 @@ export default function WorkGraphStudio() {
                         }}
                       >
                         <span className="block truncate text-micro text-slate-500">{step.label}</span>
-                        <span className="block truncate text-[10px] font-semibold text-slate-200">{step.value}</span>
+                        <span className="block truncate text-[12px] font-semibold text-slate-200">{step.value}</span>
                       </button>
                     ))}
                   </div>
@@ -4006,9 +4006,9 @@ export default function WorkGraphStudio() {
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           <span className="truncate">正在执行当前节点</span>
                         </div>
-                        <div className="mt-0.5 truncate text-[11px] leading-4 text-slate-500" data-preview-running-node="true">{displayNodeTitle(activeNode)} / {runningNodeId}</div>
+                        <div className="mt-0.5 truncate text-[12.5px] leading-5 text-slate-500" data-preview-running-node="true">{displayNodeTitle(activeNode)} / {runningNodeId}</div>
                       </div>
-                      <div className="grid shrink-0 grid-cols-3 gap-1 text-center text-[10px]" data-preview-running-steps="true">
+                      <div className="grid shrink-0 grid-cols-3 gap-1 text-center text-[12px]" data-preview-running-steps="true">
                         {["技能", "模型", "产物"].map((label) => (
                           <span key={label} className="rounded border border-cyan-300/18 bg-black/20 px-2 py-1 text-cyan-100">{label}</span>
                         ))}
@@ -4018,14 +4018,14 @@ export default function WorkGraphStudio() {
                     <div className="wg-preview-receipt flex h-[64px] items-center justify-between gap-2 overflow-hidden rounded-md border border-emerald-300/22 bg-emerald-300/7 px-2.5" data-preview-result-receipt="true" data-preview-priority="media-first" data-preview-stage-size="compact">
                       <div className="min-w-0">
                         <div className="truncate text-[12px] font-semibold text-emerald-100">结果记录已生成</div>
-                        <div className="mt-0.5 truncate text-[11px] leading-4 text-slate-500" data-preview-receipt-id="true">{previewResult?.id}</div>
+                        <div className="mt-0.5 truncate text-[12.5px] leading-5 text-slate-500" data-preview-receipt-id="true">{previewResult?.id}</div>
                         <div className="mt-0.5 flex min-w-0 items-center gap-1" data-preview-receipt-next-actions="true">
-                          <button className="rounded border border-emerald-300/18 bg-black/20 px-1.5 py-0.5 text-[10px] text-emerald-100 hover:border-emerald-300/60 disabled:opacity-50" onClick={() => fileInputRef.current?.click()} disabled={busy} data-preview-receipt-next-action="upload">上传素材</button>
-                          <button className="rounded border border-emerald-300/18 bg-black/20 px-1.5 py-0.5 text-[10px] text-emerald-100 hover:border-emerald-300/60" onClick={() => openNodeModule("asset")} data-preview-receipt-next-action="asset">绑定素材</button>
-                          <button className="rounded border border-emerald-300/18 bg-black/20 px-1.5 py-0.5 text-[10px] text-emerald-100 hover:border-emerald-300/60" onClick={() => setBottomTab("反馈")} data-preview-receipt-next-action="feedback">写反馈</button>
+                          <button className="rounded border border-emerald-300/18 bg-black/20 px-1.5 py-0.5 text-[12px] text-emerald-100 hover:border-emerald-300/60 disabled:opacity-50" onClick={() => fileInputRef.current?.click()} disabled={busy} data-preview-receipt-next-action="upload">上传素材</button>
+                          <button className="rounded border border-emerald-300/18 bg-black/20 px-1.5 py-0.5 text-[12px] text-emerald-100 hover:border-emerald-300/60" onClick={() => openNodeModule("asset")} data-preview-receipt-next-action="asset">绑定素材</button>
+                          <button className="rounded border border-emerald-300/18 bg-black/20 px-1.5 py-0.5 text-[12px] text-emerald-100 hover:border-emerald-300/60" onClick={() => setBottomTab("反馈")} data-preview-receipt-next-action="feedback">写反馈</button>
                         </div>
                       </div>
-                      <div className="grid shrink-0 grid-cols-3 gap-1 text-center text-[10px]" data-preview-receipt-stats="true">
+                      <div className="grid shrink-0 grid-cols-3 gap-1 text-center text-[12px]" data-preview-receipt-stats="true">
                         <button className="rounded border border-emerald-300/18 bg-black/20 px-2 py-1 text-emerald-100 hover:border-emerald-300/60" onClick={() => openPreviewTraceTarget("node", traceNodeId)} disabled={!traceNodeId} data-preview-receipt-action="node">{previewResult?.status || activeNode?.status || "完成"}</button>
                         <button className="rounded border border-emerald-300/18 bg-black/20 px-2 py-1 text-emerald-100 hover:border-emerald-300/60" onClick={() => openPreviewTraceTarget("logs")} data-preview-receipt-action="logs">{resultLogs.length || activeNodeLogs.length} 日志</button>
                         <button className="rounded border border-emerald-300/18 bg-black/20 px-2 py-1 text-emerald-100 hover:border-emerald-300/60" onClick={() => openPreviewTraceTarget("feedback")} data-preview-receipt-action="feedback">{previewResult?.piSessionId || previewResult?.trace?.piSessionId ? "Pi" : "反馈"}</button>
@@ -4035,12 +4035,12 @@ export default function WorkGraphStudio() {
                     <div className="wg-empty-state wg-empty-state-structured flex h-[64px] items-center justify-between gap-2 rounded-md border border-dashed border-cyan-300/22 bg-cyan-300/5 px-2.5" data-preview-empty-state="true" data-preview-priority="media-first" data-preview-empty-layout="actionable" data-preview-stage-size="compact">
                       <div className="min-w-0">
                         <div className="truncate text-[12px] font-semibold text-slate-200">预览区已就绪</div>
-                        <div className="mt-0.5 truncate text-[11px] leading-4 text-slate-500">等待节点输出，输出后可复制或打开产物。</div>
+                        <div className="mt-0.5 truncate text-[12.5px] leading-5 text-slate-500">等待节点输出，输出后可复制或打开产物。</div>
                       </div>
                       <div className="flex shrink-0 items-center gap-1" data-preview-empty-actions="true">
                         <button
                           type="button"
-                          className="inline-flex h-7 items-center gap-1 rounded bg-cyan-300 px-2 text-[10px] font-semibold text-slate-950 hover:bg-cyan-200 disabled:opacity-60"
+                          className="inline-flex h-7 items-center gap-1 rounded bg-cyan-300 px-2 text-[12px] font-semibold text-slate-950 hover:bg-cyan-200 disabled:opacity-60"
                           onClick={() => void runNode()}
                           disabled={busy || !activeNode}
                           data-preview-empty-action="run-node"
@@ -4063,7 +4063,7 @@ export default function WorkGraphStudio() {
                     </div>
                   ) : null}
                   {previewText && (
-                    <pre className="wg-preview-text mt-1 max-h-8 overflow-auto whitespace-pre-wrap rounded-md border border-white/8 bg-black/16 px-2 py-1 text-[11px] leading-4 text-slate-300" data-preview-text-result="true" data-preview-text-density="compact" data-preview-summary-line="true">{previewText}</pre>
+                    <pre className="wg-preview-text mt-1 max-h-8 overflow-auto whitespace-pre-wrap rounded-md border border-white/8 bg-black/16 px-2 py-1 text-[12.5px] leading-5 text-slate-300" data-preview-text-result="true" data-preview-text-density="compact" data-preview-summary-line="true">{previewText}</pre>
                   )}
                   {previewGalleryItems.length > 0 && (
                     <div className="wg-preview-gallery mt-1 grid grid-cols-3 gap-1" data-preview-gallery="true" data-preview-gallery-count={previewGalleryItems.length}>
@@ -4082,7 +4082,7 @@ export default function WorkGraphStudio() {
                             {/video|mp4|mov|webm/i.test(item.kind) ? <Film className="h-3.5 w-3.5 text-cyan-100" /> : <img src={item.url} alt={item.title} className="h-full w-full object-cover" />}
                           </span>
                           <span className="min-w-0">
-                            <span className="block truncate text-[10px] font-semibold text-slate-200">{item.title}</span>
+                            <span className="block truncate text-[12px] font-semibold text-slate-200">{item.title}</span>
                             <span className="block truncate text-micro text-slate-600">{item.source === "result" ? "结果产物" : "输入素材"}</span>
                           </span>
                         </a>
@@ -4105,14 +4105,14 @@ export default function WorkGraphStudio() {
                             data-variant-role={variant.variantRole || "variant"}
                           >
                             <div className="flex items-center justify-between gap-1">
-                              <span className="truncate text-[10px] font-semibold text-slate-200" title={variant.modelId}>{variant.modelId || "model"}</span>
+                              <span className="truncate text-[12px] font-semibold text-slate-200" title={variant.modelId}>{variant.modelId || "model"}</span>
                               {variant.variantRole === "primary" ? (
                                 <span className="shrink-0 rounded bg-cyan-400/15 px-1 text-micro text-cyan-100">主</span>
                               ) : (
                                 <button type="button" className="shrink-0 rounded border border-white/10 px-1 text-micro text-slate-300 hover:border-cyan-400/60" data-variant-select="true" onClick={() => void selectVariantAsMain(variant.id)}>选为主</button>
                               )}
                             </div>
-                            <pre className="mt-1 max-h-10 overflow-hidden whitespace-pre-wrap text-micro leading-3 text-slate-500">{String(variant.output || variant.输出 || variant.预览 || "").slice(0, 120) || "(预览待生成)"}</pre>
+                            <pre className="mt-1 max-h-10 overflow-hidden whitespace-pre-wrap text-micro leading-[1.45] text-slate-500">{String(variant.output || variant.输出 || variant.预览 || "").slice(0, 120) || "(预览待生成)"}</pre>
                           </div>
                         ))}
                       </div>
@@ -4133,7 +4133,7 @@ export default function WorkGraphStudio() {
                   )}
                   {previewExpanded && (
                   <details className="wg-preview-trace-drawer mt-1 rounded-md border border-white/10 bg-black/16" data-preview-trace-drawer="true" data-preview-trace-level="secondary" data-preview-trace-default="collapsed">
-                    <summary className="flex cursor-pointer items-center justify-between gap-2 px-2 py-0.5 text-[10px] text-slate-500">
+                    <summary className="flex cursor-pointer items-center justify-between gap-2 px-2 py-0.5 text-[12px] text-slate-500">
                       <span>追踪信息</span>
                       <span className="text-cyan-200">{previewResult?.status || activeNode?.status || "待运行"}</span>
                     </summary>
@@ -4141,8 +4141,8 @@ export default function WorkGraphStudio() {
                       <div className="mb-1 flex gap-1 overflow-x-auto" data-preview-process-summary="true" data-preview-summary-layout="single-row">
                         {previewProcessSummary.map(({ label, value }) => (
                           <div key={label} className="min-w-[72px] shrink-0 rounded-md border border-white/10 bg-black/18 px-2 py-0.5">
-                            <span className="text-[9px] uppercase text-slate-600">{label}</span>
-                            <span className="ml-1 truncate text-[11px] font-medium text-slate-300">{value}</span>
+                            <span className="text-[12.5px] uppercase text-slate-600">{label}</span>
+                            <span className="ml-1 truncate text-[12.5px] font-medium text-slate-300">{value}</span>
                           </div>
                         ))}
                       </div>
@@ -4151,7 +4151,7 @@ export default function WorkGraphStudio() {
                           <button
                             key={`${label}:${value}`}
                             type="button"
-                            className="shrink-0 rounded-md border border-white/10 bg-black/18 px-2 py-0.5 text-left text-[10px] text-slate-400 hover:border-cyan-500/70 hover:text-cyan-100"
+                            className="shrink-0 rounded-md border border-white/10 bg-black/18 px-2 py-0.5 text-left text-[12px] text-slate-400 hover:border-cyan-500/70 hover:text-cyan-100"
                             onClick={() => action && value ? openPreviewTraceTarget(action, value) : undefined}
                             title={`${label}: ${value}`}
                             data-preview-context-chip={label}
@@ -4166,8 +4166,8 @@ export default function WorkGraphStudio() {
                   )}
                   {previewExpanded && (
                   <details className="mt-2 rounded-md border border-white/10 bg-black/20" data-preview-expanded-trace-context="true">
-                    <summary className="cursor-pointer px-2 py-1 text-[11px] font-semibold text-cyan-100">追踪 / Pi 上下文</summary>
-                    <div className="grid max-h-28 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 overflow-auto border-t border-white/10 p-2 text-[11px] leading-4 text-slate-400">
+                    <summary className="cursor-pointer px-2 py-1 text-[12.5px] font-semibold text-cyan-100">追踪 / Pi 上下文</summary>
+                    <div className="grid max-h-28 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2 overflow-auto border-t border-white/10 p-2 text-[12.5px] leading-5 text-slate-400">
                       <div className="rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2 py-1.5" data-pi-session-trace-summary="true">
                         <div className="flex items-center justify-between gap-2">
                           <span className="truncate text-cyan-200">Pi 会话</span>
@@ -4211,14 +4211,14 @@ export default function WorkGraphStudio() {
                   </details>
                   )}
                 </div>
-                <div className="hidden min-h-0 overflow-auto rounded-lg border border-white/10 bg-black/20 p-2 text-[11px] leading-4 text-slate-400">
+                <div className="hidden min-h-0 overflow-auto rounded-lg border border-white/10 bg-black/20 p-2 text-[12.5px] leading-5 text-slate-400">
                   <div className="mb-2 text-[12px] font-semibold text-cyan-100">追踪</div>
                   <div className="mb-2 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2 py-1.5" data-pi-session-trace-summary="true">
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-cyan-200">Pi 会话</span>
                       <span className="shrink-0 text-slate-500">{piSessionDetail?.status || previewResult?.status || "待处理"}</span>
                     </div>
-                    <div className="mt-1 grid grid-cols-1 gap-1 text-[11px]">
+                    <div className="mt-1 grid grid-cols-1 gap-1 text-[12.5px]">
                       <span className="truncate">ID: {piSessionDetail?.id || previewResult?.piSessionId || previewResult?.trace?.piSessionId || "-"}</span>
                       <span className="truncate">节点: {piSessionDetail?.nodeId || previewResult?.nodeId || previewResult?.trace?.nodeId || activeNode?.id || "-"}</span>
                       <span className="truncate">技能: {piSessionDetail?.skillId || previewResult?.skillId || previewResult?.trace?.skillId || activeNode?.skillId || "-"}</span>
@@ -4253,7 +4253,7 @@ export default function WorkGraphStudio() {
                     })}
                   </div>
                   <details className="mt-2 rounded-md border border-white/10 bg-black/20" data-预览-prompt-trace="true">
-                    <summary className="cursor-pointer px-2 py-1.5 text-[11px] font-semibold text-slate-400">提示词追踪</summary>
+                    <summary className="cursor-pointer px-2 py-1.5 text-[12.5px] font-semibold text-slate-400">提示词追踪</summary>
                     <div className="grid grid-cols-1 gap-1 border-t border-white/10 p-1.5">
                     {[
                       ["工作区", previewPromptRecord?.workspacePrompt || workspace?.prompt || prompt],
@@ -4263,13 +4263,13 @@ export default function WorkGraphStudio() {
                     ].map(([label, value]) => (
                       <div key={label} className="rounded bg-black/20 p-2" data-预览-prompt-field={label.toLowerCase().replace(/\s+/g, "-")}>
                         <div className="text-micro uppercase text-slate-600">{label}</div>
-                        <pre className="mt-1 max-h-12 overflow-auto whitespace-pre-wrap text-[11px] leading-4 text-slate-400">{value || "-"}</pre>
+                        <pre className="mt-1 max-h-12 overflow-auto whitespace-pre-wrap text-[12.5px] leading-5 text-slate-400">{value || "-"}</pre>
                       </div>
                     ))}
                     </div>
                   </details>
                   <details className="mt-2 rounded-md border border-white/10 bg-black/20" data-pi-session-context-panel="true">
-                    <summary className="cursor-pointer px-2 py-1.5 text-[11px] font-semibold text-slate-400">Pi 上下文</summary>
+                    <summary className="cursor-pointer px-2 py-1.5 text-[12.5px] font-semibold text-slate-400">Pi 上下文</summary>
                   <div className="border-t border-white/10 p-2">
                     {piSessionDetail ? (
                       <div className="space-y-1">
@@ -4471,7 +4471,7 @@ export default function WorkGraphStudio() {
                   {activeNode?.skillId === skillDetail.skill.id && (
                     <div className="rounded border border-cyan-500/30 bg-cyan-400/8 p-2" data-skill-draft-followup="true">
                       <div className="text-[12px] font-semibold uppercase text-cyan-200">节点技能跟进</div>
-                      <div className="mt-1 text-[12px] leading-4 text-slate-400">
+                      <div className="mt-1 text-[12px] leading-5 text-slate-400">
                         当前技能已绑定到节点 {displayNodeTitle(activeNode)}。检查文件后可直接用下方提示词生成差异，确认后再写入版本。
                       </div>
                     </div>
@@ -4528,7 +4528,7 @@ export default function WorkGraphStudio() {
                         </button>
                       </div>
                       <textarea
-                        className="h-64 w-full resize-none rounded border border-slate-800 bg-slate-950 p-2 font-mono text-[12px] leading-4 text-slate-300 outline-none"
+                        className="h-64 w-full resize-none rounded border border-slate-800 bg-slate-950 p-2 font-mono text-[12px] leading-5 text-slate-300 outline-none"
                         value={skillFileDraft}
                         onChange={(event) => setSkillFileDraft(event.target.value)}
                       />
@@ -4537,7 +4537,7 @@ export default function WorkGraphStudio() {
                   <div className="rounded border border-slate-800 bg-slate-900/60 p-2">
                     <div className="mb-2 text-micro uppercase text-slate-500">自然语言技能优化</div>
                     <textarea
-                      className="h-16 w-full resize-none rounded border border-slate-800 bg-slate-950 p-2 text-[12px] leading-4 text-slate-300 outline-none"
+                      className="h-16 w-full resize-none rounded border border-slate-800 bg-slate-950 p-2 text-[12px] leading-5 text-slate-300 outline-none"
                       value={skillOptimizePrompt}
                       onChange={(event) => setSkillOptimizePrompt(event.target.value)}
                     />
@@ -4552,7 +4552,7 @@ export default function WorkGraphStudio() {
                     {skillOptimizePreview && (
                       <div className="mt-2 rounded border border-slate-800 bg-slate-950">
                         <div className="border-b border-slate-800 px-2 py-1.5 text-cyan-200">{skillOptimizePreview.message}</div>
-                        <pre className="max-h-52 overflow-auto whitespace-pre-wrap p-2 font-mono text-[12px] leading-4 text-slate-400">{skillOptimizePreview.diffPreview || skillOptimizePreview.plan?.join("\n")}</pre>
+                        <pre className="max-h-52 overflow-auto whitespace-pre-wrap p-2 font-mono text-[12px] leading-5 text-slate-400">{skillOptimizePreview.diffPreview || skillOptimizePreview.plan?.join("\n")}</pre>
                       </div>
                     )}
                   </div>
@@ -4564,7 +4564,7 @@ export default function WorkGraphStudio() {
                           <span>{skillTestResult.testId || "本地技能测试"}</span>
                           <span>{skillTestResult.routingDecision?.selectedModelId || "自动模型"}</span>
                         </div>
-                        <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-4 text-slate-400">{skillTestResult.预览 || "未返回预览"}</pre>
+                        <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-5 text-slate-400">{skillTestResult.预览 || "未返回预览"}</pre>
                       </div>
                     )}
                     <div className="space-y-1">

@@ -14,7 +14,7 @@ const config: Config = {
         accent: "hsl(var(--accent))"
       },
       fontSize: {
-        micro: ["10px", "14px"]
+        micro: ["11.5px", "16px"]
       }
     }
   },
