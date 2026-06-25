@@ -256,11 +256,15 @@ try {
   await page.locator("body").click({ position: { x: 24, y: 24 } });
   await page.keyboard.press("1");
   await waitForActiveNode(page, ["goal"]);
+  // Let the activate-node persist round-trip fully drain before the next switch:
+  // rapid switches otherwise race (a late PUT response can revert activeNodeId).
+  await page.waitForTimeout(1200);
   state = await metrics(page);
   assert(state.activeBottomNode === "goal", `1 shortcut did not switch to first node: ${state.activeBottomNode}`);
 
   await page.keyboard.press("2");
   await waitForActiveNode(page, ["brand", "brand-context"]);
+  await page.waitForTimeout(1200);
   state = await metrics(page);
   assert(state.activeBottomNode === "brand" || state.activeBottomNode === "brand-context", `2 shortcut did not switch back to second node: ${state.activeBottomNode}`);
 
