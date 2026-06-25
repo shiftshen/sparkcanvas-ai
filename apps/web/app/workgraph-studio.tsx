@@ -382,6 +382,14 @@ type ResultObject = {
   输出?: string;
   预览?: string;
   预览Url?: string;
+  // Backend (English) result fields: real run output, preview URL and variant grouping.
+  output?: string;
+  previewUrl?: string;
+  artifactPaths?: string[];
+  variantGroupId?: string;
+  variantIndex?: number;
+  variantRole?: string;
+  simulated?: boolean;
   sourceJobId?: string;
   executionId?: string;
   piSessionId?: string;
@@ -2312,6 +2320,36 @@ export default function WorkGraphStudio() {
   }
 
   const latestResult = workspace?.results?.[0];
+  // T7: side-by-side output variants — results that share the latest variant group.
+  const variantGroup = latestResult?.variantGroupId
+    ? (workspace?.results ?? [])
+        .filter((result) => result.variantGroupId === latestResult.variantGroupId)
+        .sort((left, right) => (left.variantIndex ?? 0) - (right.variantIndex ?? 0))
+    : [];
+  // T8: version history for the latest result, derived from history snapshots.
+  const [resultVersions, setResultVersions] = useState<Array<{ version: number; createdAt: string; reason: string; object?: { payload?: ResultObject } }>>([]);
+  useEffect(() => {
+    const resultId = latestResult?.id;
+    if (!resultId) { setResultVersions([]); return; }
+    let cancelled = false;
+    api(`/workgraph-os/versions/result/${encodeURIComponent(resultId)}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => { if (!cancelled && data) setResultVersions(Array.isArray(data.versions) ? data.versions : []); })
+      .catch(() => { if (!cancelled) setResultVersions([]); });
+    return () => { cancelled = true; };
+  }, [latestResult?.id, workspace?.updatedAt]);
+  async function selectVariantAsMain(resultId: string) {
+    if (!workspace) return;
+    const results = workspace.results ?? [];
+    const chosen = results.find((result) => result.id === resultId);
+    if (!chosen) return;
+    await persistWorkspace({ ...workspace, results: [chosen, ...results.filter((result) => result.id !== resultId)] }, "已选为主结果");
+  }
+  async function rollbackResultToVersion(versionPayload?: ResultObject) {
+    if (!workspace || !versionPayload?.id) return;
+    const results = workspace.results ?? [];
+    await persistWorkspace({ ...workspace, results: results.map((result) => result.id === versionPayload.id ? { ...result, ...versionPayload } : result) }, "已回滚到所选版本");
+  }
   const latestPromptRecord = latestResult?.promptRecord
     ?? workspace?.promptRecords?.find((record) => record.id === latestResult?.promptRecordId)
     ?? workspace?.promptRecords?.[0];
@@ -2400,8 +2438,8 @@ export default function WorkGraphStudio() {
   const activeNode输出结果Text = activeNodeResult?.预览 || activeNodeResult?.输出 || activePromptRecord?.输出 || "";
   const previewResult = activeNodeResult ?? latestResult;
   const previewPromptRecord = activePromptRecord ?? latestPromptRecord;
-  const previewText = previewResult?.输出 || previewResult?.预览 || activeNode输出结果Text || "";
-  const previewUrl = previewResult?.预览Url;
+  const previewText = previewResult?.输出 || previewResult?.预览 || previewResult?.output || activeNode输出结果Text || "";
+  const previewUrl = previewResult?.预览Url || previewResult?.previewUrl;
   const previewIsVideo = Boolean(previewUrl && /\.mp4\b|\.webm\b|\.mov\b/i.test(previewUrl));
   const isPreviewRunning = Boolean(runningNodeId && activeNode?.id === runningNodeId && !previewText && !previewUrl);
   const hasPreviewReceipt = Boolean(previewResult?.id && !previewText && !previewUrl && !isPreviewRunning);
@@ -4050,6 +4088,48 @@ export default function WorkGraphStudio() {
                         </a>
                       ))}
                     </div>
+                  )}
+                  {variantGroup.length > 1 && (
+                    <div className="wg-variant-compare mt-1 rounded-md border border-white/10 bg-black/16 p-1" data-variant-compare="true" data-variant-count={variantGroup.length}>
+                      <div className="mb-1 flex items-center justify-between text-micro text-slate-500">
+                        <span>变体并排 · {variantGroup.length}</span>
+                        <span className="truncate text-slate-600">{latestResult?.variantGroupId}</span>
+                      </div>
+                      <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${Math.min(variantGroup.length, 4)}, minmax(0, 1fr))` }}>
+                        {variantGroup.slice(0, 4).map((variant) => (
+                          <div
+                            key={variant.id}
+                            className={cn("min-w-0 rounded border bg-black/24 p-1", variant.variantRole === "primary" ? "border-cyan-400/60" : "border-white/10")}
+                            data-variant-item="true"
+                            data-variant-index={variant.variantIndex ?? 0}
+                            data-variant-role={variant.variantRole || "variant"}
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="truncate text-[10px] font-semibold text-slate-200" title={variant.modelId}>{variant.modelId || "model"}</span>
+                              {variant.variantRole === "primary" ? (
+                                <span className="shrink-0 rounded bg-cyan-400/15 px-1 text-micro text-cyan-100">主</span>
+                              ) : (
+                                <button type="button" className="shrink-0 rounded border border-white/10 px-1 text-micro text-slate-300 hover:border-cyan-400/60" data-variant-select="true" onClick={() => void selectVariantAsMain(variant.id)}>选为主</button>
+                              )}
+                            </div>
+                            <pre className="mt-1 max-h-10 overflow-hidden whitespace-pre-wrap text-micro leading-3 text-slate-500">{String(variant.output || variant.输出 || variant.预览 || "").slice(0, 120) || "(预览待生成)"}</pre>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {resultVersions.length > 0 && (
+                    <details className="wg-version-history mt-1 rounded-md border border-white/10 bg-black/16" data-version-history="true" data-version-count={resultVersions.length}>
+                      <summary className="cursor-pointer px-2 py-1 text-micro text-slate-400">版本历史 · {resultVersions.length}</summary>
+                      <div className="max-h-16 overflow-auto px-1 pb-1">
+                        {resultVersions.slice(0, 8).map((entry) => (
+                          <div key={entry.version} className="flex items-center justify-between gap-1 border-t border-white/5 px-1 py-0.5 text-micro text-slate-500" data-version-item="true" data-version-number={entry.version}>
+                            <span className="truncate">v{entry.version} · {String(entry.createdAt).slice(11, 19)} · {entry.reason}</span>
+                            <button type="button" className="shrink-0 rounded border border-white/10 px-1 text-slate-300 hover:border-cyan-400/60" data-version-rollback="true" onClick={() => void rollbackResultToVersion(entry.object?.payload)}>回滚</button>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
                   )}
                   {previewExpanded && (
                   <details className="wg-preview-trace-drawer mt-1 rounded-md border border-white/10 bg-black/16" data-preview-trace-drawer="true" data-preview-trace-level="secondary" data-preview-trace-default="collapsed">
