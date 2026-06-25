@@ -152,6 +152,12 @@ try {
   await desktop.locator("body").click({ position: { x: 24, y: 24 } });
   await desktop.keyboard.press("2");
   await waitForActiveNode(desktop, ["brand", "brand-context"]);
+  // Node activation is optimistic then persisted async (PUT); on slow CI a late
+  // load/persist can revert activeNodeId to the first node right after the
+  // optimistic switch. Settle so the activation PUT lands, then re-confirm it
+  // stuck before asserting (matches the T15 interaction-smoke hardening).
+  await desktop.waitForTimeout(1200);
+  await waitForActiveNode(desktop, ["brand", "brand-context"]);
   const numberSwitch = await desktop.evaluate(() => {
     const activeChip = document.querySelector("[data-bottom-node-active='true']");
     const activeCanvasNode = document.querySelector("[data-canvas-active-node='true']");
