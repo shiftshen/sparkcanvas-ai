@@ -148,6 +148,17 @@ try {
   const aiStatusPayload = await aiStatus.json();
   assert(aiStatusPayload.publicReference?.productionReady === true, "AI status should mark public reference URLs production-ready");
 
+  // Launch readiness gate (T13): composition + configured checks + consistency.
+  const launch = aiStatusPayload.launchReadiness;
+  assert(launch && typeof launch.productionReady === "boolean" && Array.isArray(launch.checks), "AI status should expose the launchReadiness gate");
+  const checkIds = launch.checks.map((check) => check.id).sort();
+  assert(["image-api", "public-reference", "text-api", "video-api"].every((id) => checkIds.includes(id)), `launchReadiness should cover all gate checks, got ${checkIds.join(",")}`);
+  const gateById = Object.fromEntries(launch.checks.map((check) => [check.id, check]));
+  assert(gateById["public-reference"].ready === true, "public-reference gate should be ready when SPARKCANVAS_PUBLIC_BASE_URL is set");
+  assert(gateById["video-api"].ready === true, "video-api gate should be ready when VIDEO_GEN_KEY is set");
+  const allReady = launch.checks.every((check) => check.ready);
+  assert(launch.productionReady === allReady, "launchReadiness.productionReady must equal all-checks-ready (gate stays blocked unless every dependency is configured)");
+
   const generatedWithoutToken = await fetch(`${baseUrl}/generated/private.txt`, {
     headers: { Origin: "https://xmanx.com" }
   });
