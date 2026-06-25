@@ -97,6 +97,7 @@ jobs:
           node scripts/workgraph-os-ui-visual-smoke.mjs
           node scripts/workgraph-os-ui-layout-smoke.mjs
           node scripts/workgraph-os-ui-flow-smoke.mjs
+          node scripts/workgraph-os-ui-drawer-exclusion-smoke.mjs
 
       - name: Dump dev log on failure
         if: failure()

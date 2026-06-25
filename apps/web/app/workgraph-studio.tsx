@@ -1281,6 +1281,10 @@ export default function WorkGraphStudio() {
   }
 
   function openNodeModule(drawer: Exclude<NodeModuleDrawer, null>) {
+    // Drawer mutual exclusion (agy review条件1): the right-side inspector module
+    // drawer and the 520px skill drawer are two heavy right surfaces — only one
+    // may be open at a time, otherwise the "多面板叠加" density regresses.
+    setSkillDrawerOpen(false);
     setInspectorCollapsed(false);
     setInspectorTab("modules");
     setNodeModuleDrawer(drawer);
@@ -1320,6 +1324,13 @@ export default function WorkGraphStudio() {
     setInspectorCollapsed(false);
     setStatus("参数视图");
   }
+
+  // Drawer mutual exclusion (agy review条件1, reverse direction): whenever the
+  // 520px skill drawer is open it is the sole right surface — collapse the
+  // inspector module drawer so the two never stack.
+  useEffect(() => {
+    if (skillDrawerOpen) setInspectorCollapsed(true);
+  }, [skillDrawerOpen]);
 
   function baseWorkspace(): WorkGraphWorkspace {
     return {
@@ -2115,10 +2126,13 @@ export default function WorkGraphStudio() {
   }
 
   async function openSkillDrawerForNode(nodeId?: string) {
-    setSkillDrawerOpen(true);
     const targetNode = plannedNodes.find((node) => node.id === nodeId) ?? activeNode;
     if (targetNode?.id) activateNode(targetNode.id);
-    openNodeModule("skill");
+    // Pre-select the node's skill module without expanding the inspector, then
+    // open the skill drawer — exclusivity keeps only the drawer as the right surface.
+    setInspectorTab("modules");
+    setNodeModuleDrawer("skill");
+    setSkillDrawerOpen(true);
     const targetSkillId = targetNode?.skillId || skills[0]?.id;
     if (targetSkillId) {
       await openSkill(targetSkillId);
@@ -2781,6 +2795,7 @@ export default function WorkGraphStudio() {
         data-inspector-collapsed={inspectorCollapsed ? "true" : "false"}
         data-resource-collapsed={resourceCollapsed ? "true" : "false"}
         data-preview-expanded={previewExpanded ? "true" : "false"}
+        data-right-surface={skillDrawerOpen ? "skill-drawer" : inspectorCollapsed ? "none" : "inspector"}
       >
         <aside className="row-span-2 flex min-h-0 flex-col overflow-hidden border-r border-white/10 bg-slate-900/70 wg-panel" data-resource-panel="true" data-resource-panel-layout="column">
           <div className="wg-resource-header flex h-9 shrink-0 items-center gap-2 border-b border-white/12 px-3 text-[12.5px] font-semibold text-slate-200">
@@ -4450,7 +4465,7 @@ export default function WorkGraphStudio() {
       </div>
 
       {skillDrawerOpen && (
-        <div className="fixed inset-y-0 right-0 z-20 w-[520px] border-l border-slate-700 bg-slate-950 shadow-2xl">
+        <div className="fixed inset-y-0 right-0 z-20 w-[520px] border-l border-slate-700 bg-slate-950 shadow-2xl" data-skill-drawer="true" data-skill-drawer-open="true">
           <div className="flex h-12 items-center justify-between border-b border-slate-800 px-3">
               <div>
               <div className="text-xs font-semibold">Pi 技能管理</div>
