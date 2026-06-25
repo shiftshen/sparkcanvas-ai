@@ -244,6 +244,7 @@ assert(serverSource.includes("/workgraph-os/versions/:type/:id") && serverSource
 assert(nextStudioSource.includes("data-variant-compare") && nextStudioSource.includes("selectVariantAsMain") && nextStudioSource.includes("variantGroup"), "apps/web should render the side-by-side variant comparison with a select-as-main action (T7)");
 assert(nextStudioSource.includes("data-version-history") && nextStudioSource.includes("rollbackResultToVersion") && nextStudioSource.includes("/workgraph-os/versions/result/"), "apps/web should render result version history with rollback (T8)");
 assert(nextStudioSource.includes("previewResult?.output") && nextStudioSource.includes("previewResult?.previewUrl"), "apps/web preview should read the backend English output/previewUrl for real pi outputs (T9)");
+assert(serverSource.includes("queryWorkGraphOsSqlite") && serverSource.includes("readWorkGraphOsObjectIndexFromSqlite") && serverSource.includes("WGOS_SQLITE_READ") && serverSource.includes("sqlite-index"), "backend /objects should support an opt-in SQLite query source with JSON fallback (T12)");
 assert(serverSource.includes("nodeParams") && serverSource.includes("Node Parameters:"), "backend should carry node module parameters into PromptRecord, Result trace and Skill runtime input");
 assert(serverSource.includes("activeNodeId?: string") && serverSource.includes("activeNodeId: z.string().default(\"\")"), "backend should persist the active WorkGraph node selection for UI takeover after reload");
 assert(serverSource.includes("effectivePrompt") && serverSource.includes("workspacePrompt") && serverSource.includes("prompt: effectivePrompt"), "backend should execute nodes with edited node input while preserving the original workspace prompt");
@@ -325,6 +326,7 @@ console.log(JSON.stringify({
     "workgraph-os-version-history-ready",
     "workgraph-os-studio-variant-compare-ready",
     "workgraph-os-studio-version-rollback-ready",
-    "workgraph-os-studio-real-output-preview-ready"
+    "workgraph-os-studio-real-output-preview-ready",
+    "workgraph-os-sqlite-query-source-ready"
   ]
 }));

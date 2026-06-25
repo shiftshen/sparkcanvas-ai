@@ -630,6 +630,9 @@ const workGraphOsDataFile = process.env.WORKGRAPH_OS_DATA_FILE ?? path.join(data
 const workGraphOsHistoryFile = process.env.WORKGRAPH_OS_HISTORY_FILE ?? path.join(dataDir, "workgraph-os-history.json");
 const projectRoot = path.resolve(__dirname, "../..");
 const workGraphOsDbFile = process.env.WORKGRAPH_OS_DB_FILE ?? path.join(projectRoot, "data", "db", "workgraph-os.sqlite");
+// Opt-in: serve the object index from SQLite (query source) instead of the JSON
+// index. Default off so the JSON path stays authoritative and zero-regression.
+const workGraphOsSqliteReadEnabled = (process.env.WGOS_SQLITE_READ ?? "off").trim().toLowerCase() === "on";
 const workGraphOsBaseDataDir = path.dirname(workGraphOsDataFile);
 const workGraphOsPiDir = process.env.WORKGRAPH_OS_PI_DIR ?? path.join(projectRoot, ".pi");
 const workGraphOsGoalDataDir = process.env.WORKGRAPH_OS_GOAL_DIR ?? path.join(workGraphOsBaseDataDir, "goals");
@@ -3820,6 +3823,59 @@ async function syncWorkGraphOsSqlite(exportPayload: WorkGraphOsSqliteExport) {
     workGraphOsSqliteState.lastError = (error as Error).message;
     console.warn(`WorkGraph SQLite sync (${writer}) failed; JSON remains authoritative: ${(error as Error).message}`);
   }
+}
+
+// Read-only query against the mirrored SQLite DB (T12). Returns parsed rows, or
+// null when SQLite is unavailable so callers fall back to the JSON index. Uses
+// the same writer detection (sqlite3 CLI -json, else node:sqlite).
+function queryWorkGraphOsSqlite(sql: string): Array<Record<string, unknown>> | null {
+  if (!existsSync(workGraphOsDbFile)) return null;
+  const writer = resolveWorkGraphSqliteWriter();
+  try {
+    if (writer === "sqlite3-cli") {
+      const out = spawnSync("sqlite3", ["-json", workGraphOsDbFile, sql], { encoding: "utf8", maxBuffer: 1024 * 1024 * 64 });
+      if (out.status !== 0) return null;
+      const text = (out.stdout || "").trim();
+      if (!text) return [];
+      return JSON.parse(text) as Array<Record<string, unknown>>;
+    }
+    if (writer === "node-sqlite") {
+      const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (path: string) => { prepare(sql: string): { all(): Array<Record<string, unknown>> }; close(): void } };
+      const database = new DatabaseSync(workGraphOsDbFile);
+      try {
+        return database.prepare(sql).all();
+      } finally {
+        database.close();
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Build the object index from SQLite (wgos_objects) when SQLite reads are enabled.
+// Returns null on any miss so the caller uses the JSON-derived index.
+function readWorkGraphOsObjectIndexFromSqlite(): { counts: Record<string, number>; objects: WorkGraphOsObject[] } | null {
+  if (!workGraphOsSqliteReadEnabled) return null;
+  const rows = queryWorkGraphOsSqlite("SELECT id, type, title, summary, source, updated_at, payload_json FROM wgos_objects");
+  if (!rows || !rows.length) return null;
+  const objects: WorkGraphOsObject[] = rows.map((row) => {
+    let payload: unknown = {};
+    try { payload = JSON.parse(objectString(row, "payload_json", "{}")); } catch { payload = {}; }
+    return {
+      id: objectString(row, "id", ""),
+      type: objectString(row, "type", "") as WorkGraphOsObject["type"],
+      title: objectString(row, "title", ""),
+      summary: objectString(row, "summary", ""),
+      source: objectString(row, "source", "sqlite") as WorkGraphOsObject["source"],
+      updatedAt: objectString(row, "updated_at", ""),
+      payload
+    };
+  });
+  const counts: Record<string, number> = {};
+  for (const object of objects) counts[object.type] = (counts[object.type] ?? 0) + 1;
+  return { counts, objects };
 }
 
 function workGraphOsExecutionLogRows(workspace: WorkGraphOsWorkspace | null) {
@@ -9389,7 +9445,9 @@ app.get("/workgraph-os/logs", async (req, res) => {
 
 app.get("/workgraph-os/objects", async (req, res) => {
   const workspace = await readWorkGraphOsWorkspace();
-  const { counts, objects } = buildWorkGraphOsObjectIndex(workspace);
+  // Prefer the SQLite index when reads are enabled; fall back to the JSON index.
+  const fromSqlite = readWorkGraphOsObjectIndexFromSqlite();
+  const { counts, objects } = fromSqlite ?? buildWorkGraphOsObjectIndex(workspace);
   const type = typeof req.query.type === "string" ? req.query.type : "";
   const query = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
   const filtered = objects.filter((object) => {
@@ -9398,11 +9456,9 @@ app.get("/workgraph-os/objects", async (req, res) => {
     return [object.id, object.type, object.title, object.summary].join(" ").toLowerCase().includes(query);
   });
   res.json({
-    storage: {
-      mode: "filesystem-json-index",
-      file: workGraphOsDataFile,
-      exists: Boolean(workspace)
-    },
+    storage: fromSqlite
+      ? { mode: "sqlite-index", file: workGraphOsDbFile, exists: true }
+      : { mode: "filesystem-json-index", file: workGraphOsDataFile, exists: Boolean(workspace) },
     counts,
     objects: filtered
   });
