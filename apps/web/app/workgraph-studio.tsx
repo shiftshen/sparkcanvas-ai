@@ -909,7 +909,7 @@ function StudioNode({ data, selected }: NodeProps<Node<{ 节点: WorkGraphNode; 
     ? "w-full bg-emerald-300"
     : "w-1/3 bg-cyan-300";
   const nodeFrameClassName = cn(
-    "wg-studio-node w-[210px] overflow-hidden rounded-md border bg-[#111417]/96 backdrop-blur transition",
+    "wg-studio-node w-[240px] overflow-hidden rounded-md border bg-[#111417]/96 backdrop-blur transition",
     isActive ? "border-cyan-300/90 ring-2 ring-cyan-300/30" : "border-slate-700/70 ring-0 hover:border-slate-500/70",
     node.disabled && "opacity-50"
   );
@@ -951,7 +951,7 @@ function StudioNode({ data, selected }: NodeProps<Node<{ 节点: WorkGraphNode; 
         <div className="wg-node-title-block border-b border-white/8 px-2 py-2" data-node-title-block="true" data-node-title-layout="primary-step" data-node-title-density="compact">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <div className="truncate text-[12px] font-semibold text-slate-100">{displayNodeTitle(node)}</div>
+              <div className="line-clamp-2 break-words text-[12px] font-semibold leading-4 text-slate-100">{displayNodeTitle(node)}</div>
               <p className="mt-0.5 line-clamp-1 text-[12px] leading-5 text-slate-500" data-node-intent-line="true">{operationProfile.intent}</p>
             </div>
             <span className="wg-node-index-pill shrink-0 rounded px-1.5 py-0.5 text-[12px]" title={node.id}>{displayNodeShortId(node)}</span>
@@ -995,7 +995,7 @@ function StudioNode({ data, selected }: NodeProps<Node<{ 节点: WorkGraphNode; 
       <div className="wg-node-title-block border-b border-white/8 px-2 py-2" data-node-title-block="true" data-node-title-layout="primary-step" data-node-title-density="compact">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="truncate text-[12px] font-semibold text-slate-100">{displayNodeTitle(node)}</div>
+            <div className="line-clamp-2 break-words text-[12px] font-semibold leading-4 text-slate-100">{displayNodeTitle(node)}</div>
             <p className="mt-0.5 line-clamp-1 text-[12px] leading-5 text-slate-500" data-node-intent-line="true">{operationProfile.intent}</p>
           </div>
           <span className="wg-node-index-pill shrink-0 rounded px-1.5 py-0.5 text-[12px]" title={node.id}>{displayNodeShortId(node)}</span>
@@ -1071,21 +1071,24 @@ function StudioNode({ data, selected }: NodeProps<Node<{ 节点: WorkGraphNode; 
 }
 
 const nodeTypes = { studio: StudioNode };
-const CANVAS_TOP_SAFE_PX = 48;
 
 async function fitCanvasWithSafeTop(instance: ReactFlowInstance<Node<{ 节点: WorkGraphNode }>, Edge>, duration = 250) {
-  await instance.fitView({ padding: 0.1, duration, maxZoom: 0.72 });
-  const viewport = instance.getViewport();
-  instance.setViewport({ ...viewport, y: viewport.y + CANVAS_TOP_SAFE_PX }, { duration });
+  // Reserve room for the canvas top toolbar inside fitView's own padding so the
+  // whole graph stays visible; allow up to 1:1 so small graphs aren't forced
+  // tiny while large ones still scale down to fit.
+  await instance.fitView({ padding: 0.18, duration, maxZoom: 1 });
 }
 
+// Grid spacing must clear the TALLEST card. The active/selected node renders a
+// detailed card (~260px tall, 240px wide), so the row pitch (320) and column
+// pitch (300) leave a real gap even when a node is expanded — no overlap.
 function nodePosition(index: number) {
   const columns = 4;
   const column = index % columns;
   const row = Math.floor(index / columns);
   return {
-    x: 80 + column * 248,
-    y: 128 + row * 176
+    x: 80 + column * 300,
+    y: 96 + row * 320
   };
 }
 
