@@ -34,6 +34,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { objectField, objectString, objectStringArray } from "./object-access.js";
 import { sqliteSqlValue, sqliteJson } from "./sqlite-literals.js";
+import { safeWorkGraphRelativePath } from "./path-utils.js";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createWriteStream, existsSync, readFileSync, renameSync, watch as fsWatch } from "node:fs";
 import path from "node:path";
@@ -4286,13 +4287,7 @@ function workGraphSlug(value: string) {
     || "skill";
 }
 
-function safeWorkGraphRelativePath(value: string) {
-  return value
-    .replace(/\\/g, "/")
-    .split("/")
-    .filter((part) => part && part !== "." && part !== "..")
-    .join("/");
-}
+// safeWorkGraphRelativePath imported from ./path-utils (T10).
 
 function workGraphSkillFolderName(input: unknown, fallbackIndex = 0) {
   return piSkillFolderName(input, fallbackIndex);
