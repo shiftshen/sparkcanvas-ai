@@ -33,6 +33,9 @@ jobs:
       - name: npm test (check && build && test:smoke)
         run: npm test
 
+      - name: Unit tests (vitest)
+        run: npm run test:unit
+
   wgos-ui:
     name: WGOS UI smokes
     runs-on: ubuntu-latest

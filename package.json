@@ -22,7 +22,8 @@
     "test:workgraph-os-ui-visual": "node scripts/workgraph-os-ui-visual-smoke.mjs",
     "test:production-smoke": "node scripts/production-smoke.mjs",
     "deploy:marketing": "bash scripts/deploy-marketing.sh",
-    "test": "npm run build && npm run check && npm run test:smoke"
+    "test": "npm run build && npm run check && npm run test:smoke",
+    "test:unit": "pnpm --filter @sparkcanvas/pi-adapter --filter @sparkcanvas/skill-runtime test"
   },
   "workspaces": [
     "apps/*",
