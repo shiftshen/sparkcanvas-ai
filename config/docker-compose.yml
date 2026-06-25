@@ -66,19 +66,24 @@ services:
 
   # HTTP Basic Auth gateway in front of the studio. The credential is generated
   # at container start from STUDIO_BASIC_AUTH_USER/PASSWORD (env, from
-  # .env.production) — no secret is committed. 1panel reverse-proxies
+  # .env.production) — no secret is committed. The nginx template injects a
+  # server-side bearer token (STUDIO_BACKEND_TOKEN = the backend's
+  # SPARKCANVAS_AUTH_TOKEN) onto /workgraph-os so the production-gated WGOS API
+  # works without exposing the token to the browser. 1panel reverse-proxies
   # studio.xmanx.com -> 127.0.0.1:23090 and terminates TLS.
   studio-gateway:
     image: nginx:1.27-alpine
     depends_on:
       - studio
+      - backend
     ports:
       - "23090:80"
     environment:
       - STUDIO_BASIC_AUTH_USER=${STUDIO_BASIC_AUTH_USER:?set-studio-basic-auth-user-in-.env.production}
       - STUDIO_BASIC_AUTH_PASSWORD=${STUDIO_BASIC_AUTH_PASSWORD:?set-studio-basic-auth-password-in-.env.production}
+      - STUDIO_BACKEND_TOKEN=${SPARKCANVAS_AUTH_TOKEN:?set-sparkcanvas-auth-token-in-.env.production}
     volumes:
-      - ../config/studio-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../config/studio-nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
       - ../config/studio-gateway-htpasswd.sh:/docker-entrypoint.d/40-studio-htpasswd.sh:ro
     restart: unless-stopped
 
